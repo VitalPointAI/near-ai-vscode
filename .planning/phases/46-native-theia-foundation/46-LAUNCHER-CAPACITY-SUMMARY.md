@@ -12,4 +12,4 @@ The revised plan `d9749a58` and the launcher and fixture diff passed independent
 
 ## Open conditions
 
-None for display of the recorded readings. Workstation acceptance is separate.
+None.
