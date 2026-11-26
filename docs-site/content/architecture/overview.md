@@ -1,148 +1,197 @@
 ---
 sidebar_label: Overview
 sidebar_position: 1
+mdx:
+  format: mdx
 ---
+
+import SystemArchitectureMap, { SystemArchitectureFlows } from '@site/src/components/SystemArchitectureMap';
 
 # Architecture overview
 
-This section renders the repository's design documents as they are. Nothing here is a second copy
-to keep in step: each page says which file it comes from, and that file is the one to edit.
+Sterling Sovereign AI connects staff workspaces, mission hubs, approved models and governed data.
+The browser Workbench runs on a workstation today. Organization-hosted sessions are planned.
 
 ## How the parts fit
 
-```mermaid
-flowchart LR
-  subgraph Editor["VS Code, or the Sterling workbench in Eclipse Theia"]
-    UI["Pages: chat, Team Studio, Team Live, Staff Room"] --> Host["Extension host"]
-    Host --> Gate["Gate: policy, labels, approvals, outbound check"]
-  end
-  Gate --> Models["Models: NEAR AI Cloud or a runtime you choose"]
-  Gate --> Tools["Tools: files, commands, web, MCP servers"]
-  Host --> State["Project state: encrypted, in the project folder"]
-  State -. "only when you turn sync on" .-> Remote["Your git host"]
-```
+<SystemArchitectureMap />
 
-The pages only display what the extension host sends them; keys and raw context stay in the host.
-Every model request and every tool call goes through one gate, which applies your organization's
-policy, the labels and the approvals before anything leaves. The [security policy](../security/policy.synced.md)
-describes each of these in full.
+In the component descriptions, **Available** means the capability is part of the current
+product or operator release. **Implemented** means the repository contains the component or
+foundation. **Verified offline** describes a particular render or fixture. **Planned** describes the
+intended system. A single area can contain components at several of these stages.
 
-The same extension runs in two editors. In VS Code you install it yourself. The Sterling workbench
-is a browser-based editor built on Eclipse Theia: it opens the Sterling Get Started page and the
-Canadian Defence Edition, and runs the same extension inside it. The workbench also has its own
-views that are not part of the extension: read-only Team Studio samples, the bundled
-documentation and a Compliance view.
+### Paths through the system
+
+<SystemArchitectureFlows />
+
+## Workbench and agents
+
+| Component | What it does and where it runs |
+| --- | --- |
+| Local launcher and browser | **Available.** The repository launcher checks the local Docker engine, reports visible CPU and memory, and starts the exact supplied approved Workbench image with a persistent workspace. Staff open the local preview on the machine's loopback address. Site sign-in and durable secret storage are part of the hosted path. The published image is Linux x86-64. Native ARM64 testing has passed and signed ARM64 publication is pending. |
+| Managed workstation setup | **Planned.** An administrator can add **This machine** for development or choose an enrolled machine from approved inventory. A local runner checks prerequisites and hardware, handles authorized software setup, verifies approval for the exact installed artifacts, and can join an approved hub. A standalone workstation can operate without a hub. |
+| Eclipse Theia Workbench | **Available.** The release container embeds the Sterling extension. Theia supplies the browser shell, Get Started, work areas, documentation and compliance surfaces. First-project setup connects a profile and an eligible model. The VSIX is the extension package inside that container. A compatible VS Code path also exists. [Getting started](../using/getting-started.md) |
+| Extension host and native Theia backend | **Implemented.** The extension host owns the bridge to its pages, profiles, attachments, models, agent sessions and project state. The native backend provides host integration for site configuration, session activity, identity, secret storage, keys and egress. Hosted operation still needs site acceptance. |
+| Chat, Team Studio and Agent Activity | **Implemented.** Chat is the working conversation and task surface. Team Studio designs teams, assigns model and role presets, and tests roles. Agent Activity displays runs, work progress and spend. Native examples and extension-owned live project views have different data sources. |
+| Team Live and Staff Room | **Implemented foundations.** Staff see shared role work, assignments and signed products as their permissions allow. Position handover, restricted observers, disconnected exchange and wider multi-site operation depend on their respective rollout and acceptance steps. |
+| Defence Edition work areas | **Available shell and local views.** Capability Development, Exercises and Training, Planning, and Resource Management organize the work. Portfolio Room and Resource Inventory provide the work-area views. Signed publication and organization roll-up, prioritization, scenarios, capacity, dependencies and capital programme offices are progressive roadmap work. |
+| Project state | **Implemented.** A workspace keeps project records, transcripts, attachments, checkpoints and contextual memory in its own state. Shared staff history uses the signed replica path. Optional Git sync follows the project's settings and policy. |
+| Agent runtime and Open-GSD | **Implemented foundations.** The agent loop runs bounded tasks and can delegate role work. Open-GSD organizes requirements, plans, independent review and execution. Worktrees let parallel coding tasks work in isolation and reconcile reviewed results. |
+| Tools and execution backends | **Implemented local tools, planned wider isolation.** File, command, search, web and MCP capabilities declare their effects and pass through the policy boundary. The roadmap adds isolated execution on a copy, reviewed changes and guarded application to the original project. |
+| Workbench administration and diagnostics | **Implemented foundations.** Local setup reports readiness. Governance and the trust line show why the system allowed or stopped actions. The Workbench also presents activity, spend and release-bound assessment evidence. Managed inventory, site operations, and Data Management and Model Factory views follow the applicable deployment and product phases. |
+
+Sources include the [codebase architecture](./codebase/ARCHITECTURE.synced.md),
+[guided onboarding](./design/guided-onboarding/DESIGN.synced.md),
+[staff teams](./design/staff-teams/10-STAFF-TEAMS-DESIGN.synced.md) and
+[portfolio design](./design/portfolio-and-assignment/DESIGN.synced.md).
+
+## Trust and policy
+
+| Component | What it does and where it applies |
+| --- | --- |
+| Person, agent and device identity | **Implemented foundations.** Decentralized identifiers and verifiable credentials express who a person, agent or device is and what its issuer granted. Trust policy, expiry and status constrain use across workspaces, hubs and sites. Hosted sign-in establishes a session. It does not grant every capability inside it. |
+| Organization policy and classification | **Implemented foundations.** Organization policy and deterministic classification rules interpret labels, compartments, handling and releasability. The gate checks clearance, source restrictions, privacy and egress. The planned classification assistant can propose markings and show evidence. An authorized person signs effective changes under policy. |
+| Capability manifests and policy gate | **Implemented foundations.** The gate evaluates declared effects, scope, network and endpoint policy, approvals and emergency stops. Model requests have destination and outbound checks. The local policy may require a request to stay on the same machine. |
+| Run contracts and delegation | **Progressive rollout.** Signed contracts bind the requester, purpose, authorized actions, recipients, time and spend. Delegation narrows the parent authority. Human approvals authorize specific requests. |
+| Spend controls and emergency stop | **Implemented foundations.** Local budget checks and spend records provide oversight. The relay roadmap applies them to requester- and tenant-bound contracts. Emergency controls stop eligible in-flight work. |
+| Credential broker and secret stores | **Progressive rollout.** The broker supplies narrowly scoped, short-lived access for authorized actions. Local and hosted secret stores protect credentials and keys at their own boundaries. Hosted OpenBao also provides controlled secrets, cryptographic services and certificates. |
+| Project and data protection | **Implemented foundations.** Signed project records and sealed payloads support compartmented access. Data and policy checks still apply before routing, sharing, export or replication. Verified labels travel with governed objects where the relevant format supports them. |
+| Export and allied exchange | **Progressive and planned.** Export-control marking, eligibility and audit govern transfers. Policy-approved TDF and ZTDF exchange can carry bound labels for NATO and Five Eyes workflows. Cross-domain release has its own approval, guard and destination verification. |
+| Audit and operator evidence | **Implemented foundations.** Trust and activity records capture decisions and outcomes. Site log collection, long-term evidence handling and accreditation feed the operational and assessor processes described below. |
+
+See the [trust model](../security/trust-model.md),
+[security policy](../security/policy.synced.md) and
+[platform direction](./design/platform-direction/README.synced.md).
+
+## Sites and mission networks
+
+| Component | What it does and where it runs |
+| --- | --- |
+| Standalone workstation and shared hub | **Available as separate services.** The Workbench runs in a local container and can work alone. The optional hub is deployed by the organization on a reachable server or VM. A developer can run both containers on the same machine. Editor-project pairing is a later rollout. |
+| Sync hub and client replicas | **Implemented foundation.** The hub checks roster-authorized signed writes and holds sealed project events and blobs. It relays updates, presence and checkpoints. Client replicas verify and apply shared state. The hub sees routing and activity metadata and can read its roster and the cells granted to it under policy. Agent tools and inference run at their own execution boundaries. |
+| Mission workspaces and federation | **Planned expansion.** One workstation can open separately authorized workspaces for different mission hubs. Each mission has its own membership, trust, keys, storage and policy. HQ and edge sites can operate disconnected and later exchange authorized records or sealed packages. Shared hardware does not imply shared data access. |
+| Scoped mission discovery | **Synthetic foundation, planned live integration.** Authorized nodes or sources advertise scoped metadata to their mission. The catalogue provides visibility-filtered discovery and can withdraw stale or revoked entries. Discovering a reference grants no right to open the data. When the user opens an item, the authorized source or service rechecks identity, device, mission, clearance and source permissions. |
+| Cross-domain release | **Planned.** A human-authorized immutable package moves through source classification and releasability checks, an approved transfer path with the required cross-domain guard, and destination quarantine and verification. Audited acceptance records the outcome. Same-classification allied exchange can supply a package format. |
+| Messaging relay | **Implemented foundation.** The separate relay provides health checks, a private queue, deduplication and redacted logs. Planned Teams, Signal and Telegram integrations add authenticated channel ingress, tenant and requester pairing, channel permissions, budgets and signed run contracts. Authorized headless runners use the same policy boundary before replying. |
+
+[Multi-user sync](./design/multiuser-sync/DESIGN.synced.md) and the
+[hub and relay operator guide](https://github.com/VitalPointAI/near-ai-vscode/blob/main/relay/README.md)
+describe the existing services and their rollout boundaries.
+
+### Hosting for many people (planned, not yet released)
+
+The local Workbench preview serves one person on their own computer and uses loopback access.
+The on-premises design adds signed-in sessions at connected or air-gapped organization sites.
+The site configuration and a broad portion of the deployment stack have been checked offline.
+A signed lab install, production session lifecycle, recovery exercise and measured capacity
+remain separate acceptance steps. See [the capacity evidence](../using/reference/hosting/capacity.synced.md).
+
+| Component | What it does and where it runs |
+| --- | --- |
+| RKE2 and etcd | Run the site cluster and persist its platform state. Nodes use the site's hardened operating system, DNS, network policy and authoritative time source. |
+| HAProxy, network policy and admission | HAProxy serves the site's endpoints and wildcard webview names. Namespace policies restrict traffic. Kyverno and Sterling admission policy enforce the required image identity and signatures at deployment. |
+| Site PKI | An offline organization root and site intermediates establish trust. OpenBao PKI and cert-manager issue site certificates. Bootstrap credentials and the bootstrap CA are retired after the site is ready. |
+| Harbor or Zot | A local registry serves exact artifacts imported from a verified bundle. Zot is the small-site and lab option. Harbor supports the larger reference configuration. |
+| Keycloak and PostgreSQL | Keycloak supplies hosted passkey or hardware-key sign-in, with realm and lifecycle settings. PostgreSQL stores its identity data. Device, visitor and credential-officer procedures follow their approved site policies. |
+| oauth2-proxy and Theia Cloud | Authenticate web access, start isolated Workbench sessions through the operator and AppDefinition, and serve their browser routes. Workspace volumes retain data across idle stop and resume. |
+| OpenBao and site key custody | OpenBao provides KV secrets, transit cryptography and PKI. Site policy chooses approved HSM or Shamir custody. The lab configuration specifies a software token as the substitute for hardware in the planned isolated test. |
+| Longhorn or approved encrypted storage | Backs service data and hosted workspaces. Snapshot and restore policies govern the stored volumes. An organization-managed NAS can provide datasets or backups and can back live volumes when verified for that workload. |
+| Fluent Bit and OpenSearch | Collect and index auditable site logs. Retention, snapshots and archive procedures preserve the required records. |
+| Prometheus, exporters and Alertmanager | Observe the platform, workloads and backup signals, and send site alerts through the approved notification path. |
+| Import host, backup and recovery | A separate trust path admits the signed bundle. Operators keep escrow, backups and a separate-site copy, and exercise recovery. Automated off-site copying is planned. Approved inference servers, data services, and messaging relay can be deployed independently. |
+| Single-machine lab VM | An isolated RHEL-compatible guest exercises the air-gapped site setup. The smaller lab profile uses Zot, encrypted static volumes and a placeholder session. Its offline configuration has landed. The lab preview, storage checks and the live signed install are tracked separately. |
+
+[Multi-user hosting design](./design/multiuser-hosting/DESIGN.synced.md) and the
+[site install runbook](https://github.com/VitalPointAI/near-ai-vscode/blob/main/deploy/runbooks/site-install.md)
+describe the site services and operator sequence in detail.
+
+## Governed data platform
+
+The approved synthetic trial exercised an isolated catalogue, database and panel path with
+fictional data. Live sources, production identity, and the Workbench Data Management rollout
+follow the roadmap. Organization-controlled Data Platform hosts run the connector runtime, store and query service. They can share eligible infrastructure with other services, with their data permissions kept distinct. The platform retains source restrictions throughout ingestion and use.
+
+| Component | What it does |
+| --- | --- |
+| Source catalogue and connector setup | Shows approved connections for Microsoft 365, Google Workspace, file shares and later databases and catalogues. Organization-owned setup binds identity and narrow credential access. Manifest connectors and reviewed sandboxed connector authoring expand source coverage later. |
+| Endpoint collectors | Managed Windows, macOS and Linux collectors observe approved folders, preserve source ACLs and change evidence, respect opt-outs and skip placeholder content according to policy. |
+| Connector runtime and inventory | Inventories approved metadata first, then acquires only permitted content. It tracks cursors, checkpoints, retry and source health, and handles changes, resync and withdrawal. |
+| Ingest ledger and governed catalogue | PostgreSQL records observations, provenance, checkpoints and an outbox transactionally. Row-level security combines source permission, label and current authorization. Access to metadata and counts is also filtered. The replica client handles signed governance and authorized discovery notices. |
+| Extraction workers and derived artifacts | Isolated workers parse files, OCR images and transcribe audio where approved. They write encrypted, content-addressed derivatives with lineage rather than changing the original source. |
+| Classification, privacy and stewardship | Rules, detectors and eligible models propose classification, personal-data handling and training suitability. Signed decisions govern labels and exceptions. Policy can raise protection. A signed decision from an authorized person is required to lower it. A lifecycle service handles retention, erasure, personal opt-outs, legal holds and access requests with durable evidence. |
+| Search and query service | A governed query boundary filters access before metadata, lexical and vector search, queries and retrieval for models. Postgres, BM25 search and pgvector support text and similarity retrieval. |
+| Context graph, entities and cited answers | Authorized relationships and entity pages connect records across sources. Ask uses eligible evidence and citations. Derived claims retain source permissions, provenance and a label at least as restrictive as each contributing label. A separately approved existence-only disclosure can expose presence without content. |
+| Analytics and reports | Label-partitioned Parquet, DuckDB and DuckLake are planned for analytical data. Views, reports and insights operate within the same query and publication rules. Signed reports can be verified and cited, and timeline replay shows what was known at the selected time. |
+| Data Management | A roadmap Workbench view for authorized inventory, source health and governed discovery. It uses the shared catalogue and query service. The portable synthetic test is separate from release activation. |
+| Defence Digital Twin | **Design under consideration.** Governed projections connect equipment, holdings, people, positions and capabilities using stable identities, signed observations and source evidence. Resource Management, Portfolio and the context graph supply permitted views. 3D or XR is a possible later presentation of the governed records. |
+
+[Data platform design](./design/data-platform/00-DESIGN.synced.md) and the
+[Defence Digital Twin design](./design/data-platform/05-defence-digital-twin.synced.md)
+cover the data topology and its evidence requirements.
+
+## Models and Model Factory
+
+| Component | What it does and where it runs |
+| --- | --- |
+| Local model runtime | **Available through compatible endpoints.** Workbench can use a policy-approved OpenAI-compatible runtime on the workstation or at an approved organization endpoint. A network endpoint cannot satisfy same-computer-only policy. The model manager roadmap adds fit checks, artifact provenance, installation and lifecycle controls. |
+| NEAR AI Cloud and forwarded models | **Available routes subject to policy.** The private route verifies attestation on a fresh connection for protected use. Forwarded inference uses a separate route for eligible labels. Destination and egress rules apply to both. |
+| Organization-attested and Cohere vault endpoints | **Progressive and planned.** Organization-managed confidential hosting and Cohere Model Vault and Encrypted Vault add separately attested or sovereign-region routes. Each endpoint has its own identity and policy eligibility. |
+| Compare Models and evaluation | **Implemented foundations.** Isolated tasks, graders and role ratings help compare models. The Model Factory adds fixed held-out evaluations, baseline comparison, provenance and policy acceptance for models it produces. |
+| Opportunity Agent | **Planned.** Clusters repeated work from eligible activity and evaluation signals, estimates benefit, and proposes a specialist or a plan to fill a data gap. Proposals require approval before training or wider data collection. |
+| Dataset builder | **Planned.** Builds a versioned corpus from authorized chat or run logs and, later, signed organization opt-in data. It enforces use rights, consent and holds, scrubs and deduplicates, records provenance, and keeps held-out cases separate. An optional teacher uses its own approved inference route. |
+| Training and fine-tuning | **Planned Model Factory workflow.** Selects suitable approved hardware available on the network for each approved workload. A supervised worker uses pinned artifacts and bounded resources on the chosen host. The training job runs without off-host network calls. The Strix Halo groundwork and the fictional adviser fixture are preparation. |
+| Classification and protection adviser | **Synthetic fixture verified.** The specialist will recommend sensitivity, protections, usefulness over time, retention review and when to reassess. It cites evidence or abstains when evidence is insufficient. Existing protections, source policy and human classification decisions remain authoritative. |
+| Model registrar, passport and approved models | **Implemented policy foundation, planned full lifecycle.** The registrar binds each version to lineage, licence, evaluation, artifact digest and verified endpoint identity. A signed passport and organization approval govern whether the version appears as approved and can be routed for the requested use. |
+| Activation and monitoring | **Planned.** Each version progresses through separately approved evaluation, shadow or limited rollout, and wider activation. Monitoring supports rollback and review. Consent changes or erasure can invalidate affected datasets and prompt fallback or retraining. |
+
+[Model provenance](./design/model-provenance/DESIGN.synced.md) and the
+[Model Factory design](./design/data-platform/04-model-factory-and-opportunity-agent.synced.md)
+describe model trust and the proposed workflow.
 
 ## How a release is shipped
 
-Each release is a versioned container image of the Sterling workbench, with the release's extension
-inside it. Releases are no longer published to the Visual Studio Marketplace. Releases from 0.4.38
-on carry the full GitHub release described below; version 0.4.37's image is on the registry, but
-it has no GitHub release.
-
-```mermaid
-flowchart LR
-  Tag["Release tag on main"] --> Build["Build: tests, extension package, checksums"]
-  Build --> Image["Image: built with that exact package, then started and checked"]
-  Build --> Evidence["Compliance package and attestations"]
-  Image --> Approve{"Owner approves"}
-  Evidence --> Approve
-  Approve --> GHCR["Image pushed to the GitHub Container Registry"]
-  GHCR --> Release["GitHub release: image digest, package, checksums, assessor package"]
-```
-
-1. A release tag on `main` starts the [Release workflow](https://github.com/VitalPointAI/near-ai-vscode/blob/main/.github/workflows/release.yml).
-   It runs the tests, builds the extension package (VSIX) and records its SHA-256 checksum.
-2. It builds the workbench image from
-   [its Dockerfile](https://github.com/VitalPointAI/near-ai-vscode/blob/main/.planning/spikes/theia-team-studio/Dockerfile),
-   with that same checked package inside, then starts the image and checks that the extension is there.
-3. The image is pushed to `ghcr.io/vitalpointai/near-ai-vscode:vX.Y.Z` only after the owner approves
-   it in the protected `container-release` environment. The older `marketplace` environment still
-   exists but no release uses it.
-4. The GitHub release records the image digest beside the VSIX, its checksum and the assessor
-   package. Pull the image by that digest, so you get exactly the image that was tested.
+| Component | What it does |
+| --- | --- |
+| GitHub CI and review | Check source, dependencies, release content, documentation, images, deploy renders and evidence. An independent review is required for merge. Changes to protected gates require owner approval. |
+| Release build | Builds the tested VSIX and embeds those exact bytes in the Workbench container. It records SHA-256, manifests, provenance, the software bill of materials and assessor artifacts. [Release workflow](https://github.com/VitalPointAI/near-ai-vscode/blob/main/.github/workflows/release.yml) · [Workbench Dockerfile](https://github.com/VitalPointAI/near-ai-vscode/blob/main/workbench/Dockerfile) |
+| Release publication | The owner approves the container release before it is published to the GitHub Container Registry. The GitHub release records the exact image digest and artifacts. Workstation launch uses the approved digest. |
+| Signed offline site bundle | Contains pinned tools, charts, images and their verification material. The import host checks bundle signatures and digests against separately trusted media, and the site registry supplies verified local artifacts. |
 
 ## The compliance fit check
 
-Nothing from outside the repository is used without a review. Every dependency, base image,
-workflow action, Helm chart, tool and bundled library needs a reviewed entry in
-[`compliance/resources.json`](https://github.com/VitalPointAI/near-ai-vscode/blob/main/compliance/resources.json).
-Each entry says what the resource is for, its licence, which controls it touches, how it handles
-cryptography and security fixes, whether it works without the internet, and whether it fits.
-[`scripts/resource-check.mjs`](https://github.com/VitalPointAI/near-ai-vscode/blob/main/scripts/resource-check.mjs)
-finds every resource the repository uses and fails the required `lint` CI job when one has no
-entry. Each entry also says why the architecture needs the resource, and which area it serves.
+| Component | What it does |
+| --- | --- |
+| Resource fit and component catalogue | Records what each dependency, image, workflow action, Helm chart, tool and bundled library does, its licence and pin, and the controls it touches. The CI resource check requires reviewed entries. [Generated component catalogue](./components/index.md) |
+| Compliance engine | Uses OSCAL catalogues and profiles, control statements, responsibility and tailoring. It evaluates applicable code, tests, settings, reviews and live evidence with freshness and scope checks. |
+| Evidence and assessor package | Produces control status, system and assessment records, gap and remediation evidence, and a verifiable assessor bundle tied to a release or site. The documentation and Workbench Compliance view display that evidence. |
+| Operations and authorization | Your organization operates the site, reviews controls and evidence, and makes its accreditation and operational authorization decisions. The [road to production](../security/road-to-production.md) gives the open conditions and what blocks production. |
 
-The [component catalogue](./components/index.md) is generated from that register. It lists every
-component by area, with its exact pinned version or digest, what it provides and why it is needed,
-and explains where to get the full software bill of materials (SBOM) of each release.
+## Longer-term platform direction
 
-The [road to production and higher classification](../security/road-to-production.md) lists every
-known gap and open condition, by the lowest level where it matters and whether it blocks live use.
-It is generated from the gap register, `compliance/gaps.json`, the same way.
-
-## Hosting for many people (planned, not yet released)
-
-Today the workbench image is a local preview for one person on one computer. It has no sign-in of
-its own, so it must only be published on `127.0.0.1`.
-
-The decided direction is that your organization hosts the workbench at its own sites: on-premise,
-connected or fully air-gapped. Each person gets their own workbench session. The full design is in
-[Hosting Sterling for many people](./design/multiuser-hosting/DESIGN.synced.md).
-
-The first deployment is planned for one HQ site. The design can grow later, to more people and to
-edge sites. How many people a site can serve is stated only on the [Capacity](../using/reference/hosting/capacity.synced.md)
-page, from load runs on our own hardware, and no run has been recorded yet.
-
-```mermaid
-flowchart LR
-  Person(["Person with a passkey or hardware security key"]) --> Ingress["Site ingress"]
-  Ingress --> SignIn["Keycloak sign-in, no passwords"]
-  Ingress --> Session["One workbench session per person, run by Theia Cloud"]
-  Session --> Secrets["OpenBao: secrets and keys, with an HSM where the site has one"]
-  Session --> Hub["Sync hub"]
-  Registry["Site registry"] --> Session
-```
-
-Every site runs the same parts:
-
-- **Kubernetes:** RKE2.
-- **Images:** a registry at the site (Harbor or Zot). Images and charts arrive as signed bundles,
-  so nothing is pulled from the internet.
-- **Sessions:** self-hosted Eclipse Theia Cloud starts one workbench session per person.
-- **Sign-in:** Keycloak, with passkeys or hardware security keys only. There are no passwords.
-- **Secrets and keys:** OpenBao, unsealed with a hardware security module (HSM) where the site has one.
-- **Logs:** Fluent Bit sends logs to OpenSearch at the site.
-- **Shared work:** the existing sync hub.
-
-What exists today, and what does not:
-
-- The `deploy/` folder pins each part's Helm chart by checksum, with its settings and a template
-  for each site's own settings. It also holds the pinned base layers of the images we will build
-  ourselves. None of this is released, and no site can be installed from it yet.
-- The native workbench package is being built. It ties each session to the signed-in person and
-  keeps each person's secrets in OpenBao. It is not on `main` yet.
-- The sync hub exists today as a container your organization runs itself. Running several hubs
-  at each site comes with the hosted stack.
+| Roadmap area | Intended capability |
+| --- | --- |
+| Local appliance and desktop | A single-machine Theia appliance with local inference, execution, optional relay and a candidate OpenShell gateway, followed by desktop Theia, native work surfaces, approved scheduled routines and learned skills. |
+| Governed team and reusable work | Multi-user Team Mode, role handover, portfolio and capital office workflows, and reusable signed team, skill and tool packages. |
+| Proof anchoring and edge federation | Optional NEAR proof anchoring for identity, credentials and policy with proofs on-chain. Disconnected edge operation, authorized federation and a pool of approved edge compute follow within their policy boundaries. |
+| Cybersecurity assessment workspace | A later governed workspace for assessment planning, evidence and findings under approved scope. |
+| Defence Digital Twin projections | Potential shared views of governed assets and relationships, with wider federation or 3D presentation after separate design and acceptance. |
 
 ## Where to read more
 
 | Topic | Document |
 | --- | --- |
-| Every third-party component, its pin and why it is needed | [Component catalogue](./components/index.md) |
-| How the code is organized today | [Architecture](./codebase/ARCHITECTURE.synced.md), [Structure](./codebase/STRUCTURE.synced.md), [Integrations](./codebase/INTEGRATIONS.synced.md) |
-| Hosting the workbench for many people at your organization's sites | [Multi-user hosting design](./design/multiuser-hosting/DESIGN.synced.md) |
-| Platform direction: our own engine, sandbox and identity | [Platform direction research](./design/platform-direction/README.synced.md) |
-| Model provenance, use tiers and Western defaults | [Model provenance](./design/model-provenance/DESIGN.synced.md) |
-| Multi-user staff workspaces and signed replication | [Multi-user sync](./design/multiuser-sync/DESIGN.synced.md) |
-| Guided setup and local model management | [Guided onboarding](./design/guided-onboarding/DESIGN.synced.md) |
-| Assigned positions, organization modes and the portfolio view | [Portfolio and assignment](./design/portfolio-and-assignment/DESIGN.synced.md) |
-| Staff team templates | [Staff teams design](./design/staff-teams/10-STAFF-TEAMS-DESIGN.synced.md) |
-| The data platform | [Data platform design](./design/data-platform/00-DESIGN.synced.md) |
+| Full roadmap and individual phases | [Repository roadmap](https://github.com/VitalPointAI/near-ai-vscode/blob/main/.planning/ROADMAP.md) |
+| Exact third-party dependencies, services, versions and pins | [Generated component catalogue](./components/index.md) |
+| Current code structure and interfaces | [Architecture](./codebase/ARCHITECTURE.synced.md), [Structure](./codebase/STRUCTURE.synced.md), [Integrations](./codebase/INTEGRATIONS.synced.md) |
+| Current startup steps | [Getting started](../using/getting-started.md) |
+| Open acceptance and release conditions | [Road to production](../security/road-to-production.md) |
 
-Every other design document and research note is in the menu under **Design documents**.
+Update the component descriptions and their source references when the roadmap changes.
+The illustrated areas link directly to these sections. Update their artwork only when the
+set of areas changes. The generated component catalogue continues to track individual
+third-party dependencies and their pins.
 
 ## Decision records
 
-Decision records will appear in this section as they are added under `docs/decisions/` in the
-repository; the site picks them up at the next build without any change here.
+Decision records appear as they are added under `docs/decisions/` in the repository.
