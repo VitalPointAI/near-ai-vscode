@@ -16,9 +16,10 @@ export type AuthoredRefusal = { ok: false; reason: 'no-grant-key' | 'action-requ
 type Target = { member: string; writer?: string };
 export interface AccessSnapshot { predecessor: string; priorEntry: string; priorRoot: string }
 interface ManagedAccess extends AccessSnapshot {
-  kind: 'member.remove' | 'device.revoke' | 'cell.rekey';
+  kind: 'member.remove' | 'device.revoke' | 'cell.rekey' | 'member.update';
   operation: object;
   revision: string;
+  at?: string;
   cells: ReadonlyArray<Pick<OpenedGrantEvidence, 'evidence' | 'decision'> & { recipients: readonly string[]; previousEpoch?: number }>;
   founding?: { cell: string; grants: readonly unknown[] };
 }
@@ -74,7 +75,7 @@ export async function appendManagedAccess(project: ReplicaProject, roster: Roste
     }
     return {
       kind: plan.kind, data: { ...plan.operation, accessRevision: plan.revision, accessRoot: commitment.root },
-      options: { signer, action, roster: plan.predecessor, stageAccess: (entry) => ({
+      options: { signer, action, at: plan.at, roster: plan.predecessor, stageAccess: (entry) => ({
         entry,
         openings: plan.cells.map(({ evidence }) => ({ ...commitment.cellProof(evidence.cell), entry, evidence })),
         accessProofs: permits.map(({ permit }) => commitment.proof(permit.cell, permit.writer)),

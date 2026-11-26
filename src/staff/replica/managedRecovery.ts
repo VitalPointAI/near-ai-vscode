@@ -18,7 +18,7 @@ import { newEpochGrant } from './wrapPlan';
 
 type RecoveryRefusal = AuthoredRefusal | ProjectRefused | { ok: false; reason: 'switch-first' | 'rekey-awaiting-keys' };
 
-function selected(roster: RosterState, authority: string): (AccessSnapshot & { cells: OpenedGrantEvidence[] }) | undefined {
+export function selectedManagedAccess(roster: RosterState, authority: string): (AccessSnapshot & { cells: OpenedGrantEvidence[] }) | undefined {
   const revision = roster.accessRevision;
   const position = roster.positions.length - 1;
   if (revision === undefined || roster.pending.length > 0 || !isRosterWriterAt(roster, authority, position)) return undefined;
@@ -32,10 +32,10 @@ function selected(roster: RosterState, authority: string): (AccessSnapshot & { c
 }
 
 export function pendingManagedCells(roster: RosterState, authority: string): string[] | undefined {
-  return selected(roster, authority)?.cells.filter(({ decision }) => decision === 'pending').map(({ evidence }) => evidence.cell);
+  return selectedManagedAccess(roster, authority)?.cells.filter(({ decision }) => decision === 'pending').map(({ evidence }) => evidence.cell);
 }
 
-function recipients(roster: RosterState, item: OpenedGrantEvidence): string[] {
+export function managedRecipients(roster: RosterState, item: OpenedGrantEvidence): string[] {
   const excluded = new Set(item.evidence.excluded);
   return [...new Set(item.evidence.grants.flatMap((grant) => grant.recipients))].filter((writer) =>
     !excluded.has(writer) && deviceAt(roster.members, writer, roster.positions.length - 1) !== undefined).sort();
@@ -46,11 +46,11 @@ async function recoverCell(project: ReplicaProject, roster: RosterState, info: C
   const signer = project.rosterSigner;
   const authority = writerIdOf(signer.publicKey);
   if (signer !== project.signer) return { ok: false, reason: 'action-required' };
-  const snapshot = selected(roster, authority);
+  const snapshot = selectedManagedAccess(roster, authority);
   const prior = snapshot?.cells.find(({ evidence }) => evidence.cell === info.cell);
   if (snapshot === undefined || authority !== project.deviceWriter || prior?.decision !== 'pending' || !info.known || (!info.base && info.raw === undefined) ||
       !project.keys.holds(info.cell, prior.evidence.epoch)) return { ok: false, reason: 'no-grant-key' };
-  const writers = recipients(roster, prior);
+  const writers = managedRecipients(roster, prior);
   if (!writers.includes(authority)) return { ok: false, reason: 'no-grant-key' };
   const position = roster.positions.length - 1;
   if (writers.some((writer) => x25519At(roster.members, writer, position) === undefined)) return { ok: false, reason: 'rekey-awaiting-keys' };
@@ -78,9 +78,9 @@ async function recoverCell(project: ReplicaProject, roster: RosterState, info: C
   const revision = accessRevisionId(roster.anchor.project, roster.accessRevision?.id ?? null, snapshot.predecessor, kind, operation);
   const cells = snapshot.cells.map((item) => item === prior ? {
     evidence, decision: 'continues' as const, previousEpoch: prior.evidence.epoch, recipients: writers
-  } : { evidence: item.evidence, decision: item.decision, recipients: recipients(roster, item) });
+  } : { evidence: item.evidence, decision: item.decision, recipients: managedRecipients(roster, item) });
   const result = await appendManagedAccess(project, roster, { ...snapshot, kind, operation, revision, cells, founding: { cell: info.cell, grants: pages } },
-    now, (fresh) => selected(fresh, authority));
+    now, (fresh) => selectedManagedAccess(fresh, authority));
   return isProjectRefused(result) || !result.ok ? result : undefined;
 }
 

@@ -46,6 +46,7 @@ import type { ProjectOutput } from '../../domain/replica/projectFold';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
+import { appendManagedClearance } from './managedClearance';
 import { appendManagedWithdrawal } from './managedWithdrawal';
 import { finishManagedRekeys, leftReason } from './managedRecovery';
 import { readLegacyCellLabel } from '../../domain/replica/productCells';
@@ -241,13 +242,7 @@ export function gateOf(shared: SharedProjectHost): Gate {
   return { scales, context: { scales, mappings: shared.mappings ?? [], now: now(shared.deps).getTime() } };
 }
 
-/**
- * Is the member cleared for the cell? Every member is on the base cell. A labelled cell this device cannot read clears nobody. A member with a
- * declared clearance is cleared when it dominates the label (Phase 70, all five conditions). A member with no declared clearance (only the founding
- * lead, whose genesis names none) is cleared for the cells one of its devices already holds, so the lead is never dropped from a cell it founded.
- * The legacy cell (D-20) clears only the lead or the deputy at the position (leadOrDeputy), and then only with a declared clearance that dominates
- * every label in it (or, with none declared, when a device of theirs already holds it): admission, an ordinary member and a hub never get it.
- */
+/** Check a cell's clearance with the active policy. The base is shared; the legacy cell is restricted to lead and deputy. */
 export function clearedFor(clearance: unknown, info: CellInfo, holds: boolean, gate: Gate, leadOrDeputy = false): boolean {
   if (info.base) return true;
   if (info.legacy !== undefined) {
@@ -291,11 +286,7 @@ export function clearedDevices(roster: RosterState, info: CellInfo, position: nu
   return writers.sort();
 }
 
-/**
- * The cell order the fold checks writes against (D-25), for ReplicaProjectDeps.cellOrder: an entry in one cell may cite an entry in another only when
- * the citing cell's label dominates the cited one's, by Phase 70 rules with the host clock and the given scales. The base cell is the lowest: every
- * cell may cite it and it may cite no labelled cell. A cell whose label this device cannot read answers no (fail closed).
- */
+/** Order citations upward by the active policy (D-25); an unreadable label cannot be used. */
 export function cellOrderHook(options: { scales?: ScaleTable; mappings?: readonly ScaleMapping[]; now?: () => Date } = {}): (roster: RosterState, keys: DeviceKeyRing) => NonNullable<ReplicaContext['cellOrder']> {
   return (roster, keys) => {
     const scales = options.scales ?? SCALE_PRESETS;
@@ -1221,16 +1212,14 @@ export function removeFromProject(shared: SharedProjectHost, input: RemoveInput)
 
 export interface UpdateMemberInput { member: string; name?: string; seat?: string; roles?: string[]; clearance?: unknown; agentSeats?: string[] }
 
-/**
- * Changes a member's name, seat, roles, clearance or agent seats (member.update). A lowered clearance moves every cell the member is no longer cleared
- * for to a new key without the member's devices (D-23); a raised one gives those devices every epoch of the cells they are newly cleared for (D-45).
- */
 export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput): Promise<MembershipResult> {
   return guarded(async () => {
     const { project } = shared;
-    const finished = await finishPending(shared);
+    const initial = (await project.state()).roster;
+    const managed = initial.requiredFrom.has(CELL_ACCESS_FEATURE);
+    const finished = managed ? { rekeyed: [], skipped: [] } : await finishPending(shared, initial);
     if (isResult(finished)) return finished;
-    const { roster } = await project.state();
+    const roster = managed ? initial : (await project.state()).roster;
     const problem = writerProblem(shared, roster);
     if (problem !== undefined) return problem;
     const head = headOf(roster);
@@ -1243,6 +1232,18 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
     const gate = gateOf(shared);
     const devices = devicesOfMemberAt(roster.members, input.member, head.position).filter((device) => device.kind === 'person');
     const changesClearance = input.clearance !== undefined;
+    if (managed && changesClearance) {
+      const result = await appendManagedClearance(project, roster, data, { context: gate.context,
+        cells: cellsAt(roster, project.keys, head.position, gate.scales),
+        cleared: (value, info, held, privileged) => clearedFor(value, info, held, gate, privileged) });
+      if (isProjectRefused(result)) return fromProject(result);
+      if (!result.ok) {
+        if (result.reason === 'clearance-grants-pending') return refused(result.reason, 'This clearance change would give access to more parts of the project. It needs managed key delivery before it can apply.');
+        if (result.reason === 'change-not-applied') return refused(result.reason, 'The shared history changed while this change was prepared. Try again.');
+        return refused(result.reason, result.reason === 'no-grant-key' ? MEMBERSHIP_REFUSALS['no-grant-key'] : PROJECT_REFUSALS_HOST[result.reason]);
+      }
+      return done('The clearance changed. Parts awaiting a new key will stay read only.', { member: input.member, rekeyed: [], granted: [] });
+    }
     const planned = changesClearance
       ? rekeyPlans(shared, roster, { kind: 'clearance-lowered', writers: devices.map((device) => device.writer) }, { clearance: { member: input.member, value: input.clearance } }, gate)
       : { plans: [] as RekeyPlan[], cells: new Map<string, CellInfo>() };

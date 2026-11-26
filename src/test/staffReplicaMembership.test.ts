@@ -1016,7 +1016,11 @@ test('managed clearance reduction commits decisions using the lead’s custom sc
   const finished = await finishRekeys({ ...lead.host, project: viewer });
   assert.equal(finished.ok, true, finished.message);
   assert.deepEqual(finished.rekeyed, [affected]);
-  assert.equal((await head(viewer)).roster.accessGrants.get(affected)?.evidence.policy, pending.evidence.policy);
+  const recovered = await head(viewer);
+  assert.equal(recovered.roster.accessGrants.get(affected)?.evidence.policy, pending.evidence.policy);
+  const expanded = await updateMember({ ...lead.host, project: viewer }, { member: peer.member, clearance });
+  assert.equal(expanded.reason, 'clearance-grants-pending');
+  assert.equal((await head(viewer)).hash, recovered.hash);
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
