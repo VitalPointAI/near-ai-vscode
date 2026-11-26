@@ -5,10 +5,10 @@ import type { AccessPermit, AccessWriteContext, CellAccessDecision } from '../do
 import { advanceGrantEvidence, grantEvidenceHash, matchesGrantEvidence } from '../domain/replica/rotationGrants';
 import type { GrantEvidence } from '../domain/replica/rotationGrants';
 import { grantHash } from '../domain/replica/cellKeys';
-import { foldRoster } from '../domain/replica/roster';
+import { foldRoster, prepareManagedWithdrawal } from '../domain/replica/roster';
 import { isPersonKeyKind, requiresActionId } from '../domain/replica/sessionKeys';
 import { fixedSigner } from './helpers/replicaWorld';
-import { createRosterWorld } from './helpers/replicaRosterWorld';
+import { createRosterWorld, DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 
 const project = '0'.repeat(32);
 const cell = '1'.repeat(32);
@@ -157,4 +157,64 @@ test('the fold releases a staged managed grant only with exact cell evidence und
   assert.equal(promoted.cells.cells.get(world.project)?.grants.some((item) => item.hash === hash), true);
   assert.ok('accessGrants' in promoted && promoted.accessGrants instanceof Map);
   assert.equal(promoted.accessGrants.get(world.project)?.entry, binding.hash);
+});
+
+test('scoped withdrawal uses all selected private manifests, including recipients whose wraps have not arrived', () => {
+  const world = createRosterWorld();
+  const base = world.project;
+  const unchanged = '5'.repeat(32);
+  const closes = '6'.repeat(32);
+  const peer = world.device('withdrawal-recipient', 'mbr-analyst');
+  const genesis = world.genesis();
+  const invited = world.rosterEntry(world.lead, 'member.invite', { invite: 'analyst-invite', name: 'Mo Analyst', seat: 'j2-chief',
+    roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: 'e'.repeat(64) }, genesis.entry.hash);
+  const admitted = world.rosterEntry(world.lead, 'member.admit', { member: peer.member, invite: 'analyst-invite', name: 'Mo Analyst',
+    seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, device: peer.descriptor(2), agentSeats: [] }, invited.hash);
+  const stableGrant = world.grant(world.lead, { cell: unchanged, roster: admitted.hash, to: [world.lead] });
+  const createStable = world.rosterEntry(world.lead, 'cell.create', { cell: unchanged, epoch: 1, grant: grantHash(stableGrant) }, admitted.hash);
+  const closingGrant = world.grant(world.lead, { cell: closes, roster: createStable.hash, to: [peer] });
+  const createClosing = world.rosterEntry(world.lead, 'cell.create', { cell: closes, epoch: 1, grant: grantHash(closingGrant) }, createStable.hash);
+  const arm = world.rosterEntry(world.lead, 'roster.require', { features: ['cell-access@1'] }, createClosing.hash);
+  const id = accessRevisionId(base, null, arm.hash, 'cell.access.commit', {});
+  const late = 'f'.repeat(64);
+  const commitments = (items: Array<[string, string]>) => items
+    .map(([hash, recipient]) => ({ hash, pages: [], recipients: [recipient] }))
+    .sort((a, b) => a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
+  const manifests: GrantEvidence[] = [
+    { project: base, cell: base, epoch: 1, policy: null, grants: commitments([[grantHash(genesis.grant), world.lead.writer], [late, peer.writer]]), excluded: [] },
+    { project: base, cell: unchanged, epoch: 1, policy: null, grants: commitments([[grantHash(stableGrant), world.lead.writer]]), excluded: [] },
+    { project: base, cell: closes, epoch: 1, policy: null, grants: commitments([[grantHash(closingGrant), peer.writer]]), excluded: [] }
+  ].sort((a, b) => a.cell < b.cell ? -1 : 1);
+  const committed = buildAccessCommitment(id, manifests.map((manifest) => {
+    const evidence = grantEvidenceHash(manifest);
+    assert.ok(evidence);
+    return { ...decision, cell: manifest.cell, evidence };
+  }), []);
+  assert.ok(committed);
+  const bound = world.rosterEntry(world.lead, 'cell.access.commit', { accessRevision: id, accessRoot: committed.root }, arm.hash);
+  const receipts = manifests.map((evidence) => ({ ...committed.cellProof(evidence.cell), entry: bound.hash, evidence }));
+  const folded = (grantEvidence: readonly unknown[]) => foldRoster({
+    entries: world.entries, anchor: world.anchor(), keys: world.ringFor(world.lead), blobs: (blob) => world.blobs.get(blob),
+    grants: [genesis.grant, stableGrant], grantEvidence, now: new Date('2026-11-19T12:00:00.000Z')
+  });
+  const state = folded(receipts);
+  assert.equal(state.cells.cells.get(base)?.grants.some((grant) => grant.hash === late), false);
+  assert.equal(prepareManagedWithdrawal(folded(receipts.slice(0, -1)), world.lead.writer, { member: peer.member }) === undefined, true);
+  assert.equal(prepareManagedWithdrawal(state, peer.writer, { member: world.lead.member }) === undefined, true);
+  assert.equal(prepareManagedWithdrawal(state, world.lead.writer, { member: peer.member, writer: world.lead.writer }) === undefined, true);
+  const plan = prepareManagedWithdrawal(state, world.lead.writer, { member: peer.member });
+  assert.ok(plan);
+  const cells = new Map(plan.cells.map((item) => [item.evidence.cell, item]));
+  assert.equal(plan.priorEntry, bound.hash);
+  assert.equal(plan.priorRoot, committed.root);
+  assert.equal(plan.revision, accessRevisionId(base, id, bound.hash, 'member.remove', { member: peer.member }));
+  assert.deepEqual(cells.get(base)?.evidence.excluded, [peer.writer]);
+  assert.equal(cells.get(base)?.decision, 'pending');
+  assert.deepEqual(cells.get(base)?.recipients, [world.lead.writer]);
+  assert.equal(cells.get(unchanged)?.decision, 'continues');
+  assert.equal(cells.get(closes)?.decision, 'closed');
+  assert.deepEqual(cells.get(closes)?.recipients, []);
+  const revoke = prepareManagedWithdrawal(state, world.lead.writer, { member: peer.member, writer: peer.writer });
+  assert.equal(revoke?.kind, 'device.revoke');
+  assert.equal(revoke?.revision, accessRevisionId(base, id, bound.hash, 'device.revoke', { member: peer.member, writer: peer.writer }));
 });

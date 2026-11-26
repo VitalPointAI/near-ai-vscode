@@ -78,8 +78,14 @@ export function matchesGrantEvidence(evidence: GrantEvidence, grant: GrantCommit
 }
 
 /** Resolves a private grant opening against an entry already selected by the roster fold. */
+export interface OpenedGrantEvidence {
+  entry: string;
+  evidence: GrantEvidence;
+  decision: 'continues' | 'pending' | 'closed';
+}
+
 export function openGrantEvidence(project: string, revisions: ReadonlyMap<string, AccessRevision>, value: unknown):
-  { entry: string; evidence: GrantEvidence } | undefined {
+  OpenedGrantEvidence | undefined {
   if (!isRecord(value) || Object.keys(value).length !== 4 || !isHash(value.entry) ||
     !evidenceShape(value.evidence) || value.evidence.project !== project) return undefined;
   const revision = revisions.get(value.entry);
@@ -88,7 +94,7 @@ export function openGrantEvidence(project: string, revisions: ReadonlyMap<string
   const excluded = new Set(value.evidence.excluded);
   if (decision?.decision === 'continues' && value.evidence.grants.some((grant) => grant.recipients.some((writer) => excluded.has(writer)))) return undefined;
   return decision !== undefined && decision.epoch === value.evidence.epoch && decision.evidence === grantEvidenceHash(value.evidence)
-    ? { entry: value.entry, evidence: value.evidence } : undefined;
+    ? { entry: value.entry, evidence: value.evidence, decision: decision.decision } : undefined;
 }
 
 /** Verify the grant and its pages before staging a confidential handoff. The signed roster may still be in transit. */

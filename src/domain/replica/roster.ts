@@ -35,7 +35,8 @@ import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
 import { CELL_ACCESS_FEATURE } from './features';
 import { accessRevisionId, verifiesAccessWrite } from './rotationProof';
 import type { AccessRevision } from './rotationProof';
-import { matchesGrantEvidence, openGrantEvidence, readGrantDelivery } from './rotationGrants';
+import { advanceGrantEvidence, matchesGrantEvidence, openGrantEvidence, readGrantDelivery } from './rotationGrants';
+import type { GrantEvidence, OpenedGrantEvidence } from './rotationGrants';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
@@ -164,6 +165,7 @@ export interface RosterState {
   requiredFrom: Map<string, number>;
   accessRevision?: AccessRevision;
   accessHistory: Map<string, AccessRevision>;
+  accessGrants: Map<string, OpenedGrantEvidence>;
   // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
   sessions: Map<string, SessionCertificate>;
   // Each device's latest placed device.kem (33.2 D-03), by the device's writer id. kemKeysAt (deviceKem.ts) reads it. No position.
@@ -189,6 +191,7 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     required: Object.freeze([]),
     requiredFrom: new Map(),
     accessHistory: new Map(),
+    accessGrants: new Map(),
     sessions: new Map(),
     kems: new Map(),
     notChosen: new Set(),
@@ -717,6 +720,13 @@ function placeGrants(state: RosterState, grants: readonly unknown[], openings: r
     evidence.push(bound);
     delivered.push(...item.grants);
   }
+  if (state.pending.length === 0) {
+    const position = state.positions.length - 1;
+    for (const item of evidence) {
+      const { cell, epoch } = item.evidence;
+      if (item.entry === state.accessRevision?.entry && epochAt(state.cells, cell, position) === epoch) state.accessGrants.set(cell, item);
+    }
+  }
   const approved = new Set(evidence.flatMap(({ evidence: item }) => item.grants.map((grant) => grant.hash)));
   const reads: Array<{ value: unknown; read: Extract<ReturnType<typeof readGrant>, { ok: true }> }> = [];
   const byHash = new Map<string, unknown>();
@@ -783,6 +793,44 @@ function placeGrants(state: RosterState, grants: readonly unknown[], openings: r
     });
     if (outcome.status === 'refused') state.refused.push({ hash: read.hash, kind: 'grant', reason: outcome.reason });
   }
+}
+
+type Withdrawal = { member: string; writer?: string };
+type WithdrawalCell = { evidence: GrantEvidence; decision: OpenedGrantEvidence['decision']; recipients: string[] };
+
+/** Prepare the next managed membership operation without signing or writing. Every cell needs selected-root evidence. */
+export function prepareManagedWithdrawal(state: RosterState, authority: string, input: Withdrawal):
+  { kind: 'member.remove' | 'device.revoke'; operation: Withdrawal; predecessor: string; priorRoot: string; priorEntry: string;
+    revision: string; cells: WithdrawalCell[] } | undefined {
+  const prior = state.accessRevision;
+  const position = state.positions.length - 1;
+  const predecessor = state.positions[position];
+  if (!state.requiredFrom.has(CELL_ACCESS_FEATURE) || prior === undefined || state.pending.length > 0 || !isRosterWriterAt(state, authority, position)) return undefined;
+  if (memberAt(state.members, input.member, position) === undefined) return undefined;
+  const devices = devicesOfMemberAt(state.members, input.member, position);
+  const target = input.writer;
+  if (input.member === leadAt(state, position) && (target === undefined || (devices.filter((device) => device.kind === 'person').length <= 1 &&
+      deviceAt(state.members, authority, position)?.member !== deputyAt(state, position)))) return undefined;
+  if (target !== undefined && !devices.some(({ writer }) => writer === target)) return undefined;
+  const withdrawn = new Set(target === undefined ? devices.map(({ writer }) => writer) : [target]);
+  const cells: WithdrawalCell[] = [];
+  for (const cell of prior.cells) {
+    const known = state.accessGrants.get(cell);
+    if (known?.entry !== prior.entry || known.evidence.epoch !== epochAt(state.cells, cell, position)) return undefined;
+    const holders = [...new Set(known.evidence.grants.flatMap((grant) => grant.recipients))].sort();
+    const excludedNow = holders.filter((writer) => withdrawn.has(writer) || deviceAt(state.members, writer, position) === undefined);
+    const evidence = advanceGrantEvidence(known.evidence, { epoch: known.evidence.epoch, grants: [], excluded: excludedNow });
+    if (evidence === undefined) return undefined;
+    const excluded = new Set(evidence.excluded);
+    const recipients = holders.filter((writer) => !excluded.has(writer));
+    const pending = known.decision === 'pending' || recipients.length < holders.length;
+    const decision = known.decision === 'closed' || recipients.length === 0 ? 'closed' : pending ? 'pending' : 'continues';
+    cells.push({ evidence, decision, recipients: decision === 'closed' ? [] : recipients });
+  }
+  const operation = { member: input.member, ...(target === undefined ? {} : { writer: target }) };
+  const kind = target === undefined ? 'member.remove' : 'device.revoke';
+  return { kind, operation, predecessor, priorRoot: prior.root, priorEntry: prior.entry, cells,
+    revision: accessRevisionId(state.anchor.project, prior.id, predecessor, kind, operation) };
 }
 
 /** Raw grant bytes can arrive before their authority. After the switch they are only staging material. */
