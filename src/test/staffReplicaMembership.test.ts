@@ -33,7 +33,7 @@ import {
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ensureLabelCell } from '../staff/replica/labelCells';
 import { hubMemoryOf, syncOnce } from '../staff/replica/hubSync';
-import type { SyncTransport } from '../staff/replica/hubSync';
+import type { SyncLocal, SyncTransport } from '../staff/replica/hubSync';
 import { ReplicaProject, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
@@ -1272,6 +1272,110 @@ test('private founding file waits through reopening for the matching signed rost
   assert.equal(committedGrant(received.roster.cells, cell, 2), committedGrant(selected.roster.cells, cell, 2));
   assert.deepEqual(reopened.keys.epochKey(cell, 2), lead.p.keys.epochKey(cell, 2));
   assert.equal(reopened.keys.holds(cell, 1), false);
+});
+
+test('normal managed catch-up keeps an unaffected cell writable with matching proofs and resumes after a delay', async () => {
+  const lead = await founded('managed-catchup');
+  const compartments = ['KESTREL', 'OSPREY', 'RAVEN', 'LARK'];
+  const clearance = { ...CLEARED_X, compartments };
+  ok(await updateMember(lead.host, { member: 'mbr-lead', clearance }), 'declare lead clearance');
+  const peer = await bringIn(lead, 'continuity-peer', 'Mo Analyst', clearance);
+  assert.ok('ok' in await lead.p.appendOwn('roster.require', { features: ['wrap@2'] }));
+  const labels = compartments.map((compartment) => ({ ...LABEL_X, compartments: [compartment] }));
+  const cells = [];
+  for (const label of labels) cells.push(await createCell(lead, label, [lead.p.deviceWriter]));
+  const base = lead.p.projectId;
+  const { receipts } = await seedManagedAccess(lead, [base, ...cells]);
+  assert.ok('ok' in await lead.p.putGrants([], receipts));
+  peer.at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+
+  const offer = { recipient: peer.writer, continuity: [base] };
+  const revise = async (label: typeof LABEL_X) => {
+    const placed = await ensureLabelCell(lead.host, label);
+    assert.ok(placed.ok && placed.granted.includes(peer.writer));
+    const authorization = await head(lead.p);
+    const selected = (await lead.p.welcomeFor(peer.writer, [])).roster.find((entry) => entryHash(entry.header) === authorization.hash);
+    const packet = await lead.p.sealManagedHandoff(offer);
+    assert.ok(selected && packet);
+    return { entry: selected, hash: authorization.hash, ...packet };
+  };
+  const before = await revise(labels[0]);
+  const setup = await lead.p.welcomeFor(peer.writer, []);
+  assert.ok('ok' in await peer.p.ingestForeign([setup.genesis, ...setup.roster], setup.blobs));
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery({ handle: before.handle, packet: before.packet }));
+  assert.equal((await writeInBase(peer.p)).epoch, 1);
+
+  const first = await revise(labels[1]);
+  const second = await revise(labels[2]);
+  const served = [first, second];
+  const packets = new Map([[first.handle, first.packet], [second.handle, second.packet]]);
+  const attempted = new Map<string, number>();
+  const taken = new Set<string>();
+  const handles = [first.handle, second.handle];
+  const transport: SyncTransport = {
+    project: base, hub: lead.p.deviceWriter,
+    hubHeads: async () => {
+      const last = served[served.length - 1];
+      return { project: base, rosterHead: last.hash, grants: [], streams: [{ stream: base, heads: [
+        { writer: lead.p.deviceWriter, seq: last.entry.header.seq, hash: last.hash }
+      ] }] };
+    },
+    entries: async (stream, writer, from) => {
+      const item = served.find(({ entry }) => entry.header.seq === from);
+      assert.ok(item);
+      return { project: base, stream, writer, entries: [item.entry], more: item !== served[served.length - 1],
+        head: { writer, seq: item.entry.header.seq, hash: item.hash } };
+    },
+    append: async (batch) => ({ project: base, accepted: batch.entries.map(({ header }) => entryHash(header)), refused: [],
+      grantsRefused: [], rosterHead: served[served.length - 1].hash, blobsPut: false }),
+    getBlob: async (hash) => ({ kind: 'missing', hash }),
+    grant: async () => { throw new Error('Private continuity must never use the raw grants route.'); },
+    askCheckpoint: async () => ({ project: base, kept: 0 }),
+    managedRoute: {
+      put: async () => false,
+      get: async (handle) => { attempted.set(handle, (attempted.get(handle) ?? 0) + 1); return packets.get(handle); }
+    }
+  };
+  const options = { now: () => NOW, managed: {
+    offers: async () => [], pending: async () => handles.filter((handle) => !taken.has(handle)),
+    published: async () => { throw new Error('The recipient has no outgoing offer.'); },
+    accepted: async (handle: string) => { taken.add(handle); }
+  } };
+  const memory = hubMemoryOf(new MemorySecrets());
+  const local = syncLocalOf(peer.p);
+  const acceptedAt: string[] = [];
+  const observed: Array<boolean | string> = [];
+  const probe: SyncLocal = { ...local, async ingest(...args) {
+    const result = await local.ingest(...args);
+    const current = await head(peer.p);
+    const slot = deviceAt(current.roster.members, peer.writer, current.position)?.slot;
+    assert.ok(slot !== undefined);
+    const write = await peer.p.appendOwn('doc.client',
+      { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } });
+    acceptedAt.push(current.hash);
+    observed.push(isProjectRefused(write) ? write.refused : write.ok);
+    return result;
+  } };
+  const healthy = await syncOnce(transport, probe, memory, options);
+  assert.equal(healthy.pulled, 2);
+  assert.deepEqual(acceptedAt, [first.hash, second.hash]);
+  assert.deepEqual(observed, [true, true], 'a base write is possible as soon as each selected root becomes visible');
+  assert.equal(healthy.managed, 'complete');
+
+  const later = await revise(labels[3]);
+  served.push(later);
+  handles.push(later.handle);
+  const delayed = await syncOnce(transport, probe, memory, options);
+  assert.equal(delayed.managed, 'waiting');
+  assert.equal(observed.at(-1), 'rekey-pending');
+  assert.equal(attempted.get(later.handle), 1);
+  assert.ok(local.managed);
+  assert.equal(await local.managed.stage({ handle: second.handle, packet: second.packet }), false);
+  packets.set(later.handle, later.packet);
+  assert.equal((await syncOnce(transport, probe, memory, options)).managed, 'complete');
+  assert.equal(attempted.get(later.handle), 2);
+  const reopened = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  assert.equal((await writeInBase(reopened)).epoch, 1);
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
