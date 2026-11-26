@@ -33,6 +33,7 @@ import {
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
+import { openManagedGrantDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
 class MemorySecrets implements SecretStorageLike {
@@ -889,9 +890,36 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.ok(proof);
   const bound = await p.appendOwn('cell.access.commit', { accessRevision: id, accessRoot: committed.root });
   assert.ok('ok' in bound);
-  assert.ok('ok' in await p.putGrants([], [{ ...proof, entry: bound.hash, evidence }]));
+  const opening = { ...proof, entry: bound.hash, evidence };
+  const prepare = (roster: RosterState) => sealManagedGrantDelivery(roster, {
+    recipient: p.deviceWriter, opening, grant: staged, pages: [], info: { base: true }, now: NOW
+  });
+  assert.equal(prepare((await head(p)).roster), undefined, 'delivery waits for the grant and proof to be placed');
+  assert.ok('ok' in await p.putGrants([], [opening]));
   assert.ok((await head(p)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
+  const sealed = prepare((await head(p)).roster);
+  assert.ok(sealed);
+  const rival = prepare((await head(p)).roster);
+  assert.ok(rival);
+  assert.notEqual(rival.handle, sealed.handle);
+  const relayView = JSON.stringify(sealed);
+  for (const privateValue of [p.projectId, p.deviceWriter, evidence.grants[0].hash, proof.cell.decision.salt, proof.cell.decision.evidence]) {
+    assert.equal(relayView.includes(privateValue), false);
+  }
+  const keys = await loadOrCreateKemKeys(at.secrets, { identityDir: identityDir(at.global) });
+  const device = { writer: p.deviceWriter, kem: keys.privateKeys };
+  assert.equal(openManagedGrantDelivery(p.projectId, device, rival.handle, sealed.packet, NOW), undefined);
+  const changedHandle = sealed.handle.slice(0, -1) + (sealed.handle.endsWith('0') ? '1' : '0');
+  assert.equal(openManagedGrantDelivery(p.projectId, device, changedHandle, sealed.packet, NOW), undefined);
+  assert.equal(openManagedGrantDelivery('f'.repeat(32), device, sealed.handle, sealed.packet, NOW), undefined);
+  assert.equal(openManagedGrantDelivery(p.projectId, { ...device, writer: 'f'.repeat(64) }, sealed.handle, sealed.packet, NOW), undefined);
+  assert.equal(openManagedGrantDelivery(p.projectId, device, sealed.handle, sealed.packet, new Date(NOW.getTime() + 2 * DAY_MS)), undefined);
+  const delivered = openManagedGrantDelivery(p.projectId, device, sealed.handle, sealed.packet, NOW);
+  assert.ok(delivered);
+  assert.deepEqual(delivered.grants.map(grantHash), [hash]);
+  assert.deepEqual(delivered.opening, opening);
   const reopened = project(await ReplicaProject.open(at.root, at.deps));
+  assert.ok('ok' in await reopened.putGrants(delivered.grants, [delivered.opening]));
   assert.equal((await reopened.signedGrants()).some((grant) => grant.hash === hash), false);
   assert.ok((await head(reopened)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
   assert.ok(grantsOn(at).some((grant) => grantHash(grant) === hash));
