@@ -241,7 +241,7 @@ export class SqliteStore implements RelayStore {
         `UPDATE runs SET state = 'queued', updated_at = ? WHERE tenant_id = ? AND message_id = ? AND state = 'interrupted'`,
       ),
       messageById: db.prepare('SELECT * FROM messages WHERE tenant_id = ? AND message_id = ?'),
-      ack: db.prepare(`UPDATE messages SET state = 'done', done_at = ? WHERE tenant_id = ? AND message_id = ? AND state = 'claimed'`),
+      ack: db.prepare(`UPDATE messages SET state = 'done', done_at = ?, payload = '' WHERE tenant_id = ? AND message_id = ? AND state = 'claimed'`),
       queueDepth: db.prepare(`SELECT count(*) AS depth FROM messages WHERE tenant_id = ? AND state != 'done'`),
       getRun: db.prepare('SELECT * FROM runs WHERE tenant_id = ? AND run_id = ?'),
       transitionRun: db.prepare('UPDATE runs SET state = ?, updated_at = ? WHERE tenant_id = ? AND run_id = ? AND state = ?'),

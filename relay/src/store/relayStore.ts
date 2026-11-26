@@ -149,7 +149,7 @@ export interface RelayStore {
    * queued until the tenant is active again), and binding-conflict for a conversation bound to another tenant.
    */
   claimNext(tenantId: string, channel: Channel, conversationId: string, now: number): Promise<QueuedMessage | undefined>;
-  /** Claimed to done. False when the message was not claimed. */
+  /** Marks a claimed message done and clears its payload atomically. Returns false when the tenant has no matching claimed message. */
   ackMessage(tenantId: string, messageId: number, now: number): Promise<boolean>;
   /** Messages of this tenant that are not done. */
   queueDepth(tenantId: string): Promise<number>;
