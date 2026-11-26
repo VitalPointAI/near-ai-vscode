@@ -39,17 +39,18 @@ export interface ShareView {
   readonly lead: boolean;
   readonly people: readonly SharePerson[];
   readonly parts: readonly SharePart[];
+  readonly keyChanges?: readonly Pick<SharePart, 'cell' | 'label'>[];
   readonly server?: ShareServer;
   /** "Show others what I am working on" (D-21), on unless the person turned it off. */
   readonly showWork: boolean;
 }
 
-/** The backend review page for an uncommitted removal. */
-export interface RemovalConfirmation { readonly requestId: string; readonly url: string }
+/** An uncommitted action review page. */
+export interface ShareConfirmation { readonly requestId: string; readonly url: string }
 
 /** An action result with any associated notices, file, safety words, or confirmation. */
 export interface ShareOutcome {
-  readonly confirmation?: RemovalConfirmation;
+  readonly confirmation?: ShareConfirmation;
   readonly message: string;
   readonly notices: readonly string[];
   readonly file?: { readonly name: string; readonly text: string };
@@ -89,6 +90,7 @@ export interface StaffShareServer {
   /** Admits the person of a join request; refused unless the lead confirmed the six words matched. */
   admit(input: { readonly request: string; readonly codeMatched: boolean }): Promise<ServiceResult<ShareOutcome>>;
   remove(input: { readonly member: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>>;
+  finishKeyChange(input: { readonly cell: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>>;
   /** Gives your organization's server one part; refused unless the lead confirmed STAFF_SHARE_TEXT.tradeOff, shown word for word first. */
   grant(input: { readonly cell: string; readonly confirmed: boolean }): Promise<ServiceResult<ShareOutcome>>;
   /** Removes your organization's server from this shared work; every part it held moves to a new key. */
@@ -123,6 +125,13 @@ export const STAFF_SHARE_TEXT = {
   finishRemoval: 'Finish removal',
   removalReady: 'Review and confirm the removal, then return here to finish it.',
   removalNeedsReview: 'Start the removal again to confirm it for the current shared work.',
+  keyChanges: 'Pending key changes',
+  startKeyChange: 'Start key change',
+  reviewKeyChange: 'Review key change',
+  finishKeyChange: 'Finish key change',
+  keyChangeReady: 'Review and confirm the key change for this part, then return here to finish it.',
+  keyChangeNeedsReview: 'Start the key change again to confirm it for the current shared work.',
+  keyChangeUnavailable: 'This computer cannot prepare a key change for this part from the current record of access.',
   removalUnavailable: 'This computer cannot prepare the removal from the current record of who has access.',
   grant: 'Give this part to the server',
   revoke: 'Remove your organization\'s server',

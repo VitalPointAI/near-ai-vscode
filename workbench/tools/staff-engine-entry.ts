@@ -3,6 +3,13 @@
 //
 // 33-23: the session-key rules and the keyring, so a hosted session certifies its session key and keeps its epoch keys and join secrets in the
 // person's key store. 33-24 adds the replica project and the live replicator here, with the decode worker and the vendored Yjs they load by path.
+import { labelKeyShownWithMarkings as finishLabel } from '../../src/domain/gate/labelAlgebra';
+import { multiUserNoticeLines } from '../../src/domain/staff/multiUser';
+import type { RosterState } from '../../src/domain/replica/roster';
+import { cellsAt as finishCellsAt, gateOf } from '../../src/staff/replica/membership';
+import type { CellInfo, SharedProjectHost } from '../../src/staff/replica/membership';
+import { pendingManagedCells, prepareHostedFinish } from '../../src/staff/replica/managedRecovery';
+
 export { certifiedWriter, isPersonKeyKind, PERSON_KEY_KINDS, SESSION_DEFAULT_LIFETIME_MS, SESSION_MAX_LIFETIME_MS, sessionBindingBytes, sessionCertifyData } from '../../src/domain/replica/sessionKeys';
 export { writerIdOf } from '../../src/domain/replica/entry';
 export { x25519BindingBytes } from '../../src/domain/replica/cellKeys';
@@ -54,3 +61,38 @@ export { changesSinceRows, contestedCards, pendingConfirmation } from '../../src
 export { chooseRosterBranch, describeRosterBranches } from '../../src/staff/replica/membership';
 // 33.2-07: the switch to post-quantum keys in the Staff Room: this computer's cards and the three actions (switch, move, give keys).
 export { giveKeys, moveCellsToV2, switchToV2, wrapCardsFor } from '../../src/staff/replica/wrapUpgrade';
+
+const finishCellInfo = (host: SharedProjectHost, roster: RosterState) =>
+  finishCellsAt(roster, host.project.keys, roster.positions.length - 1, gateOf(host).scales);
+const pendingPartLabel = (host: SharedProjectHost, info: CellInfo) =>
+  info.base ? 'Shared project' : info.label === undefined ? 'Lead-only work' : finishLabel(info.label, gateOf(host).scales);
+
+/** Safe choices from the current private roster. Drafts and key material stay in the session backend. */
+export function pendingWorkbenchFinishParts(host: SharedProjectHost, roster: RosterState) {
+  const pending = pendingManagedCells(roster, host.project.deviceWriter);
+  return pending === undefined ? [] : finishCellInfo(host, roster).filter((info) => info.known && pending.includes(info.cell))
+    .map((info) => ({ cell: info.cell, label: pendingPartLabel(host, info) }));
+}
+
+export function prepareWorkbenchFinish(host: SharedProjectHost, roster: RosterState, cell: string, now: Date) {
+  const { project } = host;
+  const info = finishCellInfo(host, roster).find((part) => part.cell === cell);
+  const draft = info === undefined ? undefined : prepareHostedFinish(project, roster, info, host.routing, now);
+  if (draft === undefined || info === undefined) return undefined;
+  const describe = (current: SharedProjectHost, fresh: RosterState, target: string) =>
+    finishCellInfo(current, fresh).find((part) => part.cell === target);
+  return {
+    label: pendingPartLabel(host, info),
+    currentBytes(current: SharedProjectHost, fresh: RosterState, time: Date): Buffer | undefined {
+      const part = current.project === project ? describe(current, fresh, cell) : undefined;
+      return part === undefined ? undefined : draft.currentActionBytes(fresh, part, current.routing, time);
+    },
+    async commit(current: SharedProjectHost, action: string) {
+      const result = current.project === project ? await project.finishHostedCell(draft, action,
+        (fresh, target) => describe(current, fresh, target), current.routing) : undefined;
+      if (result === undefined) return { ok: false, reason: 'action-required', message: 'Start this key change again.', notices: [] };
+      return 'refused' in result ? { ok: false, reason: result.refused, message: result.message, notices: [] } :
+        { ok: true, message: 'This part now uses its new key.', notices: multiUserNoticeLines() };
+    }
+  };
+}

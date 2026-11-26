@@ -5,7 +5,7 @@
  * STAFF_SHARE_TEXT and the engine's own result sentences.
  */
 import type { ServiceResult } from '../../common/service-result.js';
-import { STAFF_SHARE_TEXT, type RemovalConfirmation, type ShareOutcome, type ShareView, type StaffShareServer } from '../../common/staff-share.js';
+import { STAFF_SHARE_TEXT, type ShareConfirmation, type ShareOutcome, type ShareView, type StaffShareServer } from '../../common/staff-share.js';
 import type { InvitationOpened } from './invite-open-handler.js';
 import '../sterling-share.css';
 
@@ -78,7 +78,8 @@ export class ShareWithPeopleSection {
   private readonly body = el('div', undefined, 'sterling-share-body');
   private readonly status = el('p', undefined, 'sterling-share-status');
   private invitation: InvitationOpened | undefined;
-  private removal: { project: string | undefined; member: string; confirmation: RemovalConfirmation } | undefined;
+  private removal: { project: string | undefined; member: string; confirmation: ShareConfirmation } | undefined;
+  private keyChange: { project: string | undefined; cell: string; confirmation: ShareConfirmation } | undefined;
   private disposed = false;
 
   constructor(private readonly server: StaffShareServer) {
@@ -126,7 +127,10 @@ export class ShareWithPeopleSection {
     }
     this.say('');
     this.body.append(this.peopleCard(view));
-    if (view.lead) this.body.append(this.inviteCard(view), this.serverCard(view));
+    if (view.lead) {
+      if (view.keyChanges?.length) this.body.append(this.keyChangesCard(view));
+      this.body.append(this.inviteCard(view), this.serverCard(view));
+    }
     this.body.append(this.selfCard(view));
   }
 
@@ -203,6 +207,7 @@ export class ShareWithPeopleSection {
     if (this.disposed) return;
     if (answer === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
     if (answer.kind === 'ok' && answer.value.confirmation !== undefined) {
+      this.keyChange = undefined;
       this.removal = { project, member, confirmation: answer.value.confirmation };
       await this.refresh();
       this.say(answer.value.message);
@@ -213,6 +218,46 @@ export class ShareWithPeopleSection {
       if (answer.kind === 'refused') await this.refresh();
     }
     await this.shown(Promise.resolve(answer));
+  }
+
+  private async finishCellKeyChange(project: string | undefined, cell: string, requestId?: string): Promise<void> {
+    const answer = await this.server.finishKeyChange({ cell, ...(requestId === undefined ? {} : { requestId }) }).catch(() => undefined);
+    if (this.disposed) return;
+    if (answer === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
+    if (answer.kind === 'ok' && answer.value.confirmation !== undefined) {
+      this.removal = undefined;
+      this.keyChange = { project, cell, confirmation: answer.value.confirmation };
+      await this.refresh();
+      this.say(answer.value.message);
+      return;
+    }
+    if (requestId !== undefined) {
+      this.keyChange = undefined;
+      if (answer.kind === 'refused') await this.refresh();
+    }
+    await this.shown(Promise.resolve(answer));
+  }
+
+  private keyChangesCard(view: ShareView): HTMLElement {
+    const card = this.card(STAFF_SHARE_TEXT.keyChanges, 'key');
+    const list = el('ul', undefined, 'sterling-share-list');
+    for (const part of view.keyChanges ?? []) {
+      const item = el('li', undefined, 'sterling-share-row');
+      item.append(el('span', part.label));
+      const current = this.keyChange;
+      const pending = current !== undefined && current.project === view.project && current.cell === part.cell ? current.confirmation : undefined;
+      if (pending === undefined) item.append(this.button(STAFF_SHARE_TEXT.startKeyChange, 'key', () => this.finishCellKeyChange(view.project, part.cell)));
+      else {
+        const review = el('a', STAFF_SHARE_TEXT.reviewKeyChange);
+        review.href = pending.url;
+        review.target = '_blank';
+        review.rel = 'noopener noreferrer';
+        item.append(review, this.button(STAFF_SHARE_TEXT.finishKeyChange, 'key', () => this.finishCellKeyChange(view.project, part.cell, pending.requestId)));
+      }
+      list.append(item);
+    }
+    card.append(list);
+    return card;
   }
 
   private peopleCard(view: ShareView): HTMLElement {

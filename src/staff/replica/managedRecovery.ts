@@ -109,14 +109,17 @@ export function prepareHostedFinish(project: ReplicaProject, roster: RosterState
   if (intent === undefined) return undefined;
   const binding = intent.actionBytes();
   const cell = info.cell;
+  const currentActionBytes = (fresh: RosterState, part: CellInfo, rules: RoutingTable | undefined, time: Date): Buffer | undefined => {
+    if (project.rosterSigner !== signer || part.cell !== cell) return undefined;
+    const current = finishContext(project, fresh, part, rules, time);
+    const bytes = current === undefined ? undefined : createFinishIntent(current.context, intent.unsignedGrant())?.actionBytes();
+    return bytes?.equals(binding) === true ? bytes : undefined;
+  };
   const draft = Object.freeze({
     intent,
     epochKey: () => Buffer.from(next.key),
-    matches(fresh: RosterState, part: CellInfo, rules: RoutingTable | undefined, time: Date): boolean {
-      if (project.rosterSigner !== signer || part.cell !== cell) return false;
-      const current = finishContext(project, fresh, part, rules, time);
-      return current !== undefined && createFinishIntent(current.context, intent.unsignedGrant())?.actionBytes().equals(binding) === true;
-    }
+    currentActionBytes,
+    matches: (fresh: RosterState, part: CellInfo, rules: RoutingTable | undefined, time: Date) => currentActionBytes(fresh, part, rules, time) !== undefined
   });
   hostedDraftProjects.set(draft, project);
   return draft;

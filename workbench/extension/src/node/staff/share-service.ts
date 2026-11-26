@@ -59,6 +59,8 @@ export interface StaffShareApi {
   removeFromProject(shared: never, input: { readonly member: string }, action?: string): Promise<EngineResult>;
   managedWithdrawalActionBytes(roster: never, authority: string, input: { readonly member: string }): Buffer | undefined;
   readonly CELL_ACCESS_FEATURE: string;
+  pendingWorkbenchFinishParts(shared: never, roster: never): NonNullable<ShareView['keyChanges']>;
+  prepareWorkbenchFinish(shared: never, roster: never, cell: string, now: Date): WorkbenchFinishDraft | undefined;
   grantCellToHub(shared: never, input: { readonly cell: string; readonly confirmed: boolean }): Promise<EngineResult>;
   revokeHub(shared: never, input: { readonly hub?: string }): Promise<EngineResult>;
   readmitHub(shared: never, input: { readonly hub?: string; readonly certPin: string; readonly words: string }): Promise<EngineResult>;
@@ -74,6 +76,12 @@ export interface StaffShareApi {
   SCALE_PRESETS: unknown;
   HUB_GRANT_TRADE_OFF: string;
   openHubTransport(options: never): unknown;
+}
+
+interface WorkbenchFinishDraft {
+  readonly label: string;
+  currentBytes(shared: never, roster: never, now: Date): Buffer | undefined;
+  commit(shared: never, action: string): Promise<EngineResult>;
 }
 
 /** What the share service reads of the session's live engine (StaffLiveEngine). */
@@ -101,7 +109,7 @@ export interface StaffShareServiceOptions {
   readonly engine: StaffShareApi & Pick<StaffEngine, 'hubStanding' | 'readHubAddress' | 'isRosterWriterAt' | 'writerIdOf'> & { x25519BindingBytes(rawX25519: string, writer: string): Buffer };
   /** The session's live engine, once it has started. */
   readonly live: () => ShareLive | undefined;
-  readonly actions?: Pick<PendingActions, 'beginAction' | 'resumeAction'>;
+  readonly actions?: Pick<PendingActions, 'beginAction' | 'resumeAction' | 'reviewAttachment' | 'cancelReview'>;
   /** The open staff project's folder (the workspace folder). */
   readonly root: () => Promise<string | undefined>;
   /** The hub transport factory; the engine's own when absent (tests pass one with short limits). */
@@ -119,6 +127,17 @@ export async function showWorkOf(secrets: SecretStorageLike): Promise<boolean> {
 }
 
 type Refused = { readonly kind: 'refused'; readonly reason: string; readonly fix?: string };
+interface FinishReview {
+  readonly owner: symbol;
+  readonly root: string;
+  readonly live: ShareLive;
+  readonly project: EngineProject;
+  readonly writer: string;
+  readonly signer: NonNullable<ShareContext['hosted']>['keys']['personSigner'];
+  readonly signerKey: string;
+  readonly cell: string;
+  readonly draft: WorkbenchFinishDraft;
+}
 type Shared = { readonly root: string; readonly live: ShareLive; readonly context: ShareContext; readonly project: EngineProject; readonly roster: EngineRoster; readonly lead: boolean };
 
 const isRefused = (value: unknown): value is Refused => typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'refused';
@@ -139,6 +158,7 @@ function outcome(result: EngineResult, extra: Partial<ShareOutcome> = {}): Servi
 }
 
 export class StaffShareService implements StaffShareServer {
+  private readonly finishReviewOwner = Symbol();
   private binding: { readonly key: string; readonly sig: string } | undefined;
 
   constructor(private readonly options: StaffShareServiceOptions) {}
@@ -172,7 +192,9 @@ export class StaffShareService implements StaffShareServer {
         const address = await engine.readHubAddress(shared.context.globalStorageDir, project.projectId, { hub: hub.hub });
         server = { hub: hub.hub, standing: hub.standing, words: engine.serverPinWords(hub.certPin), ...(address === undefined ? {} : { address: address.address }) };
       }
-      return ok({ state: 'shared', project: project.projectId, lead, people: people.sort((a, b) => a.name.localeCompare(b.name)), parts, ...(server === undefined ? {} : { server }), showWork });
+      const keyChanges = this.mayReviewFinish(shared) ? engine.pendingWorkbenchFinishParts(this.host(shared), roster as never) : [];
+      return ok({ state: 'shared', project: project.projectId, lead, people: people.sort((a, b) => a.name.localeCompare(b.name)), parts,
+        ...(keyChanges.length === 0 ? {} : { keyChanges }), ...(server === undefined ? {} : { server }), showWork });
     });
   }
 
@@ -301,6 +323,52 @@ export class StaffShareService implements StaffShareServer {
       if (result.ok) shared.live.syncNow(shared.project.projectId);
       return result.reason === 'action-required' ? refused(STAFF_SHARE_TEXT.removalNeedsReview) : outcome(result);
     });
+  }
+
+  public finishKeyChange(input: { readonly cell: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>> {
+    return this.shared(async (shared) => {
+      const { engine, actions } = this.options;
+      if (!shared.lead) return refused(STAFF_SHARE_TEXT.notLead);
+      const signer = shared.context.hosted?.keys?.personSigner;
+      if (signer === undefined || !shared.roster.required?.includes(engine.CELL_ACCESS_FEATURE)) {
+        return refused(input.requestId === undefined ? STAFF_SHARE_TEXT.keyChangeUnavailable : STAFF_SHARE_TEXT.keyChangeNeedsReview);
+      }
+      if (actions === undefined) return refused(SESSION_KEY_TEXT.stepUp, KEY_SERVICE_TEXT.confirm);
+      const host = this.host(shared);
+      const roster = shared.roster as never;
+      const now = this.now();
+      if (input.requestId === undefined) {
+        const draft = engine.prepareWorkbenchFinish(host, roster, input.cell, now);
+        const bytes = draft?.currentBytes(host, roster, now);
+        if (draft === undefined || bytes === undefined) return refused(STAFF_SHARE_TEXT.keyChangeUnavailable);
+        const review: FinishReview = { owner: this.finishReviewOwner, root: shared.root, live: shared.live, project: shared.project,
+          writer: shared.project.deviceWriter, signer, signerKey: signer.publicKey, cell: input.cell, draft };
+        const { requestId, nonce } = actions.beginAction(bytes, { kind: 'cell.rekey.finish', fields: [{ label: 'Part', value: draft.label }] }, review);
+        return ok({ message: STAFF_SHARE_TEXT.keyChangeReady, notices: [], confirmation: { requestId, url: actionStepUpUrl(nonce) } });
+      }
+
+      const requestId = input.requestId;
+      const review = isActionNonce(requestId) ? actions.reviewAttachment(requestId) as FinishReview | undefined : undefined;
+      if (review?.owner !== this.finishReviewOwner || review.cell !== input.cell) return refused(STAFF_SHARE_TEXT.keyChangeNeedsReview);
+      const current = review.root === shared.root && review.live === shared.live && review.project === shared.project &&
+        review.writer === shared.project.deviceWriter && review.signer === signer && review.signerKey === signer.publicKey &&
+        this.options.live() === shared.live && shared.live.project(shared.project.projectId) === shared.project;
+      const bytes = current ? review.draft.currentBytes(host, roster, now) : undefined;
+      if (bytes === undefined) {
+        actions.cancelReview(requestId);
+        return refused(STAFF_SHARE_TEXT.keyChangeNeedsReview);
+      }
+      const action = actions.resumeAction(requestId, bytes);
+      if (action === undefined) return refused(STAFF_SHARE_TEXT.keyChangeNeedsReview);
+      const result = await review.draft.commit(host, action);
+      if (result.ok) shared.live.syncNow(shared.project.projectId);
+      return result.reason === 'action-required' ? refused(STAFF_SHARE_TEXT.keyChangeNeedsReview) : outcome(result);
+    });
+  }
+
+  private mayReviewFinish(shared: Shared): boolean {
+    return shared.lead && this.options.actions !== undefined && shared.context.hosted?.keys?.personSigner !== undefined &&
+      shared.roster.required?.includes(this.options.engine.CELL_ACCESS_FEATURE) === true;
   }
 
   public grant(input: { readonly cell: string; readonly confirmed: boolean }): Promise<ServiceResult<ShareOutcome>> {

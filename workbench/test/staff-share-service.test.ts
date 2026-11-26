@@ -363,7 +363,7 @@ test('managed hosted Workbench removal challenges the exact current operation be
   };
 
   const first = await challenge();
-  assert.deepEqual(writes, []);
+  assert.equal(writes.length, 0);
   assert.equal(synced, 0);
   const wrongMember = { member: 'mbr-other-fictional', requestId: first.requestId };
   assert.equal((await service.remove(wrongMember)).kind, 'refused');
@@ -373,7 +373,7 @@ test('managed hosted Workbench removal challenges the exact current operation be
   selected = 'c'.repeat(64);
   const stale = { member, requestId: first.requestId };
   assert.equal((await service.remove(stale)).kind, 'refused');
-  assert.deepEqual(writes, []);
+  assert.equal(writes.length, 0);
   assert.equal(synced, 0);
 
   const current = await challenge();
@@ -417,10 +417,11 @@ test('managed Workbench Finish reviews one private draft and never falls back on
   const writes: { cell: string; action: string }[] = [];
   const resolved = new Set<string>();
   const project = { projectId, deviceWriter: 'c'.repeat(64), state: async () => ({
-    roster: { positions: [selected], required: ['cell-access@1'], members: {} }, fold: {}
+    roster: { positions: [selected], required: ['cell-access@1'], members: { members: new Map(), devices: new Map() } }, fold: {}
   }) };
+  let liveProject = project;
   const live = {
-    projects: () => [{ root, project: projectId }], project: () => project,
+    projects: () => [{ root, project: projectId }], project: () => liveProject,
     shareContext: () => ({ deps: {}, secrets, globalStorageDir: root, hosted: { keys: { personSigner: signer } } }),
     syncNow: () => { synced += 1; }
   };
@@ -429,6 +430,10 @@ test('managed Workbench Finish reviews one private draft and never falls back on
     engine: {
       ...engine,
       isRosterWriterAt: () => authority,
+      hubStanding: async () => [],
+      cellsAt: () => [],
+      pendingWorkbenchFinishParts: () => [{ cell, label: 'Protected A' }, { cell: other, label: 'Protected B' }]
+        .filter(({ cell: target }) => !resolved.has(target)),
       prepareWorkbenchFinish: (_host: never, roster: { positions: string[] }, target: string) => {
         prepares += 1;
         if (resolved.has(target)) return undefined;
@@ -447,11 +452,8 @@ test('managed Workbench Finish reviews one private draft and never falls back on
     } as never
   };
   const service = new StaffShareService(wiring);
-  const call = (on: StaffShareService, target: string, requestId?: string): Promise<ServiceResult<ShareOutcome>> => {
-    const finish = Reflect.get(on, 'finishKeyChange');
-    return finish === undefined ? Promise.resolve({ kind: 'refused', reason: 'No per-cell service' }) :
-      Reflect.apply(finish, on, [{ cell: target, requestId }]) as Promise<ServiceResult<ShareOutcome>>;
-  };
+  const call = (on: StaffShareService, target: string, requestId?: string) =>
+    on.finishKeyChange({ cell: target, ...(requestId === undefined ? {} : { requestId }) });
   const challenge = async (target = cell) => {
     const response = value(await call(service, target), 'request one Finish confirmation');
     const pending = response.confirmation;
@@ -467,6 +469,9 @@ test('managed Workbench Finish reviews one private draft and never falls back on
     instant += 1000;
     assert.equal(actions.bindStepUp(nonce, { acr, authTime: instant / 1000, sub: 'fictional', activeSub: 'fictional' }), true);
   };
+  assert.deepEqual(value(await service.view(), 'lead pending parts').keyChanges, [
+    { cell, label: 'Protected A' }, { cell: other, label: 'Protected B' }
+  ]);
   const first = await challenge();
   assert.equal((await call(service, cell, first.pending.requestId)).kind, 'refused', 'an early return cannot sign');
   bind(first.nonce);
@@ -479,18 +484,28 @@ test('managed Workbench Finish reviews one private draft and never falls back on
   bind(replaced.nonce);
   signer = fixedSigner('different-fixture-finish-person').signer;
   assert.equal((await call(service, cell, replaced.pending.requestId)).kind, 'refused');
+  const replacedProject = await challenge();
+  bind(replacedProject.nonce);
+  liveProject = { ...project };
+  assert.equal((await call(service, cell, replacedProject.pending.requestId)).kind, 'refused');
+  liveProject = project;
+  const supersededByOtherAction = await challenge();
+  actions.beginAction(Buffer.from('different action'), { kind: 'member.remove', fields: [] });
+  assert.equal(actions.summaryOf(supersededByOtherAction.nonce), undefined);
+  assert.equal((await call(service, cell, supersededByOtherAction.pending.requestId)).kind, 'refused');
   const canceled = await challenge();
   const current = await challenge(other);
   assert.equal((await call(service, cell, canceled.pending.requestId)).kind, 'refused');
   bind(current.nonce);
   instant += 61_000;
   assert.equal((await call(service, other, current.pending.requestId)).kind, 'refused');
-  assert.deepEqual(writes, []);
+  assert.equal(writes.length, 0);
   assert.equal(synced, 0);
 
   const checked = await challenge();
   bind(checked.nonce);
   authority = false;
+  assert.equal(value(await service.view(), 'non-lead pending parts').keyChanges, undefined);
   assert.equal((await call(service, cell, checked.pending.requestId)).kind, 'refused');
   authority = true;
   refuseCommit = true;
@@ -506,6 +521,8 @@ test('managed Workbench Finish reviews one private draft and never falls back on
   const renewed = await challenge();
   bind(renewed.nonce);
   assert.equal((await call(service, cell, renewed.pending.requestId)).kind, 'ok');
+  assert.equal(actions.reviewAttachment(renewed.pending.requestId), undefined);
+  assert.deepEqual(value(await service.view(), 'remaining pending part').keyChanges, [{ cell: other, label: 'Protected B' }]);
   assert.equal((await call(service, cell, renewed.pending.requestId)).kind, 'refused');
   assert.equal((await call(service, other, renewed.pending.requestId)).kind, 'refused');
   assert.deepEqual(writes.map((write) => write.cell), [cell, cell]);

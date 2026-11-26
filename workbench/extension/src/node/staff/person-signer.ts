@@ -81,11 +81,14 @@ export interface StepUpToken {
 export interface PendingActions extends ActionGate {
   authorizePayload(action: string, payload: Uint8Array): boolean;
   /** A new pending action: the request id goes to the browser, the nonce into the step-up address only. */
-  beginAction(payload: Uint8Array, summary: ActionSummary): { requestId: string; nonce: string };
+  beginAction(payload: Uint8Array, summary: ActionSummary, attachment?: unknown): { requestId: string; nonce: string };
   /** The summary of a pending, unexpired action, for its page; undefined otherwise. */
   summaryOf(nonce: string): ActionSummary | undefined;
   /** Called only by the return route. True when the token was bound to this nonce's action. */
   bindStepUp(nonce: string, token: StepUpToken): boolean;
+  /** Access a server-only attachment while a review is pending or bound. */
+  reviewAttachment(requestId: string): unknown;
+  cancelReview(requestId: string): void;
   /** The action id, once, for a bound action and the same payload; undefined otherwise. */
   resumeAction(requestId: string, payload: Uint8Array): string | undefined;
 }
@@ -111,6 +114,7 @@ interface ActionRecord {
   readonly payload: string;
   readonly summary: ActionSummary;
   readonly begunAt: number;
+  attachment?: unknown;
   state: ActionState;
   authTime?: number;
   boundAt?: number;
@@ -145,10 +149,10 @@ export function createPendingActions(options: PendingActionOptions): PendingActi
   };
 
   return {
-    beginAction(payload, summary) {
+    beginAction(payload, summary, attachment) {
       prune();
       for (const [id, record] of actions) if (record.state !== 'resumed') actions.delete(id);
-      const record: ActionRecord = { id: randomId(), requestId: randomId(), nonce: randomId(), payload: payloadHash(payload), summary, begunAt: clock.now(), state: 'pending' };
+      const record: ActionRecord = { id: randomId(), requestId: randomId(), nonce: randomId(), payload: payloadHash(payload), summary, begunAt: clock.now(), state: 'pending', attachment };
       actions.set(record.id, record);
       return { requestId: record.requestId, nonce: record.nonce };
     },
@@ -167,10 +171,18 @@ export function createPendingActions(options: PendingActionOptions): PendingActi
       record.boundAt = clock.now();
       return true;
     },
+    reviewAttachment(requestId) {
+      return find((record) => record.requestId === requestId && record.state !== 'resumed')?.attachment;
+    },
+    cancelReview(requestId) {
+      const record = find((item) => item.requestId === requestId && item.state !== 'resumed');
+      if (record !== undefined) actions.delete(record.id);
+    },
     resumeAction(requestId, payload) {
       const record = find((item) => item.requestId === requestId && item.state === 'bound');
       if (record === undefined || record.payload !== payloadHash(payload)) return undefined;
       record.state = 'resumed';
+      record.attachment = undefined;
       return record.id;
     },
     authorize: (action) => resumed(action) !== undefined,
@@ -215,6 +227,7 @@ export const ACTION_LINES: Readonly<Record<string, string>> = Object.freeze({
   'posting.return': 'You are about to return a person to their own position.',
   'posting.end': 'You are about to end a person\'s time in a position.',
   'posting.cancel': 'You are about to cancel a placement.',
+  'cell.rekey.finish': 'You are about to finish changing the key for this part of your shared work.',
   'cell.rekey.staged': 'You are about to prepare a key change.',
   'project.mode': 'You are about to change how this shared work is run.',
 });
