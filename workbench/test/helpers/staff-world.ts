@@ -33,6 +33,11 @@ export const SECRET_MARKER = 'NORTHWIND-ONLY-AVERY-7Q2X9';
 const SECRET_BODY = `# Source assessment\n\nThe source on the far bank is ${SECRET_MARKER}.\n\nDECISION FOR: commander. Option A or option B, with their risk.\n`;
 
 const HOOK = path.join(workbenchRoot, 'test', 'helpers', 'outbound-hook.mjs');
+const DECISION_HOOK = path.join(workbenchRoot, 'test', 'helpers', 'staff-decision-fixture.mjs');
+const DECISION_CHANNEL = '/run/staff-fixture';
+const DECISION_SOCKET = 'control.sock';
+export const STAFF_DECISION_COMMANDS = ['state', 'roster', 'clear-1', 'prepare-2', 'propose-3', 'prepare-4', 'isolate', 'reconnect'] as const;
+export type StaffDecisionCommand = typeof STAFF_DECISION_COMMANDS[number];
 const CA_IN_CONTAINER = '/run/sterling/openbao-ca.pem';
 const HUB_ALIAS = 'staff-hub';
 const HUB_SECRET_FILES = ['hub_tls_cert', 'hub_tls_key', 'hub_signing_key', 'hub_encryption_key'] as const;
@@ -72,6 +77,8 @@ export interface StaffWorld {
   /** Stops your organization's server (both sessions go offline) and starts it again with its state. */
   stopHub(): Promise<void>;
   startHub(): Promise<void>;
+  /** A fixed action over the host's socket to one test session. */
+  decision(person: StaffPersonKey, command: StaffDecisionCommand): Promise<unknown>;
   /** The logs and the outbound hook lines of a workbench, for the leak and egress checks. */
   logsOf(person: WorldPerson): Promise<{ log: string; hook: string[] }>;
   stop(): Promise<void>;
@@ -134,6 +141,7 @@ export async function startStaffWorld(options: { image: string; hubImage: string
   const internal = `sterling-workbench-test-${suffix}-staff-internal`;
   const forwarders: net.Server[] = [];
   const connections = new Set<net.Socket>();
+  const decisionSockets = new Map<StaffPersonKey, string>();
   const stop = async (): Promise<void> => {
     for (const socket of connections) socket.destroy();
     await Promise.all(forwarders.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
@@ -197,7 +205,8 @@ export async function startStaffWorld(options: { image: string; hubImage: string
     const hubFile = (await mustRun('docker', ['exec', containerName('staff-hub'), '/nodejs/bin/node', '/app/bin.mjs', '--hub-file', '7'])).stdout.trim();
     assert.ok(hubFile.length > 0, 'the hub printed a hub file');
 
-    const hooked = (): string[] => ['-v', `${HOOK}:/test-hook/outbound-hook.mjs:ro`, '-e', 'NODE_OPTIONS=--import=/test-hook/outbound-hook.mjs',
+    const hooked = (): string[] => ['-v', `${HOOK}:/test-hook/outbound-hook.mjs:ro`, '-v', `${DECISION_HOOK}:/test-hook/staff-decision-fixture.mjs:ro`,
+      '-e', 'NODE_OPTIONS=--import=/test-hook/outbound-hook.mjs --import=/test-hook/staff-decision-fixture.mjs',
       '-e', 'NEAR_AI_TEST_OUTBOUND_LOG=/tmp/outbound.log', '-e', `NEAR_AI_TEST_OUTBOUND_ALLOW=127.0.0.1,::1,localhost,${openBaoHost},${HUB_ALIAS}`];
     const uid = process.getuid?.() ?? 10001;
 
@@ -205,12 +214,16 @@ export async function startStaffWorld(options: { image: string; hubImage: string
       const entityId = await entityOf(key);
       const workspace = mkdtempSync(path.join(worldDir(), `sterling-staff-${key}-`));
       made.dirs.push(workspace);
+      const control = mkdtempSync(path.join(worldDir(), 'd-'));
+      made.dirs.push(control);
+      decisionSockets.set(key, path.join(control, DECISION_SOCKET));
       chmodSync(workspace, 0o775);
       if (key === 'a') await seedStaffWork(workspace);
       else mkdirSync(workspace, { recursive: true });
       const name = `staff-${key}`;
       // The image is arbitrary-UID friendly (group 0 owns the home): the workbench runs as this computer's user so the mounted folder is its own.
       const started = await runContainer(name, ['-d', '--memory=3g', '--user', `${uid}:0`, '--network', internal, ...hooked(),
+        '-v', `${control}:${DECISION_CHANNEL}`, '-e', `STAFF_DECISION_SIDE=${key}`,
         '-v', `${workspace}:/home/sterling/workspace`, '-v', `${bao.caFile}:${CA_IN_CONTAINER}:ro`,
         '-e', `STERLING_OPENBAO_ADDR=${bao.tlsNetworkAddr}`, '-e', `STERLING_OPENBAO_CA_FILE=${CA_IN_CONTAINER}`,
         '-e', `THEIACLOUD_SESSION_USER=${STAFF_PEOPLE[key].email}`, '-e', `STERLING_STEPUP_ACR=${TEST_STEPUP_ACR}`, '-e', 'STERLING_LISTEN_HOST=0.0.0.0',
@@ -258,6 +271,7 @@ export async function startStaffWorld(options: { image: string; hubImage: string
       bao, a, b, hubFile, secrets,
       stopHub: async () => { await mustRun('docker', ['stop', '-t', '5', containerName('staff-hub')]); },
       startHub: async () => { await mustRun('docker', ['start', containerName('staff-hub')]); },
+      decision: (person, command) => requestDecision(decisionSockets.get(person) as string, command),
       logsOf: async (target) => {
         const output = await run('docker', ['logs', containerName(target.container)]);
         const hook = await run('docker', ['exec', containerName(target.container), 'cat', '/tmp/outbound.log']);
@@ -269,4 +283,21 @@ export async function startStaffWorld(options: { image: string; hubImage: string
     await stop();
     throw error;
   }
+}
+
+function requestDecision(socketPath: string, command: StaffDecisionCommand): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(socketPath, () => socket.write(`${command}\n`));
+    socket.setTimeout(25_000, () => socket.destroy(new Error('The decision fixture socket did not answer.')));
+    socket.once('error', reject);
+    socket.setEncoding('utf8');
+    let input = '';
+    socket.on('data', (text: string) => {
+      input += text;
+      if (input.length > 32_768) socket.destroy(new Error('The decision fixture response exceeded its bound.'));
+    });
+    socket.once('end', () => {
+      try { resolve(JSON.parse(input)); } catch (error) { reject(error); }
+    });
+  });
 }

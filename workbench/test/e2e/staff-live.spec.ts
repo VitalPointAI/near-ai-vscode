@@ -9,7 +9,7 @@
 //   status       both status bars read Synced; with the server stopped both read Offline and the Staff Room shows the offline banner; started
 //                again, both read Synced
 //   invitation   an invitation with a sign-in older than the step-up window asks for confirmation and completes after a fresh sign-in (D-60).
-//                Decision step-up, contested decisions and stale decision dialogs are tracked separately in G542.
+//   blocking     decision step-up, competing offline decisions and settlement, and a dialog that became stale (D-24, D-60).
 //   blocking     nothing secret on the wire: no recorded WebSocket frame or HTTP body in either browser holds a key, a token, a signature or the
 //                text of a part the viewer is not cleared for (a marker planted in a product only A may read; D-35)
 //
@@ -57,6 +57,75 @@ async function signIn(who: 'a' | 'b', age = 0): Promise<Record<string, string>> 
 async function desk(action: 'hub-stop' | 'hub-start'): Promise<void> {
   const response = await fetch(`${DESK}/${action}`, { method: 'POST' });
   expect(response.status).toBe(204);
+}
+
+interface DecisionState {
+  hash: string;
+  number: number;
+  state: string;
+  status: string;
+  effective: string[];
+  contested: string[];
+  decisions: Array<{ hash: string; person: 'a' | 'b' | null; outcome: string; seen: string[] }>;
+}
+interface FixtureState { ready: boolean; versions: DecisionState[] }
+
+async function fixture(side: Side, command: string): Promise<FixtureState> {
+  const response = await fetch(`${DESK}/decision/${side.who}/${command}`, { method: 'POST', signal: AbortSignal.timeout(30_000) });
+  const value = await response.json().catch(() => ({})) as FixtureState & { error?: string };
+  expect(response.status, `the ${side.who} fixture answered ${command}: ${value.error ?? ''}`).toBe(200);
+  return value;
+}
+
+async function version(side: Side, number: number, state: string, count: number, status?: string): Promise<DecisionState> {
+  const read = async () => (await fixture(side, 'state')).versions.find((entry) => entry.number === number);
+  await expect.poll(async () => {
+    const entry = await read();
+    return entry === undefined ? undefined : [entry.state, entry.decisions.length, ...(status === undefined ? [] : [entry.status])];
+  }, { timeout: 60_000, message: `${side.who} folds v${number} with ${count} decisions` }).toEqual([
+    state, count, ...(status === undefined ? [] : [status]),
+  ]);
+  return (await read()) as DecisionState;
+}
+
+async function staffRoom(side: Side): Promise<Locator> {
+  const room = side.page.locator('.sterling-staff-room');
+  if (!await room.isVisible()) await runCommand(side.page, 'Staff Room');
+  await expect(room).toBeVisible();
+  return room;
+}
+
+async function submitVersion(number: number): Promise<void> {
+  const room = await staffRoom(a);
+  await room.getByLabel(new RegExp(`^Decision role for v${number} of `)).selectOption('commander');
+  await room.getByRole('button', { name: new RegExp(`^Submit v${number} of `) }).click();
+  for (const side of [a, b]) await version(side, number, 'awaiting-decision', 0);
+}
+
+async function openDecision(side: Side, number: number): Promise<Locator> {
+  const room = await staffRoom(side);
+  await room.getByRole('button', { name: new RegExp(`^Decide v${number} of `) }).click();
+  const dialog = room.getByRole('dialog', { name: new RegExp(`^v${number} of `) });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+async function decide(dialog: Locator, outcome: 'Approve' | 'Reject', reasons: string): Promise<void> {
+  await dialog.getByLabel('Your reasons').fill(reasons);
+  await dialog.getByRole('button', { name: outcome, exact: true }).click();
+}
+
+async function editForVersion(number: number): Promise<void> {
+  const marker = `Planning revision ${number} adds more transport.`;
+  await typeAtEnd(a, await openProduct(a), `\n${marker}`);
+  const peer = await openProduct(b);
+  await expect.poll(() => editorText(peer), { timeout: 30_000 }).toContain(marker);
+}
+
+async function forwardSignIn(side: Side, age = 0): Promise<void> {
+  await side.context.setExtraHTTPHeaders(await signIn(side.who, age));
+  // A same-origin HTTP request updates the forwarded sign-in kept by this backend without losing its open workspace.
+  await side.page.evaluate(async () => { await fetch('/', { cache: 'no-store' }); });
 }
 
 /** Records what crosses the wire in this browser: WebSocket frames both ways, request bodies and text response bodies. */
@@ -292,6 +361,118 @@ test('invitation step-up: an old sign-in asks for the passkey or security key, a
   await invite.getByLabel('Position').fill('j4-planner');
   const made = await download(a, invite.getByRole('button', { name: 'Invite a person' }));
   expect(made.name).toMatch(/\.near-staff-invite$/);
+});
+
+test('blocking: contested decisions', async () => {
+  test.setTimeout(360_000);
+  await Promise.all([forwardSignIn(a), forwardSignIn(b)]);
+  await fixture(a, 'roster');
+  for (const side of [a, b]) await expect.poll(async () => (await fixture(side, 'state')).ready, { timeout: 60_000 }).toBe(true);
+  await fixture(a, 'clear-1');
+  await submitVersion(1);
+  try {
+    await fixture(a, 'isolate');
+    await expect(statusEntry(a)).toContainText('Offline', { timeout: 90_000 });
+    await expect(statusEntry(b)).toContainText('Synced');
+    await decide(await openDecision(a, 1), 'Approve', 'The bridges are secured.');
+    await decide(await openDecision(b, 1), 'Reject', 'The transport reserve is missing.');
+    const left = await version(a, 1, 'approved', 1);
+    const right = await version(b, 1, 'rejected', 1);
+    expect(left.hash).toBe(right.hash);
+    expect(left.decisions[0]).toMatchObject({ person: 'a', outcome: 'approve', seen: [] });
+    expect(right.decisions[0]).toMatchObject({ person: 'b', outcome: 'reject', seen: [] });
+  } finally {
+    await fixture(a, 'reconnect');
+  }
+  for (const side of [a, b]) await expect(statusEntry(side)).toContainText('Synced', { timeout: 120_000 });
+  const card = (side: Side) => side.page.locator('.sterling-staff-room-card-contested');
+  for (const side of [a, b]) {
+    await staffRoom(side);
+    await expect(card(side)).toContainText('Avery');
+    await expect(card(side)).toContainText('Blake Rivers');
+    await expect(card(side)).toContainText('The bridges are secured.');
+    await expect(card(side)).toContainText('The transport reserve is missing.');
+  }
+  const contested = await version(a, 1, 'awaiting-decision', 2, 'contested');
+  expect(contested.contested).toHaveLength(2);
+  expect(contested.contested.toSorted()).toEqual(contested.decisions.map((item) => item.hash).toSorted());
+  await forwardSignIn(a);
+  await card(a).getByRole('button', { name: /^Approve v1/ }).click();
+  await decide((await staffRoom(a)).getByRole('dialog'), 'Approve', 'The transport reserve is now assigned.');
+  const settled = await version(a, 1, 'approved', 3, 'effective');
+  const final = settled.decisions.find((item) => settled.effective.includes(item.hash));
+  expect(final?.person).toBe('a');
+  expect(final?.seen.toSorted()).toEqual(contested.contested.toSorted());
+  expect(await version(b, 1, 'approved', 3, 'effective')).toEqual(settled);
+  for (const side of [a, b]) await expect(card(side)).toHaveCount(0);
+  console.info(`decision evidence: contested v1 ${settled.hash} settled two person decisions ${final?.seen.join(', ')}`);
+});
+
+test('blocking: changed while deciding', async () => {
+  test.setTimeout(300_000);
+  await forwardSignIn(a);
+  await editForVersion(2);
+  await fixture(a, 'prepare-2');
+  await submitVersion(2);
+  await openDecision(b, 2);
+  await editForVersion(3);
+  await fixture(a, 'propose-3');
+  const newest = await version(a, 3, 'draft', 0);
+  await decide(await openDecision(a, 2), 'Approve', 'The alternate route is ready.');
+  const approved = await version(b, 2, 'approved', 1, 'effective');
+  expect(approved.decisions[0]).toMatchObject({ person: 'a', outcome: 'approve' });
+  const stale = (await staffRoom(b)).getByRole('dialog', { name: /^v2 of / });
+  await decide(stale, 'Reject', 'The route could be unavailable.');
+  await expect(b.page.getByText('Someone else decided this version while you were deciding. Look again.', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await expect(stale).toHaveCount(0);
+  for (const side of [a, b]) {
+    expect(await version(side, 2, 'approved', 1, 'effective')).toEqual(approved);
+    expect(await version(side, 3, 'draft', 0)).toEqual(newest);
+  }
+  console.info(`decision evidence: stale v2 ${approved.hash} added zero decisions and v3 ${newest.hash} remained draft`);
+});
+
+test('blocking: decision step-up', async () => {
+  test.setTimeout(300_000);
+  await forwardSignIn(a);
+  await editForVersion(4);
+  await fixture(a, 'prepare-4');
+  await submitVersion(4);
+  await forwardSignIn(a, 3600);
+  await decide(await openDecision(a, 4), 'Approve', 'The full plan is ready.');
+  const confirm = a.page.getByRole('button', { name: 'Confirm with your passkey or security key', exact: true }).filter({ visible: true }).first();
+  await expect(confirm).toBeVisible();
+  const awaiting = await version(a, 4, 'awaiting-decision', 0);
+  expect(await version(b, 4, 'awaiting-decision', 0)).toEqual(awaiting);
+  const current = new URL(a.page.url());
+  // Finish the identity provider's landing request before changing Chromium's forwarded headers for the return.
+  await a.context.route((url) => url.pathname === '/oauth2/start',
+    (route) => route.fulfill({ status: 200, contentType: 'text/plain', body: 'Fixture passkey confirmation' }), { times: 1 });
+  await Promise.all([
+    a.page.waitForURL((url) => url.pathname === '/oauth2/start', { waitUntil: 'load', timeout: 30_000 }),
+    confirm.click({ timeout: 15_000 }),
+  ]);
+  const confirmation = new URL(a.page.url());
+  const originalPath = current.pathname + current.search;
+  expect(confirmation.origin).toBe(current.origin);
+  expect(confirmation.searchParams.get('max_age')).toBe('0');
+  expect(confirmation.searchParams.get('acr_values')).toBe(process.env.STAFF_STEPUP_ACR);
+  expect(confirmation.searchParams.get('rd')).toBe(originalPath);
+
+  await a.context.setExtraHTTPHeaders(await signIn('a'));
+  await a.page.goto(new URL(originalPath, current.origin).href);
+  const returned = new URL(a.page.url());
+  expect(returned.origin).toBe(current.origin);
+  expect(returned.pathname + returned.search).toBe(originalPath);
+  await expect(statusEntry(a)).toContainText('Synced', { timeout: 120_000 });
+  const retained = (await staffRoom(a)).getByRole('dialog', { name: /^v4 of / });
+  await expect(retained).toBeVisible();
+  await decide(retained, 'Approve', 'The full plan is ready.');
+  const saved = await version(a, 4, 'approved', 1, 'effective');
+  expect(saved.hash).toBe(awaiting.hash);
+  expect(saved.decisions[0]).toMatchObject({ person: 'a', outcome: 'approve', seen: [] });
+  expect(await version(b, 4, 'approved', 1, 'effective')).toEqual(saved);
+  console.info(`decision evidence: step-up v4 ${saved.hash} saved one person decision after zero on refusal`);
 });
 
 test('blocking: nothing secret on the wire: no key, token or signature in either browser, and B never receives the text of A\'s Confidential product', async () => {

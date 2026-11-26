@@ -7,9 +7,7 @@
 // OpenBao trusts.
 //
 //   diagnostic   co-edit, cursor names, own undo, the status entry and the offline banner (D-65: recorded, fixed in the owning plan's files)
-//   blocking     the person-key step-up and nothing secret on the wire (authorization contracts). The contested card and changed while deciding
-//                need a decision the native Staff Room cannot yet make (no decider role, submit or approve on a version in the native workbench);
-//                they are open conditions of 33-30, not run here.
+//   blocking     invitation and decision step-up, contested decisions, changed while deciding, and nothing secret on the wire.
 //
 // After the run: no refused outbound connection in either workbench, and no token, key or JWT in either log.
 import assert from 'node:assert/strict';
@@ -20,14 +18,15 @@ import { after, before, test } from 'node:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { containerName, mustRun, removeOwn, run, runPlaywright, suffix, testImage } from '../helpers/docker';
-import { SECRET_MARKER, SECRET_PRODUCT, SEED_PRODUCT, startStaffWorld, type StaffPersonKey, type StaffWorld } from '../helpers/staff-world';
+import { SECRET_MARKER, SECRET_PRODUCT, SEED_PRODUCT, STAFF_DECISION_COMMANDS, startStaffWorld, type StaffPersonKey, type StaffDecisionCommand, type StaffWorld } from '../helpers/staff-world';
+import { TEST_STEPUP_ACR } from '../helpers/openbao-dev';
 import { staffProductPath } from '../../../src/domain/staff/writeLimits.ts';
 
 let world: StaffWorld;
 let desk: http.Server;
 let deskUrl = '';
 let ownHubImage: string | undefined;
-let report: Array<{ title: string; status: string; error?: string }> = [];
+let report: Array<{ title: string; status: string }> = [];
 const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-staff-live-'));
 
 /** The hub image: STERLING_HUB_TEST_IMAGE when set, otherwise built once from the repository root and removed after. */
@@ -50,6 +49,15 @@ before(async () => {
     // POST /hub-stop and /hub-start: your organization's server goes away and comes back with its state.
     if (request.method === 'POST' && (url.pathname === '/hub-stop' || url.pathname === '/hub-start')) {
       void (url.pathname === '/hub-stop' ? world.stopHub() : world.startHub()).then(() => response.writeHead(204).end(), () => response.writeHead(500).end());
+      return;
+    }
+    const fixture = /^\/decision\/(a|b)\/([a-z0-9-]+)$/.exec(url.pathname);
+    if (request.method === 'POST' && fixture !== null && STAFF_DECISION_COMMANDS.includes(fixture[2] as StaffDecisionCommand)) {
+      const [, person, command] = fixture;
+      if (person === 'b' && command !== 'state') { response.writeHead(404).end(); return; }
+      void world.decision(person as StaffPersonKey, command as StaffDecisionCommand).then((value) => {
+        response.writeHead(value !== null && typeof value === 'object' && 'error' in value ? 409 : 200, { 'Content-Type': 'application/json' }).end(JSON.stringify(value));
+      }, () => response.writeHead(500).end());
       return;
     }
     const key = url.searchParams.get('person');
@@ -84,27 +92,54 @@ test('the staff fixture services share one internal Docker bridge', async () => 
       '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{println}}{{end}}', name]);
     assert.deepEqual(attached.trim().split('\n'), [network], `${name} uses only the fixture bridge`);
   }
+  console.info('fixture topology: two workbenches, hub and OpenBao on one internal Docker bridge');
 });
 
-test('the staff-live browser run: co-edit, cursors, own undo, status, invitation step-up and nothing secret on the wire', { timeout: 1_800_000 }, async () => {
+test('the staff-live browser run completes in two built workbenches', { timeout: 1_800_000 }, async () => {
   const reportFile = path.join(scratch, 'report.json');
   const result = await runPlaywright('staff-live.spec.ts', {
     STAFF_A_URL: world.a.url, STAFF_B_URL: world.b.url, STAFF_TOKEN_DESK: deskUrl, STAFF_HUB_FILE: world.hubFile,
     STAFF_PRODUCT_PATH: staffProductPath(SEED_PRODUCT.section, SEED_PRODUCT.product),
     STAFF_SECRET_PATH: staffProductPath(SECRET_PRODUCT.section, SECRET_PRODUCT.product), STAFF_MARKER: SECRET_MARKER,
+    STAFF_STEPUP_ACR: TEST_STEPUP_ACR,
     STAFF_SECRETS: JSON.stringify(world.secrets), STAFF_DOWNLOADS: scratch,
     PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile,
   }, ['--reporter=list,json']);
   report = flatten(JSON.parse(readFileSync(reportFile, 'utf8')) as PlaywrightJson);
-  assert.ok(report.length >= 6, `the staff-live spec ran ${report.length} tests:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-2000)}`);
+  for (const line of result.stdout.split('\n')) if (line.startsWith('decision evidence: ')) console.info(line);
   assert.equal(result.code, 0, `Playwright staff-live.spec.ts failed:\n${result.stdout.slice(-8000)}\n${result.stderr.slice(-3000)}`);
 });
 
-test('included authorization checks ran and passed: invitation step-up and nothing secret on the wire', () => {
-  for (const name of ['invitation step-up', 'blocking: nothing secret']) {
-    const found = report.find((item) => item.title.startsWith(name));
-    assert.ok(found, `the blocking test "${name}" is in the report`);
-    assert.equal(found.status, 'passed', `${name}: ${found.error ?? ''}`);
+test('the built frontend holds neither Yjs nor replica modules', async () => {
+  const check = `const { readdirSync, readFileSync } = require('node:fs');
+    const root = '/app/lib/frontend';
+    const files = readdirSync(root, { recursive: true }).filter((file) => file.endsWith('.js'));
+    if (files.length === 0) process.exit(1);
+    for (const file of files) {
+      const text = readFileSync(root + '/' + file, 'utf8');
+      if (/\\byjs\\b|y-protocols|lib0\\//.test(text) || /staff[\\\\/]replica[\\\\/]|replicaProject|liveReplicator|DeviceKeyRing|sessionCertifyData/.test(text)) {
+        console.error('Replica code in a built frontend file:', file);
+        process.exit(1);
+      }
+    }`;
+  for (const person of [world.a, world.b]) await mustRun('docker', ['exec', containerName(person.container), 'node', '-e', check]);
+});
+
+test('every required native staff browser case appears exactly once and passes', () => {
+  const required = [
+    'blocking: decision step-up',
+    'blocking: contested decisions',
+    'blocking: changed while deciding',
+    "tracer: A shares and invites, B joins through the page, A admits, and a word A types appears in B's editor within 3 seconds",
+    "cursors: B's cursor shows in A's editor with B's name",
+    "own undo: A types, B types, A presses Ctrl+Z; A's text goes and B's stays, in both browsers",
+    'status: both read Synced; the server stopped turns both Offline with the banner; started again, both read Synced',
+    'invitation step-up: an old sign-in asks for the passkey or security key, and a fresh one creates the invitation',
+    "blocking: nothing secret on the wire: no key, token or signature in either browser, and B never receives the text of A's Confidential product",
+  ];
+  for (const title of required) {
+    assert.deepEqual(report.filter((item) => item.title === title).map((item) => item.status), ['passed'], title);
+    console.info(`browser passed: ${title}`);
   }
 });
 
@@ -119,14 +154,16 @@ test('nothing called out and nothing leaked: no refused connection, and no token
 });
 
 interface PlaywrightJson { suites?: PlaywrightSuite[] }
-interface PlaywrightSuite { suites?: PlaywrightSuite[]; specs?: Array<{ title: string; tests: Array<{ results: Array<{ status: string; error?: { message?: string } }> }> }> }
+interface PlaywrightSuite { suites?: PlaywrightSuite[]; specs?: Array<{ title: string; tests: Array<{ results: Array<{ status: string }> }> }> }
 
-function flatten(json: PlaywrightJson): Array<{ title: string; status: string; error?: string }> {
-  const out: Array<{ title: string; status: string; error?: string }> = [];
+function flatten(json: PlaywrightJson): Array<{ title: string; status: string }> {
+  const out: Array<{ title: string; status: string }> = [];
   const walk = (suite: PlaywrightSuite): void => {
     for (const spec of suite.specs ?? []) {
-      const last = spec.tests[0]?.results.at(-1);
-      out.push({ title: spec.title, status: last?.status ?? 'missing', ...(last?.error?.message === undefined ? {} : { error: last.error.message }) });
+      for (const test of spec.tests) {
+        if (test.results.length === 0) out.push({ title: spec.title, status: 'missing' });
+        for (const result of test.results) out.push({ title: spec.title, status: result.status });
+      }
     }
     for (const child of suite.suites ?? []) walk(child);
   };
