@@ -77,25 +77,35 @@ export function sealManagedGrantDelivery(roster: RosterState, input: ManagedGran
   });
 }
 
-export interface SupplementalHandoff { cell: string; recipient: string; info: WrapCell; routing?: RoutingTable }
+interface ManagedGrantHandoff { cell: string; recipient: string; info: WrapCell; routing?: RoutingTable }
+export type ManagedHandoff = ManagedGrantHandoff | { recipient: string; continuity: readonly string[] };
 
-/** Reoffer a placed current-epoch grant using the current opening and the recipient's exact direct permit. */
-export function sealPlacedSupplemental(roster: RosterState, evidence: readonly unknown[], input: SupplementalHandoff, now: Date) {
+/** Offer only the exact current proof and a placed grant from selected history; continuity can travel independently. */
+export function sealPlacedManagedHandoff(roster: RosterState, evidence: readonly unknown[], input: ManagedHandoff, now: Date) {
   const revision = roster.accessRevision;
   const head = roster.positions.length - 1;
-  if (revision === undefined || deviceAt(roster.members, input.recipient, head)?.kind !== 'person') return undefined;
+  if (revision === undefined || roster.pending.length > 0 || deviceAt(roster.members, input.recipient, head)?.kind !== 'person') return undefined;
   const stages = evidence.flatMap((value) => readAuthoredAccessStage(value) ?? []).filter((stage) => roster.accessHistory.has(stage.entry));
   const current = stages.filter((stage) => stage.entry === revision.entry);
+  const proofs = new Map<string, AccessWriteProof>();
+  for (const value of current.flatMap((stage) => stage.accessProofs)) {
+    const proof = readAccessWriteProof(value);
+    const permit = proof?.signed.permit;
+    if (proof !== undefined && permit !== undefined && permit.writer === input.recipient && permit.device === input.recipient &&
+        managedWriteAllowed(roster, permit.cell, permit.epoch, input.recipient, head, now, proof) === true) proofs.set(permit.cell, proof);
+  }
+  if ('continuity' in input) {
+    const requested = new Set(input.continuity);
+    if (requested.size === 0 || requested.size !== input.continuity.length || requested.size > revision.cells.length) return undefined;
+    const accessProofs = [...proofs].filter(([cell]) => requested.has(cell)).map(([, proof]) => proof);
+    return accessProofs.length === requested.size ? sealManagedContinuityDelivery(roster, input.recipient, { entry: revision.entry, accessProofs }, now) : undefined;
+  }
   const opening = current.flatMap((stage) => stage.openings).find((value) =>
     openGrantEvidence(roster.anchor.project, roster.accessHistory, value)?.evidence.cell === input.cell);
-  const accessProof = current.flatMap((stage) => stage.accessProofs).find((value) => {
-    const permit = readAccessWriteProof(value)?.signed.permit;
-    return permit !== undefined && permit.cell === input.cell && permit.writer === input.recipient &&
-      managedWriteAllowed(roster, input.cell, permit.epoch, input.recipient, head, now, value) === true;
-  });
+  const accessProof = proofs.get(input.cell);
   if (opening === undefined || accessProof === undefined) return undefined;
   for (const stage of stages) {
-    const issued = stage.supplemental;
+    const issued = stage.founding ?? stage.supplemental;
     if (issued?.recipients.includes(input.recipient) !== true) continue;
     const [grant, ...pages] = issued.grants;
     const sealed = sealManagedGrantDelivery(roster, { ...input, now, accessProof, opening, grant, pages });

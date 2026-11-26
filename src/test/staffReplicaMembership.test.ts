@@ -1042,7 +1042,7 @@ async function supplementalFixture() {
 test('managed Give keys authorizes the current epoch before a private file handoff', async () => {
   const { lead, peer, cell, seed } = await supplementalFixture();
   const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
-  assert.equal(await lead.p.sealManagedSupplemental(request), undefined);
+  assert.equal(await lead.p.sealManagedHandoff(request), undefined);
   const ensured = await ensureLabelCell(lead.host, LABEL_X);
   assert.equal(ensured.ok, true, ensured.ok ? undefined : ensured.message);
   assert.equal(ensured.cell, cell);
@@ -1062,8 +1062,8 @@ test('managed Give keys authorizes the current epoch before a private file hando
   assert.ok(repeated.ok);
   assert.deepEqual(repeated.granted, []);
   assert.equal((await head(reopened)).hash, after.hash);
-  assert.equal(await reopened.sealManagedSupplemental({ ...request, recipient: lead.p.deviceWriter }), undefined);
-  const delivery = await reopened.sealManagedSupplemental(request);
+  assert.equal(await reopened.sealManagedHandoff({ ...request, recipient: lead.p.deviceWriter }), undefined);
+  const delivery = await reopened.sealManagedHandoff(request);
   assert.ok(delivery);
   const wire = JSON.stringify(delivery);
   for (const value of [cell, peer.writer, issued.hash]) assert.equal(wire.includes(value), false);
@@ -1085,42 +1085,57 @@ test('managed Give keys authorizes the current epoch before a private file hando
 
 });
 
-test('normal managed peer sync adopts the recipient package only after pulling its signed commitment', async () => {
-  const { lead, peer, cell } = await supplementalFixture();
-  const placed = await ensureLabelCell(lead.host, LABEL_X);
-  assert.ok(placed.ok && placed.granted.includes(peer.writer));
-  const selected = await head(lead.p);
+async function stageManagedPredecessors(lead: Lead, peer: Person, revision: string) {
   const welcome = await lead.p.welcomeFor(peer.writer, []);
-  const root = welcome.roster.find((entry) => entryHash(entry.header) === selected.hash);
+  const root = welcome.roster.find((entry) => entryHash(entry.header) === revision);
   assert.ok(root);
   peer.at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
   assert.ok('ok' in await peer.p.ingestForeign([welcome.genesis, ...welcome.roster.filter((entry) => entry !== root)], welcome.blobs));
 
-  const offer = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  return root;
+}
+
+async function managedPeerRoute(lead: Lead, peer: Person, revision: string) {
+  const root = await stageManagedPredecessors(lead, peer, revision);
   const stored = new Map<string, unknown>();
-  const sharedHandles: string[] = [];
-  let accepted = 0;
   let revealRoot = false;
+  const delayed = new Set<string>();
+  const attempts = new Map<string, number>();
   const project = lead.p.projectId;
-  const tip = { writer: root.header.writer, seq: root.header.seq, hash: selected.hash };
+  const tip = { writer: root.header.writer, seq: root.header.seq, hash: revision };
   const transport: SyncTransport = {
     project, hub: lead.p.deviceWriter,
-    hubHeads: async () => ({ project, rosterHead: revealRoot ? selected.hash : (await head(peer.p)).hash,
+    hubHeads: async () => ({ project, rosterHead: revealRoot ? revision : (await head(peer.p)).hash,
       streams: revealRoot ? [{ stream: project, heads: [tip] }] : [], grants: [] }),
     entries: async (stream, writer, from) => {
       assert.deepEqual([stream, writer, from], [project, tip.writer, tip.seq]);
       return { project, stream, writer, entries: [root], more: false, head: tip };
     },
     append: async (batch) => ({ project, accepted: batch.entries.map((entry) => entryHash(entry.header)),
-      refused: [], grantsRefused: [], rosterHead: selected.hash, blobsPut: false }),
+      refused: [], grantsRefused: [], rosterHead: revision, blobsPut: false }),
     getBlob: async (hash) => ({ kind: 'missing', hash }),
     grant: async () => { throw new Error('Managed packets must never use the public grants route.'); },
     askCheckpoint: async () => ({ project, kept: 0 }),
     managedRoute: {
       put: async (handle, packet) => { stored.set(handle, packet); return true; },
-      get: async (handle) => stored.get(handle)
+      get: async (handle) => {
+        attempts.set(handle, (attempts.get(handle) ?? 0) + 1);
+        return delayed.has(handle) ? undefined : stored.get(handle);
+      }
     }
   };
+  return { transport, delayed, attempts, reveal: () => { revealRoot = true; } };
+}
+
+test('normal managed peer sync adopts the recipient package only after pulling its signed commitment', async () => {
+  const { lead, peer, cell } = await supplementalFixture();
+  const placed = await ensureLabelCell(lead.host, LABEL_X);
+  assert.ok(placed.ok && placed.granted.includes(peer.writer));
+  const selected = await head(lead.p);
+  const { transport, reveal } = await managedPeerRoute(lead, peer, selected.hash);
+  const offer = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const sharedHandles: string[] = [];
+  let accepted = 0;
   const away = hubMemoryOf(new MemorySecrets());
   const sent = await syncOnce(transport, syncLocalOf(lead.p), away, { now: () => NOW, managed: {
     offers: async () => [offer], pending: async () => [],
@@ -1139,7 +1154,7 @@ test('normal managed peer sync adopts the recipient package only after pulling i
   assert.equal(before.managed, 'waiting');
   assert.equal(accepted, 0);
   assert.equal(peer.p.keys.holds(cell, 1), false);
-  revealRoot = true;
+  reveal();
   const after = await syncOnce(transport, syncLocalOf(peer.p), memory, receiver);
   assert.equal(after.managed, 'complete');
   assert.equal(after.pulled, 1);
@@ -1147,7 +1162,7 @@ test('normal managed peer sync adopts the recipient package only after pulling i
   assert.deepEqual(peer.p.keys.epochKey(cell, 1), lead.p.keys.epochKey(cell, 1));
 });
 
-test('normal managed peer delivery offers the exact founding epoch committed by Finish', async () => {
+async function foundingHandoffFixture() {
   const lead = await founded('managed-founding-handoff');
   const peer = await bringIn(lead, 'late-founding-recipient', 'Mo Analyst', CLEARED_X);
   const withdrawn = await bringIn(lead, 'founding-excluded-recipient', 'Nell Planner', CLEARED_X);
@@ -1162,12 +1177,101 @@ test('normal managed peer delivery offers the exact founding epoch committed by 
   assert.deepEqual(ok(await finishRekeys(lead.host), 'finish').rekeyed, [cell]);
   const selected = await head(lead.p);
   assert.equal(selected.roster.accessRevision?.predecessor, pending.hash);
+  return { lead, peer, withdrawn, cell, pending, selected };
+}
+
+test('normal managed peer delivery offers the exact founding epoch committed by Finish', async () => {
+  const { lead, peer, withdrawn, cell, pending, selected } = await foundingHandoffFixture();
   const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
   const sender = syncLocalOf(project(await ReplicaProject.open(lead.at.root, lead.at.deps))).managed;
   assert.ok(sender);
   assert.equal(await sender.seal({ ...request, recipient: withdrawn.writer }), undefined);
   const offered = await sender.seal(request);
   assert.ok(offered, 'the normal sync sender can offer the committed founding grant');
+  const keys = await loadOrCreateKemKeys(peer.at.secrets, { identityDir: identityDir(peer.at.global) });
+  const artifact = openManagedGrantDelivery(lead.p.projectId, { writer: peer.writer, kem: keys.privateKeys }, offered.handle, offered.packet, NOW);
+  assert.ok(artifact && artifact.accessProof);
+  const [founding, ...pages] = artifact.grants;
+  const verified = readGrant(founding);
+  assert.ok(verified.ok);
+  const manifest = selected.roster.accessGrants.get(cell)?.evidence.grants.find(({ hash }) => hash === verified.hash);
+  assert.ok(manifest);
+  assert.deepEqual(pages.map(grantHash).sort(), [...manifest.pages].sort());
+  assert.deepEqual(manifest.recipients, [lead.p.deviceWriter, peer.writer].sort());
+  assert.equal(verified.grant.roster, pending.hash);
+  assert.equal(artifact.accessProof.signed.permit.writer, peer.writer);
+  assert.equal(artifact.accessProof.signed.permit.epoch, 2);
+
+  const { transport, reveal, delayed, attempts } = await managedPeerRoute(lead, peer, selected.hash);
+  const handles: string[] = [];
+  const accepted = new Set<string>();
+  const sent = await syncOnce(transport, syncLocalOf(lead.p), hubMemoryOf(new MemorySecrets()), { now: () => NOW, managed: {
+    offers: async () => [request, { recipient: peer.writer, continuity: [lead.p.projectId] }],
+    pending: async () => [],
+    published: async (offer, handle) => {
+      handles.push(handle);
+      if ('cell' in offer) delayed.add(handle);
+    },
+    accepted: async () => { throw new Error('The sender has no incoming packet.'); }
+  } });
+  assert.equal(sent.managed, 'complete');
+  assert.equal(handles.length, 2);
+  const [foundingHandle, continuityHandle] = handles;
+  const options = { now: () => NOW, managed: {
+    offers: async () => [],
+    pending: async () => handles.filter((handle) => !accepted.has(handle)),
+    published: async () => { throw new Error('The recipient has no outgoing packet.'); },
+    accepted: async (handle: string) => { accepted.add(handle); }
+  } };
+  const memory = hubMemoryOf(new MemorySecrets());
+  const before = await syncOnce(transport, syncLocalOf(peer.p), memory, options);
+  assert.equal(before.managed, 'waiting');
+  assert.equal(accepted.size, 0);
+  reveal();
+  const partial = await syncOnce(transport, syncLocalOf(peer.p), memory, options);
+  assert.equal(partial.managed, 'waiting');
+  assert.equal(partial.pulled, 1);
+  assert.deepEqual([...accepted], [continuityHandle]);
+  assert.equal(attempts.get(foundingHandle), 2, 'only one attempt per exchange while the founding grant waits');
+  assert.equal((await writeInBase(peer.p)).epoch, 1);
+  const receiving = await head(peer.p);
+  const slot = deviceAt(receiving.roster.members, peer.writer, receiving.position)?.slot;
+  assert.ok(slot !== undefined);
+  const data = { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
+  const waiting = await peer.p.appendOwn('doc.client', data, { stream: cell });
+  assert.equal(isProjectRefused(waiting) && waiting.refused, 'no-key');
+  assert.equal(peer.p.keys.holds(cell, 2), false);
+
+  delayed.clear();
+  const complete = await syncOnce(transport, syncLocalOf(peer.p), memory, options);
+  assert.equal(complete.managed, 'complete');
+  assert.ok(accepted.has(foundingHandle));
+  assert.equal(attempts.get(foundingHandle), 3);
+  const reopened = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  const remote = await head(reopened);
+  assert.equal(committedGrant(remote.roster.cells, cell, 2), verified.hash);
+  assert.equal(reopened.keys.holds(cell, 1), false);
+  assert.deepEqual(reopened.keys.epochKey(cell, 2), lead.p.keys.epochKey(cell, 2));
+  const written = await reopened.appendOwn('doc.client', data, { stream: cell });
+  assert.ok('ok' in written);
+  assert.equal(written.built.entry.header.epoch, 2);
+
+});
+
+test('private founding file waits through reopening for the matching signed roster', async () => {
+  const { lead, peer, cell, selected } = await foundingHandoffFixture();
+  const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const file = await lead.p.sealManagedHandoff(request);
+  assert.ok(file);
+  const root = await stageManagedPredecessors(lead, peer, selected.hash);
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(file));
+  const reopened = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  assert.equal(reopened.keys.holds(cell, 2), false);
+  assert.ok('ok' in await reopened.ingestForeign([root], []));
+  const received = await head(reopened);
+  assert.equal(committedGrant(received.roster.cells, cell, 2), committedGrant(selected.roster.cells, cell, 2));
+  assert.deepEqual(reopened.keys.epochKey(cell, 2), lead.p.keys.epochKey(cell, 2));
+  assert.equal(reopened.keys.holds(cell, 1), false);
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {

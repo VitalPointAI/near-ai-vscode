@@ -15,6 +15,7 @@ import { staticRosterView } from '../domain/replica/rosterView';
 import type { RosterView } from '../domain/replica/rosterView';
 import { FULL_REPLAY_SENTENCE, RESTORING_SENTENCE, syncOnce } from '../staff/replica/hubSync';
 import type { HubMemory, SyncLocal, SyncTransport } from '../staff/replica/hubSync';
+import type { ManagedHandoff } from '../staff/replica/managedGrantDelivery';
 import { HubTransportError } from '../staff/replica/hubTransport';
 import type { AppendAnswer, AppendBatch, EntriesPage, HubHeads } from '../staff/replica/hubTransport';
 import { epochKey, fixedSigner, streamId } from './helpers/replicaWorld';
@@ -163,7 +164,7 @@ test('normal sync passes only opaque managed addresses to an explicitly configur
   const secretHandoffs: string[] = [];
   const local = Object.assign(memoryLocal(rosterWith()), {
     managed: {
-      seal: async (input: typeof descriptor) => {
+      seal: async (input: ManagedHandoff) => {
         assert.deepEqual(input, descriptor);
         return { handle: outgoing, packet: 'outgoing ciphertext' };
       },
@@ -176,7 +177,7 @@ test('normal sync passes only opaque managed addresses to an explicitly configur
   const options = { now: () => NOW, managed: {
     offers: async () => [descriptor],
     pending: async () => [incoming, incoming, 'invalid-address'],
-    published: async (_input: typeof descriptor, handle: string) => { secretHandoffs.push(handle); },
+    published: async (_input: ManagedHandoff, handle: string) => { secretHandoffs.push(handle); },
     accepted: async (handle: string) => { secretHandoffs.push(handle); }
   } };
   const legacy = scripted({});

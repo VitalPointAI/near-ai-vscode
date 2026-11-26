@@ -61,8 +61,8 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
-import { openManagedGrantArtifact, sealPlacedSupplemental, verifySelectedManagedArtifact } from './managedGrantDelivery';
-import type { SupplementalHandoff } from './managedGrantDelivery';
+import { openManagedGrantArtifact, sealPlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
+import type { ManagedHandoff } from './managedGrantDelivery';
 import { verifyManagedStage } from './managedWithdrawal';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
@@ -588,11 +588,11 @@ export class ReplicaProject {
     });
   }
 
-  public sealManagedSupplemental(input: SupplementalHandoff) {
+  public sealManagedHandoff(input: ManagedHandoff) {
     return this.exclusive(async () => {
       const { roster } = await this.foldNow();
       if (!isRosterWriterAt(roster, this.device.writer, roster.positions.length - 1)) return undefined;
-      return sealPlacedSupplemental(roster, this.evidence.map(({ value }) => value), input, this.now());
+      return sealPlacedManagedHandoff(roster, this.evidence.map(({ value }) => value), input, this.now());
     });
   }
 
@@ -1179,7 +1179,7 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
     blobsCitedBy: (hashes) => project.blobsCitedBy(hashes),
     grants: () => project.signedGrants(),
     managed: {
-      seal: (offer) => project.sealManagedSupplemental(offer),
+      seal: (offer) => project.sealManagedHandoff(offer),
       stage: async (value) => !isProjectRefused(await project.ingestManagedGrantDelivery(value, 'peer'))
     },
     async ingest(entries, blobs) {

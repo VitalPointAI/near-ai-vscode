@@ -1,5 +1,5 @@
 import { HASH_PATTERN } from '../../domain/replica/entry';
-import type { SupplementalHandoff } from './managedGrantDelivery';
+import type { ManagedHandoff } from './managedGrantDelivery';
 
 export interface ManagedSyncRoute {
   put(handle: string, packet: unknown): Promise<boolean>;
@@ -8,14 +8,14 @@ export interface ManagedSyncRoute {
 
 /** Handoffs live on the confidential side. The opaque route is never given a cell or a recipient. */
 export interface ManagedSyncHandoffs {
-  offers(): Promise<readonly SupplementalHandoff[]>;
+  offers(): Promise<readonly ManagedHandoff[]>;
   pending(): Promise<readonly string[]>;
-  published(offer: SupplementalHandoff, handle: string): Promise<void>;
+  published(offer: ManagedHandoff, handle: string): Promise<void>;
   accepted(handle: string): Promise<void>;
 }
 
 export interface ManagedSyncLocal {
-  seal(offer: SupplementalHandoff): Promise<{ handle: string; packet: unknown } | undefined>;
+  seal(offer: ManagedHandoff): Promise<{ handle: string; packet: unknown } | undefined>;
   stage(value: unknown): Promise<boolean>;
 }
 
