@@ -1,5 +1,6 @@
 import { inject, injectable, ContainerModule, postConstruct } from '@theia/core/shared/inversify';
 import { CommandRegistry } from '@theia/core/lib/common/command.js';
+import { MessageService } from '@theia/core/lib/common/message-service.js';
 import { FileService } from '@theia/filesystem/lib/browser/file-service.js';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service.js';
 import type { FrontendApplication } from '@theia/core/lib/browser/frontend-application.js';
@@ -202,6 +203,9 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   @inject(CommandRegistry)
   protected readonly commandRegistry!: CommandRegistry;
 
+  @inject(MessageService)
+  protected readonly messages!: MessageService;
+
   @inject(WorkspaceService)
   protected readonly workspaceService!: WorkspaceService;
 
@@ -220,6 +224,22 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     const shortcuts = document.createElement('nav');
     shortcuts.className = 'sterling-rail-shortcuts';
     shortcuts.setAttribute('aria-label', 'Sterling shortcuts');
+    const status = document.createElement('span');
+    status.className = 'sterling-rail-status';
+    status.setAttribute('role', 'status');
+
+    const openShortcut = async (command: string, label: string): Promise<void> => {
+      status.textContent = '';
+      try {
+        await this.commandRegistry.executeCommand(command);
+      } catch (error) {
+        console.warn(`Sterling could not open ${label}.`, error);
+        const message = `Could not open ${label}. Wait a moment and try again.`;
+        status.textContent = message;
+        void this.messages.warn(message);
+      }
+    };
+
     for (const { label, icon, command } of railActions) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -241,16 +261,18 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
             this.slideChat(true);
             return;
           }
-          const action = this.chatIsOpen() ? this.collapseChat() : this.commandRegistry.executeCommand(command);
-          void action.catch(error => console.warn('Sterling could not toggle Chat.', error));
+          if (this.chatIsOpen()) {
+            void this.collapseChat().catch(error => console.warn('Sterling could not toggle Chat.', error));
+          } else {
+            void openShortcut(command, label);
+          }
         });
       } else {
-        button.addEventListener('click', () => {
-          void this.commandRegistry.executeCommand(command).catch(error => console.warn(`Sterling could not open ${label}.`, error));
-        });
+        button.addEventListener('click', () => void openShortcut(command, label));
       }
       shortcuts.append(button);
     }
+    shortcuts.append(status);
     tabBar.parent.insertWidget(0, new BaseWidget({ node: shortcuts }));
     tabBar.addClass('sterling-managed-rail');
   }
