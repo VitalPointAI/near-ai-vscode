@@ -1,11 +1,11 @@
 ---
 phase: 102-institutional-joint-staff-teams
 plan: studio-profile-first
-wave: 2
+wave: 12
 status: draft
 type: execute
 autonomous: false
-depends_on: ["studio-setup", "studio-lang-01", "20261127-staff-section-selection"]
+depends_on: ["102-STUDIO-SETUP", "102-STUDIO-LANG-01"]
 requirements: []
 files_modified:
   - src/domain/staff/profiles.ts
@@ -50,7 +50,7 @@ Turn the verified selectable-sections checklist into profile-first setup. A user
 </objective>
 
 <context>
-Start from the verified selectable-sections source `b9506ce45` and summary `5f1750469`. Use the exact steering addendum `81f5d4098` from `docs/team-studio-section-delivery` and the checked [tier crosswalk](102-JOINT-TIER-CROSSWALK.md) and [coverage table](102-DUTY-COVERAGE.md#profile-and-level-coverage). The steering commit is a reference on a separate branch. Do not merge it into this base to begin the work.
+Start from the verified selectable-sections source `b9506ce45` and summary `5f1750469`. Use the exact steering addendum `81f5d4098` from `docs/team-studio-section-delivery` and the checked [tier crosswalk](102-JOINT-TIER-CROSSWALK.md) and [coverage table](102-DUTY-COVERAGE.md#profile-and-level-coverage). Require the selectable-sections quick summary on the execution base, in addition to the two phase dependencies. The steering commit is a reference on a separate branch. Do not merge it into this base to begin the work.
 
 `StaffSettings.level` and `STAFF_LEVELS` select planning process. `sectionCode` defaults to the higher process prefix. `templateOffers` proves `(profile, planning level, nation)` only, and tactical J2 is the only current setup question with explicit brigade and battalion variants. None of those facts establishes every organizational level or applies to all nations. `staffSetupCommand.ts` currently prompts after selecting the template, while `teamStudioStaffSetup.ts` guesses a J code without saved staff settings. `projectStaffTeams` and `linkStaffTeam` are legacy linkage callers. The latter uses filename candidates and the strict `staffSettingsJson` round-trip. Keep that path in the compatibility review.
 </context>
