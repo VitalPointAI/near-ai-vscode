@@ -330,7 +330,7 @@ test('Team Studio staff setup previews the selected project in the User language
     const palette = workbench.locator('.quick-input-widget input');
     await expect(palette).toBeVisible();
     await palette.fill('>SovAI: Team Studio');
-    await workbench.locator('.quick-input-list .monaco-list-row').filter({ hasText: 'Team Studio' }).click({ timeout: 60_000 });
+    await workbench.getByRole('option', { name: 'SovAI: Team Studio', exact: true }).click({ timeout: 60_000 });
     const studioTab = workbench.locator('#theia-main-content-panel .lm-TabBar-tab').filter({ hasText: 'SovAI Team Studio' });
     await expect(currentTab(workbench)).toHaveText('SovAI Team Studio', { timeout: 60_000 });
     const frame = workbench.locator('#theia-main-content-panel [id^="plugin-webview:"]').filter({ visible: true })
