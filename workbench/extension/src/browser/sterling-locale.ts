@@ -26,7 +26,10 @@ export function observeSterlingLocale(
   preferences: PreferenceService, providers: PreferenceProviderProvider, update: (locale: SterlingLocale) => void
 ): Disposable {
   const user = providers(PreferenceScope.User);
-  if (!user) return Disposable.NULL;
+  if (!user) {
+    update(defaultSterlingLocale);
+    return Disposable.NULL;
+  }
   const ready = Promise.all([user.ready, preferences.ready]);
   let disposed = false;
   const refresh = (): void => {
@@ -34,7 +37,7 @@ export function observeSterlingLocale(
       if (disposed) return;
       const value = preferences.inspectInScope(languagePreference, PreferenceScope.User);
       update(value === 'fr-CA' ? value : defaultSterlingLocale);
-    }, () => undefined);
+    }, () => { if (!disposed) update(defaultSterlingLocale); });
   };
   // A hand-edited workspace value can shadow aggregate notifications. Observe the User provider directly.
   const listener = user.onDidPreferencesChanged(changes => {

@@ -17,7 +17,7 @@ import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
 import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cloneNameProblem, savedTeamName, TEAM_NAME_MAX, KEPT_WIZARD_TEXT, takenTeamNames, teamNameClash, optimiseTarget, parseStudioMessage, reviewDraft, startingPointDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
-import { createStaffSetupPreview } from '../services/teamStudioStaffSetup';
+import { createStaffSetupPreview, createTeamStudioLocale } from '../services/teamStudioStaffSetup';
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { JPEG, jpegOfSize, png, SVG, WEBP, webpOfSize } from './iconFixtures';
 import { iconVariation, ICON_VARIATIONS, teamIconPrompt, withIconReference } from '../agent/teamIcon';
@@ -3942,11 +3942,10 @@ test('page: Staff setup preview shows the chosen project and scope and discards 
   entry().click();
   const second = page.posts.at(-1)!;
   const preview = {
-    type: 'staff-preview-state', session: 'host-session', project: 'Library project', profile: 'NATO/Canadian', level: 'Tactical',
-    modelLocation: 'Model location unavailable until project setup records a policy.',
+    type: 'staff-preview-state', session: 'host-session', project: 'Library project', profile: 'nato-ca', level: 'tactical',
     rows: [
-      { id: 'j4', label: 'Logistics', template: true, status: 'Linked team', team: 'Library logistics', decisionRole: 'Section lead' },
-      { id: 'j9', label: 'Civil-military cooperation', template: false, status: 'Setup unavailable. No team template is available.' }
+      { id: 'j4', template: true, status: 'linked', team: 'Library logistics', decisionRole: true },
+      { id: 'j9', template: false, status: 'noTemplate' }
     ]
   };
   page.dispatch({ ...preview, request: first.request });
@@ -3961,7 +3960,7 @@ test('page: Staff setup preview shows the chosen project and scope and discards 
   page.dispatch({ type: 'staff-preview-result', request: second.request, session: 'host-session', applied: false });
   assert.equal(page.doc.activeElement, page.byLabel('Logistics'));
   page.byLabel('Complete staff')!.click();
-  assert.match(page.text(), /Library logistics.*Civil-military cooperation.*No team template/);
+  assert.match(page.text(), /Library logistics.*Civil-military cooperation.*No agent team template/);
   assert.equal(page.byLabel('Set up this staff'), undefined);
   assert.equal(page.doc.activeElement, page.doc.getElementById('staff-preview-title'));
   let escapeHandled = false;
@@ -3969,6 +3968,62 @@ test('page: Staff setup preview shows the chosen project and scope and discards 
   assert.equal(escapeHandled, true);
   assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request: second.request });
   assert.equal(page.doc.activeElement, entry());
+});
+
+test('page: a Canadian language change preserves the staff preview, focused section and one pending decision', async () => {
+  const page = await dashboardPage();
+  page.byLabel('Set up staff')!.click();
+  const request = page.posts.at(-1)!.request;
+  page.dispatch({
+    type: 'staff-preview-state', request, session: 'host-session', project: 'Project Écho',
+    profile: 'nato-ca', level: 'tactical',
+    rows: [
+      { id: 'j4', code: 'G4', template: true, status: 'linked', team: 'Library logistics', decisionRole: true },
+      { id: 'j9', code: 'G9', template: false, status: 'noTemplate' }
+    ]
+  });
+  const selected = () => page.doc.getElementById('staff-section-j4')!;
+  selected().click();
+  assert.equal(page.doc.activeElement, selected());
+  const before = page.posts.length;
+
+  page.dispatch({ type: 'staff-preview-locale', locale: 'fr-CA' });
+  assert.match(page.text(), /Aperçu de la configuration de l’état-major.*Project Écho.*G4 Logistique.*Équipe liée.*Library logistics/);
+  assert.equal(selected().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.doc.activeElement, selected());
+  assert.equal(page.posts.length, before);
+  page.byLabel('Poursuivre la configuration de la section')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-continue', request, session: 'host-session', section: 'j4' });
+
+  page.dispatch({ type: 'staff-preview-locale', locale: 'en-CA' });
+  assert.match(page.text(), /Continue in the editor’s setup questions/);
+  assert.equal(page.posts.length, before + 1);
+  page.dispatch({ type: 'staff-preview-result', request, session: 'host-session', applied: false });
+  assert.equal(page.doc.activeElement, selected());
+  page.byLabel('Leave setup')!.click();
+  assert.equal(page.doc.activeElement, page.byLabel('Set up staff'));
+});
+
+test('host: late native language replies and disposed listeners cannot change Studio state', async () => {
+  const pending: Array<(value: unknown) => void> = [];
+  const locale = createTeamStudioLocale(() => new Promise(resolve => pending.push(resolve)));
+  const updates: string[] = [];
+  const subscription = locale.subscribe(value => { updates.push(value); });
+  const old = locale.refresh();
+  const current = locale.refresh();
+  pending[1]('fr-CA');
+  await current;
+  pending[0]('en-CA');
+  await old;
+  assert.equal(locale.current(), 'fr-CA');
+  assert.deepEqual(updates, ['fr-CA']);
+
+  const invalid = locale.refresh();
+  subscription.dispose();
+  pending[2]({ locale: 'fr-CA' });
+  await invalid;
+  assert.equal(locale.current(), 'en-CA');
+  assert.deepEqual(updates, ['fr-CA']);
 });
 
 test('host: Staff setup preview scopes the latest pick and holds a substituted project directory', async () => {
@@ -3997,12 +4052,16 @@ test('host: Staff setup preview scopes the latest pick and holds a substituted p
   const stale = open(1);
   await preview.receive({ type: 'staff-preview-leave', request: 1 });
   const current = open(2);
+  const locale = createTeamStudioLocale(async () => 'fr-CA');
+  await locale.refresh();
+  assert.equal(locale.current(), 'fr-CA');
+  assert.equal(picks.length, 2, 'the language change leaves the pending picker in place');
   picks[1](second);
   await current;
   picks[0](first);
   await stale;
   assert.equal(posted.length, 1);
-  assert.match(JSON.stringify(posted[0]), /Second project.*NATO\/Canadian.*Library logistics/);
+  assert.match(JSON.stringify(posted[0]), /Second project.*nato-ca.*Library logistics/);
   assert.doesNotMatch(JSON.stringify(posted[0]), /First project|library-logistics\.md/);
   await open(2);
   assert.equal(picks.length, 2, 'the current request is accepted once');

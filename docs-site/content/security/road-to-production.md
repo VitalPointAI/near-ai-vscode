@@ -11,7 +11,7 @@ This page lists every known gap and open condition: what is still to do before l
 
 Each item is listed once, at the lowest level where it matters. It still matters at every level above that. Items for exchange with allies are listed on their own, because that work can start at any level.
 
-Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 453 items, 411 block production.
+Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 454 items, 411 block production.
 
 This page shows the register, not progress. Some items may already be closed by evidence. The [gaps page](../accreditation/gaps.mdx) shows the current state of each one. Your organization decides what it accepts.
 
@@ -23,7 +23,7 @@ The list is generated from the gap register, [`compliance/gaps.json`](https://gi
 
 | Level | Blocks production | Does not block production |
 | --- | --- | --- |
-| [Now, at every level](#now) | 83 | 21 |
+| [Now, at every level](#now) | 83 | 22 |
 | [From Protected A](#protected-a) | 312 | 5 |
 | [From Protected B](#protected-b) | 12 | 5 |
 | [From Protected C](#protected-c) | 0 | 1 |
@@ -145,6 +145,7 @@ These matter today, at every level, including unclassified work.
 - **G490. The dashboard assesses every component against every control.** The dashboard assesses every in-scope component against every control, so at commit 32007751 12,242 component cells read Not met with no statement, many of them for components that have no part in the control (the HSM in account management, for example). This overstates the work and misleads readers of the dashboard and the SSP. Plans 44.1-05 to 44.1-08 add a rule-based applicability map derived from the component catalogue, a component-level Not applicable that always carries its reason, and its display in the docs drawer and the SSP. Measured at commit 2f35f92c on the map your organization reviewed (its sections unchanged since b87d11f5): the map gives 3,800 stage 1 cells (Unclassified, Protected A, hosted Protected A) and 3,775 stage 2 cells (Protected B, hosted Protected B) no part, each with its reason, and 4,541 applicable cells over those five levels have no statement yet. Each stage's cells read Not applicable only once its sign-off is recorded in compliance/applicability/reviews.json; until then they read Not met, awaiting sign-off. 44.1-22 and 44.1-23 update this count as later stages land. Source: .planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-RESEARCH.md. Controls: PL-2, CM-8. Owner role: maintainers. Planned in Phase 44.1.
 - **G493. The count of cells without a statement can rise without anyone noticing.** The pull request summary shows state changes, but nothing stops a change that removes a statement or widens a profile from adding cells that read No statement yet. Plan 44.1-07 adds a coverage measure (counts per state and component) and a ratchet in the required docs job: the count of applicable cells without a statement per component may only fall, and a rise needs a change to the gated baseline that the owner approves. Controls: CA-7, CM-4. Owner role: maintainers. Planned in Phase 44.1.
 - **G494. A statement can cite a test that no CI job reports.** Only the test, relay, hub, workbench and deploy jobs write the per-test reports the evidence bundle reads. A rule on a compliance or docs-site test never gets a result, and a statement with no rule at all is allowed in the sources; both read Not met on the dashboard, but nothing refuses them when they are written. Plan 44.1-08 refuses both at source time, through 44.1-07's required check; the appliance's reference statement stays exempt while its level makes no claim. How fresh each kind of evidence must be stays with Phase 48.2 (Live compliance evidence). Controls: CA-2, SA-11. Owner role: maintainers. Planned in Phase 44.1.
+- **G561. Canadian Workbench language coverage needs qualified review.** Workbench staff setup has been checked in Canadian English and French, including unchanged project scope and cancellation. A qualified Canadian French reviewer must verify the terminology and instructions. Record equivalent workflows and outputs for remaining Canadian Workbench surfaces before declaring full LANG-01 acceptance. Controls: SA-11. Owner role: maintainers. Tracked as POA&M item g561; first milestone: Record qualified Canadian French copy review and verify remaining Canadian Workbench workflows and outputs (Phase 46).
 
 ## From Protected A {#protected-a}
 
