@@ -6,6 +6,7 @@ import { STAFF_SLUG } from './parse';
 export const institutionalBriefDirectory = '.planning/staff/institutional/command/briefs';
 export const institutionalActionRegisterDirectory = '.planning/staff/institutional/j3/action-registers';
 export const institutionalObservationDirectory = '.planning/staff/institutional/j7/observations';
+export const institutionalFindingsDirectory = '.planning/staff/institutional/j7/after-action';
 export const institutionalBriefMaxBytes = 128 * 1024;
 
 export interface InstitutionalBriefSource {
@@ -46,6 +47,12 @@ export interface InstitutionalDraftScope {
     /** Called with the fixture interlock held immediately before a J7 effect. */
     readonly correctionAtEffect: (correction: InstitutionalObservationCorrection | null) => boolean;
   };
+  readonly findings?: {
+    readonly current: () => InstitutionalFindingsEvidence;
+    readonly predecessorCurrent: () => Promise<boolean>;
+    /** Called with the fixture interlock held immediately before a J7-10 effect. */
+    readonly predecessorAtEffect: (version: string) => boolean;
+  };
 }
 
 interface InstitutionalCitation {
@@ -83,7 +90,20 @@ export interface InstitutionalObservationReview extends Omit<InstitutionalBriefR
   readonly correction: InstitutionalObservationCorrection | null;
 }
 
-export type InstitutionalDraftReview = InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview;
+export interface InstitutionalFindingsReview extends Omit<InstitutionalBriefReview, 'duty' | 'kind'> {
+  readonly duty: 'J7-10';
+  readonly kind: 'findings';
+  readonly observation: InstitutionalFindingsEvidence['observation'];
+  readonly objective: InstitutionalFindingsEvidence['objective'];
+  readonly evidenceDigest: string;
+  readonly validation: 'open';
+  readonly release: 'disabled';
+  readonly owner: string;
+  readonly reasoningReview: { readonly person: string; readonly state: 'pending' };
+  readonly requiredApproval: InstitutionalFindingsEvidence['approver'];
+}
+
+export type InstitutionalDraftReview = InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;
@@ -450,6 +470,21 @@ export function admittedInstitutionalObservation(
     people, relatedObservationIds, corroborations, correction };
 }
 
+function attributedDissent(
+  value: unknown, sources: readonly InstitutionalBriefSource[], citation: (entry: unknown) => InstitutionalCitation,
+) {
+  const dissent = list(value, (entry) => {
+    const objection = record(entry, ['attribution', 'text', 'evidence']);
+    const attribution = text(objection.attribution, 100);
+    const evidence = list(objection.evidence, citation, 1);
+    requireObservation(evidence.some(({ sourceId }) => sources.some((source) => source.id === sourceId && source.dissentAttribution === attribution)));
+    return { attribution, text: text(objection.text), evidence };
+  });
+  requireObservation(sources.every((source) => source.dissentAttribution === undefined ||
+    dissent.some((entry) => entry.attribution === source.dissentAttribution && entry.evidence.some(({ sourceId }) => sourceId === source.id))));
+  return dissent;
+}
+
 export function prepareInstitutionalObservation(
   input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalObservationEvidence,
 ): PreparedInstitutionalDraft {
@@ -477,15 +512,7 @@ export function prepareInstitutionalObservation(
     return { observationId, reason: text(duplicate.reason), evidence: list(duplicate.evidence, citation, 1) };
   });
   requireObservation(new Set(potentialDuplicates.map(({ observationId }) => observationId)).size === potentialDuplicates.length);
-  const dissent = list(value.dissent, (entry) => {
-    const objection = record(entry, ['attribution', 'text', 'evidence']);
-    const attribution = text(objection.attribution, 100);
-    const evidence = list(objection.evidence, citation, 1);
-    requireObservation(evidence.some(({ sourceId }) => sources.some((source) => source.id === sourceId && source.dissentAttribution === attribution)));
-    return { attribution, text: text(objection.text), evidence };
-  });
-  requireObservation(sources.every((source) => source.dissentAttribution === undefined ||
-    dissent.some((entry) => entry.attribution === source.dissentAttribution && entry.evidence.some(({ sourceId }) => sourceId === source.id))));
+  const dissent = attributedDissent(value.dissent, sources, citation);
   const correction = accepted.correction && { ...accepted.correction, evidence: accepted.correction.evidence.map(citation) };
   const body = { time: accepted.time, timeKind: accepted.timeKind, statements, relatedObservations, potentialDuplicates, dissent };
   const identity = { ...binding, duty: 'J7-09' as const, echelon: 'L3' as const, kind: 'observation' as const,
@@ -503,4 +530,123 @@ export function institutionalObservationInput(body: object, productId: unknown):
     const { corroboration: _derived, ...statement } = record(entry, ['kind', 'personId', 'text', 'confidence', 'evidence', 'corroboration']);
     return statement;
   }, 1) };
+}
+
+export interface InstitutionalFindingsEvidence {
+  readonly productId: string;
+  readonly observation: { readonly version: string; readonly reviewDigest: string; readonly productId: string;
+    readonly access: 'org/Public'; readonly verification: 'unverified-draft'; readonly sources: InstitutionalBriefReview['sources'] };
+  readonly objective: { readonly id: string; readonly revision: string; readonly evidence: readonly InstitutionalCitation[] };
+  readonly directEvidence: readonly InstitutionalCitation[];
+  readonly conflictingEvidence: readonly InstitutionalCitation[];
+  readonly dissentEvidence: readonly InstitutionalCitation[];
+  readonly correctionEvidence: readonly InstitutionalCitation[];
+  readonly corroboratingEvidence: readonly InstitutionalCitation[];
+  readonly owner: string;
+  readonly subjectMatterExpert: string;
+  readonly approver: { readonly person: string; readonly level: string };
+}
+
+function requireFindings(condition: unknown): asserts condition {
+  if (!condition) throw new Error('The office-hours findings do not match the current admitted observation and objective.');
+}
+
+export function admittedInstitutionalFindings(
+  raw: unknown, observation: InstitutionalObservationReview, observationBody: object, binding: InstitutionalBriefBinding,
+  sources: readonly InstitutionalBriefSource[],
+): InstitutionalFindingsEvidence {
+  const value = record(raw, ['purpose', 'project', 'directory', 'echelon', 'state', 'productId', 'observationVersion', 'observationReviewDigest',
+    'observationEvidence', 'objective', 'corroboratingEvidence', 'owner', 'subjectMatterExpert', 'approver']);
+  const reviewDigest = canonicalDigest(observation);
+  requireFindings(value.purpose === 'fictional-office-hours-j7-10' && value.state === 'approved-for-draft' &&
+    value.project === binding.project && value.directory === binding.directory && value.echelon === 'L3' &&
+    observation.project === binding.project && observation.directory === binding.directory && observation.echelon === 'L3' &&
+    observation.duty === 'J7-09' && observation.kind === 'observation' && observation.access === 'org/Public' &&
+    value.observationVersion === observation.version && value.observationReviewDigest === reviewDigest &&
+    observation.sources.every(({ id, hash }) => sources.some((source) => source.id === id && institutionalSourceHash(source) === hash)));
+  const objective = record(value.objective, ['id', 'revision', 'evidence']);
+  const approver = record(value.approver, ['person', 'level']);
+  const owner = slug(value.owner);
+  const subjectMatterExpert = slug(value.subjectMatterExpert);
+  const approverPerson = slug(approver.person);
+  requireFindings(new Set([owner, subjectMatterExpert, approverPerson]).size === 3);
+  const { citation } = admittedCitations(sources);
+  const objectiveRevision = revision(objective.revision);
+  const objectiveEvidence = list(objective.evidence, citation, 1);
+  requireFindings(objectiveEvidence.every((entry) => entry.revision === objectiveRevision));
+
+  const explicitlyDisclosed = new Set(list(value.observationEvidence, citation, 1).map(canonicalDigest));
+  const admitted = (entries: readonly InstitutionalCitation[]) =>
+    [...new Map(entries.map((entry) => [canonicalDigest(entry), entry])).entries()]
+      .filter(([key]) => explicitlyDisclosed.has(key)).map(([, entry]) => entry);
+  const body = record(observationBody, ['time', 'timeKind', 'statements', 'relatedObservations', 'potentialDuplicates', 'dissent']);
+  const statements = list(body.statements, (entry) => {
+    const statement = record(entry, ['kind', 'personId', 'text', 'confidence', 'evidence', 'corroboration']);
+    return { kind: statement.kind, evidence: list(statement.evidence, citation, 1) };
+  }, 1);
+  const dissentEvidence = admitted(list(body.dissent, (entry) =>
+    list(record(entry, ['attribution', 'text', 'evidence']).evidence, citation, 1)).flat());
+  const correctionEvidence = admitted(observation.correction?.evidence ?? []);
+  const excludedFromDirect = new Set([...dissentEvidence, ...correctionEvidence].map(canonicalDigest));
+  const observationsAndReports = statements.filter(({ kind }) => kind === 'observed' || kind === 'reported');
+  const directEvidence = admitted(observationsAndReports.flatMap(({ evidence }) => evidence))
+    .filter((entry) => !excludedFromDirect.has(canonicalDigest(entry)));
+  requireFindings(directEvidence.length > 0);
+  const conflictingEvidence = admitted([...statements.filter(({ kind }) => kind === 'reported').flatMap(({ evidence }) => evidence), ...dissentEvidence]);
+  const observedSources = new Set([...directEvidence, ...conflictingEvidence, ...correctionEvidence].map(({ sourceId }) => sourceId));
+  return {
+    productId: slug(value.productId),
+    observation: { version: observation.version, reviewDigest, productId: observation.productId, access: observation.access,
+      verification: 'unverified-draft', sources: observation.sources.filter(({ id }) => observedSources.has(id)) },
+    objective: { id: slug(objective.id), revision: objectiveRevision, evidence: objectiveEvidence },
+    directEvidence, conflictingEvidence, dissentEvidence, correctionEvidence,
+    corroboratingEvidence: list(value.corroboratingEvidence, citation, 1),
+    owner, subjectMatterExpert, approver: { person: approverPerson, level: slug(approver.level) },
+  };
+}
+
+export function prepareInstitutionalFindings(
+  input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalFindingsEvidence,
+): PreparedInstitutionalDraft {
+  const value = record(input, ['productId', 'candidates', 'dissent', 'limitations']);
+  requireFindings(value.productId === accepted.productId);
+  const { citation, used } = admittedCitations(sources);
+  accepted.objective.evidence.forEach(citation);
+  const directCitations = new Set(accepted.directEvidence.map(canonicalDigest));
+  const corroboration = new Set(accepted.corroboratingEvidence.map(canonicalDigest));
+  const conflicts = new Set(accepted.conflictingEvidence.map(canonicalDigest));
+  const dissent = new Set(accepted.dissentEvidence.map(canonicalDigest));
+  const dissentSources = new Set(accepted.dissentEvidence.map(({ sourceId }) => sourceId));
+  const candidates = list(value.candidates, (entry) => {
+    const candidate = record(entry, ['text', 'direct', 'corroborating', 'conflicting', 'alternateExplanations',
+      'uncertainty', 'recommendation', 'implementationEvidence', 'independentCheck']);
+    const direct = list(candidate.direct, citation, 1);
+    const corroborating = list(candidate.corroborating, citation, 1);
+    const conflicting = list(candidate.conflicting, citation);
+    requireFindings(direct.every((cite) => directCitations.has(canonicalDigest(cite))) &&
+      corroborating.every((cite) => corroboration.has(canonicalDigest(cite))) &&
+      conflicting.every((cite) => conflicts.has(canonicalDigest(cite))));
+    return { text: text(candidate.text), direct, corroborating, conflicting,
+      alternateExplanations: list(candidate.alternateExplanations, (entry) => text(entry), 1),
+      uncertainty: text(candidate.uncertainty), recommendation: text(candidate.recommendation),
+      implementationEvidence: text(candidate.implementationEvidence), independentCheck: text(candidate.independentCheck) };
+  }, 1);
+  const limitations = list(value.limitations, (entry) => {
+    const limitation = record(entry, ['gap', 'resolve']);
+    return { gap: text(limitation.gap), resolve: text(limitation.resolve) };
+  }, 1);
+  const objections = attributedDissent(value.dissent, sources.filter(({ id }) => dissentSources.has(id)), (entry) => {
+    const cited = citation(entry);
+    requireFindings(dissent.has(canonicalDigest(cited)));
+    return cited;
+  });
+  const body = { candidates, dissent: objections, limitations };
+  const identity = { ...binding, duty: 'J7-10' as const, echelon: 'L3' as const, kind: 'findings' as const, productId: accepted.productId,
+    observation: accepted.observation, objective: accepted.objective, evidenceDigest: canonicalDigest(accepted),
+    sources: used(), validation: 'open' as const, release: 'disabled' as const,
+    owner: accepted.owner, reasoningReview: { person: accepted.subjectMatterExpert, state: 'pending' as const }, requiredApproval: accepted.approver };
+  const bytes = canonicalBytes({ schema: 1, ...identity, body });
+  requireFindings(bytes.length <= institutionalBriefMaxBytes);
+  const version = institutionalBriefDigest(bytes);
+  return { path: `${institutionalFindingsDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }

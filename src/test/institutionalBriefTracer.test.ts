@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -30,6 +30,8 @@ const observationTeam = 'institutional-j7-lessons-v1';
 const observationDirectory = '.planning/staff/institutional/j7/observations';
 const readObservation = 'ReadInstitutionalLessonsEvidence';
 const saveObservation = 'SaveInstitutionalObservationDraft';
+const saveFindings = 'SaveInstitutionalAfterActionDraft';
+const findingsDirectory = '.planning/staff/institutional/j7/after-action';
 const registerDirectory = '.planning/staff/institutional/j3/action-registers';
 const registerTeam = 'institutional-j3-action-register-v1';
 const readRegister = 'ReadInstitutionalActionEvidence';
@@ -160,6 +162,7 @@ async function runFixture(
 ) {
   const root = options.root ?? fixture.root;
   const offers: string[][] = [];
+  const readOffers: unknown[] = [];
   const results: string[] = [];
   const childRequests: { model: string; idle?: number; turn?: number; admitted: boolean }[] = [];
   let parentTurn = 0;
@@ -168,13 +171,14 @@ async function runFixture(
     async *streamCompletion(selectedModel: string, messages: AgentMessage[], tools: ToolDefinition[], signal: AbortSignal,
       deadlines: { idleTimeoutMs?: number; turnTimeoutMs?: number }): AsyncGenerator<CompletionEvent> {
       results.push(...messages.filter((message) => message.role === 'tool').map((message) => String(message.content)));
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
         childRequests.push({ model: selectedModel, idle: deadlines.idleTimeoutMs, turn: deadlines.turnTimeoutMs, admitted });
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
+        readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
@@ -206,7 +210,7 @@ async function runFixture(
   } satisfies AgentTurnRequest;
   options.onStart?.(() => conversation.stop());
   try { await conversation.send(request); } finally { conversation.dispose(); }
-  return { offers, results, posted, childRequests, requestPolicy, decisions: runtimes.flatMap((runtime): DecisionRecord[] => runtime.records) };
+  return { offers, readOffers, results, posted, childRequests, requestPolicy, decisions: runtimes.flatMap((runtime): DecisionRecord[] => runtime.records) };
 }
 
 test('registered setup passes the exact staged record into a real confined child and reviews its draft', async () => {
@@ -685,7 +689,7 @@ test('a changed Command Group predecessor after J3 tool offer withholds the same
   assert.deepEqual(await readdir(subject.directory), []);
 });
 
-async function newObservationFixture() {
+async function newObservationFixture(splitFindingsEvidence = false) {
   const subject = await newFixture();
   const staged = await stageInstitutionalSetup(subject.fixture.root, { label: 'Institutional G7 Lessons', team: observationTeam, keySegment: 'j7Lessons' });
   const directory = path.join(subject.fixture.root, observationDirectory);
@@ -699,8 +703,21 @@ async function newObservationFixture() {
     { id: 'office-opening-clock', revision: '4', date: '2026-11-02', label: 'org/Public', project,
       text: 'The independent office entry clock records an 08:00 opening.', spans: [] },
   ].map((source) => ({ ...source, label: 'org/Public', spans: [{ start: 0, end: source.text.length }] }));
-  const citeAt = (index: number) => [{ sourceId: sources[index].id, revision: sources[index].revision, start: 0,
-    end: sources[index].text.length, quote: sources[index].text }];
+  const addSpan = (index: number, append: string) => {
+    const source = sources[index];
+    const start = source.text.length + 1;
+    const end = start + append.length;
+    sources[index] = { ...source, text: `${source.text} ${append}`, spans: [...source.spans, { start, end }] };
+  };
+  if (splitFindingsEvidence) {
+    addSpan(0, 'The notice board was repainted.');
+    addSpan(0, 'The tea order was recorded.');
+    addSpan(1, 'The desk reviewer disputes the opening time.');
+  }
+  const citeAt = (index: number, span = 0) => {
+    const { start, end } = sources[index].spans[span];
+    return [{ sourceId: sources[index].id, revision: sources[index].revision, start, end, quote: sources[index].text.slice(start, end) }];
+  };
   const productId = 'trial-morning';
   const time = '2026-11-02T08:00:00.000Z';
   const approval = {
@@ -727,15 +744,16 @@ async function newObservationFixture() {
       { kind: 'reported', personId: 'desk-reviewer', text: 'The desk reviewer reported an 08:10 opening.', confidence: 'low', evidence: citeAt(1) },
     ],
     relatedObservations: ['trial-desk-entry'],
-    potentialDuplicates: [{ observationId: 'trial-desk-entry', reason: 'The report mentions a possibly duplicate entry for the trial.', evidence: citeAt(1) }],
-    dissent: [{ attribution: 'Desk reviewer', text: 'The reported time differs from the observation.', evidence: citeAt(1) }],
+    potentialDuplicates: [{ observationId: 'trial-desk-entry', reason: 'The report mentions a possibly duplicate entry for the trial.',
+      evidence: splitFindingsEvidence ? [...citeAt(1), ...citeAt(2)] : citeAt(1) }],
+    dissent: [{ attribution: 'Desk reviewer', text: 'The reported time differs from the observation.', evidence: citeAt(1, splitFindingsEvidence ? 1 : 0) }],
   };
   return {
     ...subject, fixture, team, directory, body, sources,
     correct: (version: string) => {
       current = { ...approval, correction: { version, reason: 'Record the desk account as conflicting rather than resolved.', evidence: citeAt(1) } };
     },
-    support: citeAt(2),
+    support: citeAt(2), citeAt,
     withdrawCorroboration: () => { current = { ...current, corroborations: [] }; },
     withdrawReport: () => { admitted = [sources[0]]; },
   };
@@ -848,4 +866,140 @@ test('the real J7 child confirms corroboration only for the exact fixture-approv
   subject.withdrawCorroboration();
   await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|changed|admitted/);
   assert.deepEqual(await readdir(subject.directory), drafts);
+});
+
+async function newFindingsFixture() {
+  const subject = await newObservationFixture(true);
+  await runFixture(subject.fixture, subject.team, { steps: [toolCall('eligible-observation', saveObservation, subject.body)] });
+  const [file] = await readdir(subject.directory);
+  assert.ok(file);
+  const version = path.basename(file, '.json');
+  const scope = selectedInstitutionalScope(subject.team);
+  assert.ok(scope);
+  const readObservationReview = async () => {
+    const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+    assert.equal(review.kind, 'observation');
+    return review;
+  };
+  const observation = await readObservationReview();
+  const additional: InstitutionalBriefSource[] = [
+    { id: 'office-trial-objective', revision: '2', date: '2026-11-02', label: 'org/Public', project: observation.project,
+      text: 'The fictional office trial sought shorter morning queue waits.', spans: [] },
+    { id: 'office-trial-aggregate', revision: '5', date: '2026-11-06', label: 'org/Public', project: observation.project,
+      text: 'The deadline has passed and median queue time is lower. No implementation record is supplied.', spans: [] },
+  ];
+  for (const [index, source] of additional.entries()) additional[index] = { ...source, spans: [{ start: 0, end: source.text.length }] };
+  const citeSource = (source: InstitutionalBriefSource) => [{ sourceId: source.id, revision: source.revision, start: 0,
+    end: source.text.length, quote: source.text }];
+  const disclosure = {
+    purpose: 'fictional-office-hours-j7-10', project: observation.project, directory: observation.directory, echelon: 'L3',
+    state: 'approved-for-draft', productId: 'trial-morning-findings', observationVersion: observation.version, observationReviewDigest: digest(observation),
+    observationEvidence: [...subject.citeAt(0), ...subject.citeAt(0, 1), ...subject.citeAt(1, 1)],
+    objective: { id: 'shorter-queue-waits', revision: '2', evidence: citeSource(additional[0]) },
+    corroboratingEvidence: citeSource(additional[1]),
+    owner: 'fictional-desk-owner', subjectMatterExpert: 'fictional-queue-reviewer',
+    approver: { person: 'fictional-office-review-chair', level: 'fictional-brigade-l3' },
+  };
+  let current = disclosure;
+  const fixture = {
+    ...subject.fixture,
+    currentSources: () => [...subject.fixture.currentSources(), ...additional],
+    findingsAuthority: { predecessorTeam: subject.team, readObservation: readObservationReview, current: () => current },
+  };
+  const team = await selectSyntheticInstitutionalJ7Findings(fixture);
+  const directory = path.join(subject.fixture.root, findingsDirectory);
+  await mkdir(directory, { recursive: true });
+  const candidate = {
+    text: 'Reduced median queue time is a candidate result.',
+    direct: subject.citeAt(0), corroborating: citeSource(additional[1]),
+    conflicting: subject.citeAt(1, 1), alternateExplanations: ['Arrival volume may have fallen.'],
+    uncertainty: 'No controlled comparison is available.',
+    recommendation: 'Request the administrative implementation log for review.',
+    implementationEvidence: 'Dated records showing the revised opening hours were used.',
+    independentCheck: 'A reviewer compares the implementation record with queue measurements.',
+  };
+  const body = { productId: disclosure.productId, candidates: [candidate], dissent: subject.body.dissent,
+    limitations: [{ gap: 'Implementation is unverified.', resolve: 'Obtain the dated opening-hours record.' }] };
+  return { fixture, team, directory, body, observation, aggregate: additional[1], objective: additional[0],
+    uncited: subject.citeAt(0, 1), undisclosed: subject.citeAt(0, 2), excludedSource: subject.sources[2],
+    withdrawDissent: () => { current = { ...disclosure, observationEvidence: subject.citeAt(0) }; },
+    restoreDisclosure: () => { current = disclosure; },
+    supersede: () => { current = { ...disclosure, state: 'superseded' }; } };
+}
+
+test('exact J7-10 candidate findings stay open for independent human validation', async () => {
+  const subject = await newFindingsFixture();
+  const unsupported = await runFixture(subject.fixture, subject.team, { steps: [
+    toolCall('unsupported-finding-state', saveFindings, { ...subject.body, validation: 'closed', release: true }),
+  ] });
+  assert.deepEqual(await readdir(subject.directory), []);
+  assert.ok(!unsupported.posted.some((entry) => entry.type === 'approval-request'));
+  assert.ok(!unsupported.decisions.some((entry) => entry.api.request.uid === 'unsupported-finding-state' && entry.action_id === 1));
+  const badDirect = await runFixture(subject.fixture, subject.team, { steps: [
+    toolCall('uncited-span-as-direct', saveFindings, { ...subject.body, candidates: [{ ...subject.body.candidates[0], direct: subject.uncited }] }),
+    toolCall('dissent-as-direct', saveFindings, { ...subject.body, candidates: [{ ...subject.body.candidates[0], direct: subject.body.dissent[0].evidence }] }),
+  ] });
+  assert.deepEqual(await readdir(subject.directory), []);
+  assert.ok(!badDirect.results.some((entry) => entry.includes('"state":"draft"')));
+  assert.ok(!badDirect.decisions.some((entry) => ['uncited-span-as-direct', 'dissent-as-direct'].includes(entry.api.request.uid) && entry.action_id === 1));
+  const valid = await runFixture(subject.fixture, subject.team, { steps: [
+    toolCall('direct-evidence', readObservation, { sourceId: subject.body.candidates[0].direct[0].sourceId }),
+    toolCall('dissent-evidence', readObservation, { sourceId: subject.body.dissent[0].evidence[0].sourceId }),
+    toolCall('excluded-evidence', readObservation, { sourceId: subject.excludedSource.id }),
+    toolCall('findings-evidence', readObservation, { sourceId: subject.aggregate.id }),
+    toolCall('findings', saveFindings, subject.body),
+  ] });
+  assert.deepEqual(valid.offers[0], [saveFindings, readObservation].sort());
+  const offeredSources = (valid.readOffers[0] as { properties: { sourceId: { enum: string[] } } }).properties.sourceId.enum;
+  const direct = subject.body.candidates[0].direct[0];
+  const dissent = subject.body.dissent[0].evidence[0];
+  assert.deepEqual(offeredSources.sort(), [direct.sourceId, dissent.sourceId, subject.aggregate.id, subject.objective.id].sort());
+  for (const quote of [direct.quote, dissent.quote, subject.aggregate.text]) assert.ok(valid.results.some((entry) => entry.includes(quote)));
+  for (const quote of [subject.uncited[0].quote, subject.undisclosed[0].quote, subject.excludedSource.text]) {
+    assert.ok(!valid.results.some((entry) => entry.includes(quote)));
+  }
+  const [file, ...others] = await readdir(subject.directory);
+  assert.ok(file);
+  assert.deepEqual(others, []);
+  const bytes = await readFile(path.join(subject.directory, file));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(file, `${version}.json`);
+  assert.ok(valid.results.some((entry) => entry.includes(version)));
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'J7-10');
+  assert.equal(draft.kind, 'findings');
+  assert.equal(draft.observation.version, subject.observation.version);
+  assert.equal(draft.observation.verification, 'unverified-draft');
+  assert.equal(draft.objective.id, 'shorter-queue-waits');
+  assert.equal(draft.validation, 'open');
+  assert.equal(draft.release, 'disabled');
+  assert.deepEqual(draft.reasoningReview, { person: 'fictional-queue-reviewer', state: 'pending' });
+  assert.deepEqual(draft.requiredApproval, { person: 'fictional-office-review-chair', level: 'fictional-brigade-l3' });
+  assert.equal(draft.owner, 'fictional-desk-owner');
+  assert.deepEqual(draft.body.candidates, subject.body.candidates);
+  assert.deepEqual(draft.body.dissent, subject.body.dissent);
+  assert.deepEqual(draft.body.limitations, subject.body.limitations);
+  assert.deepEqual(draft.observation.sources.map((source: InstitutionalBriefSource) => source.id).sort(), [direct.sourceId, dissent.sourceId].sort());
+  const scope = selectedInstitutionalScope(subject.team);
+  assert.ok(scope);
+  assert.equal((await readInstitutionalDraftReview(scope, resolveInWorkspace, version)).version, version);
+  const withdrawn = await runFixture(subject.fixture, subject.team, {
+    steps: [toolCall('withdrawn-dissent', readObservation, { sourceId: dissent.sourceId })],
+    onChildTurn(turn) { if (turn === 0) subject.withdrawDissent(); },
+  });
+  const previousOffer = (withdrawn.readOffers[0] as { properties: { sourceId: { enum: string[] } } }).properties.sourceId.enum;
+  assert.ok(previousOffer.includes(dissent.sourceId), 'the actual child had already received the old evidence offer');
+  assert.ok(!withdrawn.results.some((entry) => entry.includes(dissent.quote)));
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|admitted|changed/);
+  subject.restoreDisclosure();
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; subject.supersede(); } });
+  try {
+    const revised = { ...subject.body, candidates: [{ ...subject.body.candidates[0], text: 'The apparent improvement still needs validation.' }] };
+    const held = await runFixture(subject.fixture, subject.team, { steps: [toolCall('stale-findings', saveFindings, revised)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'stale-findings' && entry.action_id === 1));
+    assert.deepEqual(await readdir(subject.directory), [file]);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+  } finally { setCasProbe(undefined); }
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|admitted|changed/);
 });

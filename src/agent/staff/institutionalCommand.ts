@@ -3,10 +3,10 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpat
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  admittedInstitutionalObservation, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, institutionalObservationDirectory,
-  institutionalObservationInput, institutionalSourceHash, prepareInstitutionalActionRegister, prepareInstitutionalBrief, prepareInstitutionalObservation,
+  admittedInstitutionalFindings, admittedInstitutionalObservation, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, institutionalObservationDirectory,
+  institutionalObservationInput, institutionalSourceHash, prepareInstitutionalActionRegister, prepareInstitutionalBrief, prepareInstitutionalFindings, prepareInstitutionalObservation,
   validateInstitutionalBriefSource, verifyInstitutionalActionAcceptance, type InstitutionalActionAuthority, type InstitutionalBriefSource,
-  type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type PreparedInstitutionalDraft,
+  type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type InstitutionalObservationReview, type PreparedInstitutionalDraft,
 } from '../../domain/staff/institutionalBrief';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { parseTeam, renderTeam, teamAgents, type TeamDefinition } from '../teams';
@@ -47,6 +47,8 @@ const actionRegisterInstructions = 'Draft the fictional J3-07 office-hours actio
 const actionRegisterMember = 'action-register-drafter';
 const lessonsName = 'Institutional G7 Lessons';
 const lessonsMember = 'lessons-drafter';
+const saveFindings = 'SaveInstitutionalAfterActionDraft';
+const findingsInstructions = 'Draft fictional J7-10 office-hours findings for independent human validation. Show direct, corroborating and conflicting evidence, alternate explanations, uncertainty and missing implementation proof. Leave validation and release to the designated people.';
 const lessonsInstructions = 'Draft a fictional J7-09 office-hours observation from admitted local evidence. Distinguish direct observation, reports, judgment and hypothesis. Retain uncertainty, citations, corrections and dissent for human review.';
 const institutionalRoles = {
   [INSTITUTIONAL_COMMAND_GROUP_TEAM]: {
@@ -149,6 +151,14 @@ interface InstitutionalObservationFixture extends InstitutionalCommandFixture {
   readonly currentObservation: () => unknown;
 }
 
+interface InstitutionalFindingsFixture extends InstitutionalCommandFixture {
+  readonly findingsAuthority: {
+    readonly predecessorTeam: TeamDefinition;
+    readonly readObservation: () => Promise<InstitutionalObservationReview>;
+    readonly current: () => unknown;
+  };
+}
+
 const fixtureSelections = new WeakMap<TeamDefinition, { readonly fixture: InstitutionalCommandFixture; readonly scope: InstitutionalDraftScope }>();
 const stale = 'The institutional command fixture no longer matches the staged project, source or run.';
 
@@ -171,19 +181,25 @@ export async function selectSyntheticInstitutionalJ7Observation(fixture: Institu
   return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J7_LESSONS_TEAM, { currentObservation: fixture.currentObservation });
 }
 
+export async function selectSyntheticInstitutionalJ7Findings(fixture: InstitutionalFindingsFixture): Promise<TeamDefinition> {
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J7_LESSONS_TEAM, { findingsAuthority: fixture.findingsAuthority });
+}
+
 async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFixture, teamId: InstitutionalRoleId, {
-  authority, currentObservation,
-}: { authority?: InstitutionalActionRegisterFixture['actionAuthority']; currentObservation?: () => unknown } = {}): Promise<TeamDefinition> {
+  authority, currentObservation, findingsAuthority,
+}: { authority?: InstitutionalActionRegisterFixture['actionAuthority']; currentObservation?: () => unknown;
+  findingsAuthority?: InstitutionalFindingsFixture['findingsAuthority'] } = {}): Promise<TeamDefinition> {
   const exact = await captureInstitutionalBinding(fixture.root, teamId);
   if (!readInstitutionalRoleBinding(fixture.readStaged(), exact) || typeof fixture.withStableParents !== 'function' ||
       typeof fixture.currentSources !== 'function' || typeof fixture.currentActionSettings !== 'function' || !fixture.runId || !fixture.model ||
       !/^[a-f0-9]{64}$/.test(fixture.policyHash) || (teamId === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM && !authority) ||
-      (teamId === INSTITUTIONAL_J7_LESSONS_TEAM && typeof currentObservation !== 'function')) throw new ToolError(stale);
+      (teamId === INSTITUTIONAL_J7_LESSONS_TEAM && typeof currentObservation !== 'function' && !findingsAuthority)) throw new ToolError(stale);
   const role = institutionalRole(teamId);
   const team = parseTeam(role.definition, `${teamId}.md`);
   for (const member of team.members) {
     // Keep the staged definition bytes stable. Only the selected fixture supplies the explicit tool list.
-    member.tools = [role.read, role.save];
+    member.tools = [role.read, findingsAuthority ? saveFindings : role.save];
+    if (findingsAuthority) member.instructions = findingsInstructions;
     Object.freeze(member.tools);
     Object.freeze(member);
   }
@@ -233,15 +249,59 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
         try {
           const active = current();
           return institutionalBriefDigest(canonicalBytes(active.correction)) === institutionalBriefDigest(canonicalBytes(correction)) &&
-            (!correction || currentObservationPredecessor(fixture.root, binding, currentSources(), active, correction.version));
+            (!correction || Boolean(reconstructObservationPredecessor(fixture.root, binding, currentSources(), active, correction.version)));
         } catch { return false; }
       },
     });
     current();
   }
+  let findings: InstitutionalDraftScope['findings'];
+  if (findingsAuthority) {
+    const evidence = Object.freeze({ ...findingsAuthority });
+    const priorScope = fixtureSelections.get(evidence.predecessorTeam)?.scope;
+    const priorObservation = priorScope?.observation;
+    if (!priorScope || !priorObservation || priorScope.root !== fixture.root ||
+        priorScope.binding.directory !== binding.directory || priorScope.binding.team !== binding.team ||
+        !await priorScope.bindingIsCurrent()) throw new ToolError(stale);
+    const priorSources = sourceHashes(priorScope.currentSources());
+    const priorApprovalDigest = institutionalBriefDigest(canonicalBytes(priorObservation.current()));
+    const prior = structuredClone(await evidence.readObservation());
+    const reviewDigest = institutionalBriefDigest(canonicalBytes(prior));
+    const predecessorFacts = () => {
+      try {
+        return priorScope.stagedIsCurrent() && sameSources(priorSources, priorScope.currentSources()) &&
+          institutionalBriefDigest(canonicalBytes(priorObservation.current())) === priorApprovalDigest;
+      } catch { return false; }
+    };
+    if (prior.kind !== 'observation' || prior.team !== binding.team || prior.teamVersion !== binding.teamVersion ||
+        prior.skillVersion !== binding.skillVersion || !predecessorFacts() ||
+        prior.sources.some(({ id, hash }) => priorSources.get(id) !== hash)) throw new ToolError(stale);
+    const priorBody = await priorScope.withStableParents(async () => predecessorFacts() &&
+      priorObservation.correctionAtEffect(prior.correction) &&
+      reconstructObservationPredecessor(priorScope.root, priorScope.binding, priorScope.currentSources(), priorObservation.current(), prior.version));
+    if (!priorBody) throw new ToolError(stale);
+    findings = Object.freeze({
+      current: () => admittedInstitutionalFindings(evidence.current(), prior, priorBody, binding, currentSources()),
+      predecessorCurrent: async () => {
+        try {
+          if (!predecessorFacts()) return false;
+          const reopened = await evidence.readObservation();
+          return predecessorFacts() && institutionalBriefDigest(canonicalBytes(reopened)) === reviewDigest;
+        } catch { return false; }
+      },
+      predecessorAtEffect: (version: string) => {
+        try {
+          return version === prior.version && predecessorFacts() &&
+            priorObservation.correctionAtEffect(prior.correction) &&
+            Boolean(reconstructObservationPredecessor(priorScope.root, priorScope.binding, priorScope.currentSources(), priorObservation.current(), version));
+        } catch { return false; }
+      },
+    });
+    findings.current();
+  }
   fixtureSelections.set(team, { fixture: provider, scope: Object.freeze({
     root: fixture.root, binding, withStableParents: fixture.withStableParents, currentSources, stagedIsCurrent,
-    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}),
+    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}),
     bindingIsCurrent: async () => {
       const sampled = await captureInstitutionalBinding(provider.root, teamId);
       return sampled.directoryDigest === exact.directoryDigest && stagedIsCurrent();
@@ -294,19 +354,19 @@ function readExactDraftLeaf(root: string, directory: string, version: string): B
   } catch { return undefined; }
 }
 
-function currentObservationPredecessor(
+function reconstructObservationPredecessor(
   root: string, binding: InstitutionalDraftScope['binding'], sources: readonly InstitutionalBriefSource[],
   approval: InstitutionalObservationEvidence, version: string,
-): boolean {
+): object | undefined {
   const bytes = readExactDraftLeaf(root, institutionalObservationDirectory, version);
-  if (!bytes) return false;
+  if (!bytes) return undefined;
   const stored: unknown = JSON.parse(bytes.toString('utf8'));
-  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return false;
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return undefined;
   const { body, productId, correction } = stored as Record<string, unknown>;
-  if (!body || typeof body !== 'object' || Array.isArray(body) || productId !== approval.productId) return false;
+  if (!body || typeof body !== 'object' || Array.isArray(body) || productId !== approval.productId) return undefined;
   const prior = admittedInstitutionalObservation({ ...approval, correction }, binding, sources);
   const expected = prepareInstitutionalObservation(institutionalObservationInput(body, productId), binding, sources, prior);
-  return expected.review.version === version && bytes.equals(Buffer.from(expected.text));
+  return expected.review.version === version && bytes.equals(Buffer.from(expected.text)) ? body : undefined;
 }
 
 function sourceHashes(sources: readonly InstitutionalBriefSource[]): ReadonlyMap<string, string> {
@@ -348,6 +408,16 @@ const observationSchema = exactSchema({
   dissent: entries(exactSchema({ attribution: line, text: line, evidence: citationSchema })),
 });
 
+const findingsSchema = exactSchema({
+  productId: line,
+  candidates: entries(exactSchema({
+    text: line, direct: citationSchema, corroborating: citationSchema, conflicting: citationSchema,
+    alternateExplanations: entries(line), uncertainty: line, recommendation: line, implementationEvidence: line, independentCheck: line,
+  })),
+  dissent: entries(exactSchema({ attribution: line, text: line, evidence: citationSchema })),
+  limitations: entries(exactSchema({ gap: line, resolve: line })),
+});
+
 export async function institutionalChildTools(
   team: TeamDefinition | undefined, selection: { root: string; runId: string; label: string; model: string; local: boolean; onTeam: boolean; detached: boolean },
   store: {
@@ -361,25 +431,41 @@ export async function institutionalChildTools(
   if (!selected || !selection.local || !selection.onTeam || selection.detached || selection.label !== role.member ||
       selected.scope.root !== selection.root || selected.fixture.runId !== selection.runId || selected.fixture.model !== selection.model) throw new ToolError(stale);
   const { scope, fixture: { policyHash, currentActionSettings } } = selected;
-  if (!await scope.bindingIsCurrent() || (scope.actionRegister && !await scope.actionRegister.predecessorCurrent())) throw new ToolError(stale);
+  if (!await scope.bindingIsCurrent() || (scope.actionRegister && !await scope.actionRegister.predecessorCurrent()) ||
+      (scope.findings && !await scope.findings.predecessorCurrent())) throw new ToolError(stale);
   const accepted = scope.actionRegister?.current();
   const approvedObservation = scope.observation?.current();
   const observationDigest = approvedObservation && institutionalBriefDigest(canonicalBytes(approvedObservation));
-  const { read: readEvidence, save: saveDraft } = role;
+  const approvedFindings = scope.findings?.current();
+  const findingsDigest = approvedFindings && institutionalBriefDigest(canonicalBytes(approvedFindings));
+  const readEvidence = role.read;
+  const saveDraft = approvedFindings ? saveFindings : role.save;
   const sources = structuredClone(scope.currentSources());
+  const approvedExtracts = approvedFindings && [
+    ...approvedFindings.directEvidence, ...approvedFindings.conflictingEvidence, ...approvedFindings.correctionEvidence,
+    ...approvedFindings.objective.evidence, ...approvedFindings.corroboratingEvidence,
+  ];
+  const quoteSources = approvedExtracts ? sources.map((source) => ({
+    ...source,
+    spans: source.spans.filter(({ start, end }) =>
+      approvedExtracts.some((entry) => entry.sourceId === source.id && entry.start === start && entry.end === end)),
+    dissentAttribution: approvedFindings?.dissentEvidence.some(({ sourceId }) => sourceId === source.id) ? source.dissentAttribution : undefined,
+  })).filter(({ spans }) => spans.length > 0) : sources;
   const capturedSources = sourceHashes(sources);
   const currentFacts = (context: ToolContext) => {
     try {
       return sameSources(capturedSources, scope.currentSources()) && scope.stagedIsCurrent() && !context.signal.aborted &&
         (!scope.actionRegister || (scope.actionRegister.predecessorFacts() &&
           scope.actionRegister.current().predecessor.envelopeDigest === accepted?.predecessor.envelopeDigest)) &&
-        (!scope.observation || institutionalBriefDigest(canonicalBytes(scope.observation.current())) === observationDigest);
+        (!scope.observation || institutionalBriefDigest(canonicalBytes(scope.observation.current())) === observationDigest) &&
+        (!scope.findings || institutionalBriefDigest(canonicalBytes(scope.findings.current())) === findingsDigest);
     } catch { return false; }
   };
   const fresh = async (context: ToolContext) => Boolean(context.agentId && context.agentLabel === selection.label &&
     context.root === scope.root && !context.signal.aborted && await scope.bindingIsCurrent() && currentFacts(context));
   const project = (raw: Record<string, unknown>) => {
-    const draft = approvedObservation ? prepareInstitutionalObservation(raw, scope.binding, sources, approvedObservation)
+    const draft = approvedFindings ? prepareInstitutionalFindings(raw, scope.binding, sources, approvedFindings)
+      : approvedObservation ? prepareInstitutionalObservation(raw, scope.binding, sources, approvedObservation)
       : accepted ? prepareInstitutionalActionRegister(raw, scope.binding, sources, accepted)
       : prepareInstitutionalBrief(raw, scope.binding, sources);
     draft.review.sources.forEach(Object.freeze);
@@ -390,17 +476,27 @@ export async function institutionalChildTools(
       Object.freeze(draft.review.correction.evidence);
       Object.freeze(draft.review.correction);
     }
+    if (draft.review.kind === 'findings') {
+      draft.review.observation.sources.forEach(Object.freeze);
+      Object.freeze(draft.review.observation.sources);
+      Object.freeze(draft.review.observation);
+      draft.review.objective.evidence.forEach(Object.freeze);
+      Object.freeze(draft.review.objective.evidence);
+      Object.freeze(draft.review.objective);
+      Object.freeze(draft.review.reasoningReview);
+      Object.freeze(draft.review.requiredApproval);
+    }
     Object.freeze(draft.review);
     return Object.freeze(draft);
   };
   const read: AgentTool<string> = {
     name: readEvidence, description: 'Read the admitted text spans of one fictional evidence source by ID.',
-    parameters: exactSchema({ sourceId: { ...line, enum: sources.map((source) => source.id) } }), capability: 'read',
+    parameters: exactSchema({ sourceId: { ...line, enum: quoteSources.map((source) => source.id) } }), capability: 'read',
     // The admitted extracts are in memory and have no workspace path.
     manifest: declareManifest({ tool: readEvidence, effects: [{ verb: 'plan' }], contexts: INTERACTIVE_ONLY }),
     fixtureGate: () => ({ policyHash, currentActionSettings, effect: { verb: 'plan' } }),
     parse(raw) {
-      if (Object.keys(raw).length !== 1 || typeof raw.sourceId !== 'string' || !sources.some((source) => source.id === raw.sourceId)) throw new ToolError('This evidence is unavailable.');
+      if (Object.keys(raw).length !== 1 || typeof raw.sourceId !== 'string' || !quoteSources.some((source) => source.id === raw.sourceId)) throw new ToolError('This evidence is unavailable.');
       return raw.sourceId;
     },
     title: () => 'Read admitted brief evidence',
@@ -410,24 +506,26 @@ export async function institutionalChildTools(
       const quote = () => {
         if (!context.verifyFixtureGate?.(id) ||
             (accepted && (!currentFacts(context) || !scope.actionRegister?.predecessorAtEffect(accepted.predecessor.version))) ||
-            (approvedObservation && (!currentFacts(context) || !scope.observation?.correctionAtEffect(approvedObservation.correction)))) throw new ToolError(stale);
-        const source = sources.find((candidate) => candidate.id === id)!;
+            (approvedObservation && (!currentFacts(context) || !scope.observation?.correctionAtEffect(approvedObservation.correction))) ||
+            (approvedFindings && (!currentFacts(context) || !scope.findings?.predecessorAtEffect(approvedFindings.observation.version)))) throw new ToolError(stale);
+        const source = quoteSources.find((candidate) => candidate.id === id)!;
         return JSON.stringify({ id, revision: source.revision, date: source.date, label: source.label,
           ...(source.dissentAttribution ? { dissentAttribution: source.dissentAttribution } : {}),
           spans: source.spans.map(({ start, end }) => ({ start, end, quote: source.text.slice(start, end) })),
         });
       };
-      return accepted || approvedObservation ? scope.withStableParents(async () => quote()) : quote();
+      return accepted || approvedObservation || approvedFindings ? scope.withStableParents(async () => quote()) : quote();
     },
   };
   const save: AgentTool<PreparedInstitutionalDraft> = {
-    name: saveDraft, description: approvedObservation ? 'Save one cited fictional office-hours observation for human review.'
+    name: saveDraft, description: approvedFindings ? 'Save cited fictional office-hours candidate findings for independent human validation.'
+      : approvedObservation ? 'Save one cited fictional office-hours observation for human review.'
       : accepted ? 'Save one cited fictional office-hours action register for human review.' : 'Save one cited CG-07 decision brief as a local draft for human review.',
-    parameters: approvedObservation ? observationSchema : accepted ? actionRegisterSchema : briefSchema, capability: 'workspaceWrite',
+    parameters: approvedFindings ? findingsSchema : approvedObservation ? observationSchema : accepted ? actionRegisterSchema : briefSchema, capability: 'workspaceWrite',
     manifest: declareManifest({ tool: saveDraft, effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_ONLY }),
     fixtureGate: (draft) => ({ policyHash, currentActionSettings, effect: { verb: 'workspaceWrite', path: draft.path } }),
     parse: project,
-    title: () => approvedObservation ? 'Save local observation draft' : accepted ? 'Save local action register draft' : 'Save local decision brief draft',
+    title: () => approvedFindings ? 'Save local candidate findings draft' : approvedObservation ? 'Save local observation draft' : accepted ? 'Save local action register draft' : 'Save local decision brief draft',
     async forbidden(draft, context) {
       if (!await fresh(context)) return stale;
       return store.verify(scope, draft).then(() => undefined, () => stale);

@@ -3,8 +3,8 @@ import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
   institutionalActionRegisterDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
-  institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
-  prepareInstitutionalObservation, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
+  institutionalFindingsDirectory, institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
+  prepareInstitutionalFindings, prepareInstitutionalObservation, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
 } from '../domain/staff/institutionalBrief';
 import { replaceKeepingEdits } from './staffFiles';
 
@@ -13,6 +13,7 @@ const hexDigest = /^[0-9a-f]{64}$/;
 const readLeafFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 function directoryOf(scope: InstitutionalDraftScope): string {
+  if (scope.findings) return institutionalFindingsDirectory;
   return scope.observation ? institutionalObservationDirectory : scope.actionRegister ? institutionalActionRegisterDirectory : institutionalBriefDirectory;
 }
 
@@ -78,8 +79,9 @@ function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected
   const { body, productId } = payload as Record<string, unknown>;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return changed();
   const sources = scope.currentSources();
-  const expected = scope.observation
-    ? prepareInstitutionalObservation(institutionalObservationInput(body, productId), scope.binding, sources, scope.observation.current())
+  const expected = scope.findings
+    ? prepareInstitutionalFindings({ ...body, productId }, scope.binding, sources, scope.findings.current())
+    : scope.observation ? prepareInstitutionalObservation(institutionalObservationInput(body, productId), scope.binding, sources, scope.observation.current())
     : scope.actionRegister
       ? prepareInstitutionalActionRegister({ productId, rows: storedActionRows(body) }, scope.binding, sources, scope.actionRegister.current())
       : prepareInstitutionalBrief({ ...body, productId }, scope.binding, sources);
@@ -98,11 +100,13 @@ function storedActionRows(body: object): unknown[] {
 }
 
 async function requireCurrentPredecessor(scope: InstitutionalDraftScope): Promise<void> {
-  if (scope.actionRegister && !await scope.actionRegister.predecessorCurrent()) return changed();
+  const predecessor = scope.actionRegister ?? scope.findings;
+  if (predecessor && !await predecessor.predecessorCurrent()) return changed();
 }
 
 function exactPredecessorLeaf(scope: InstitutionalDraftScope, review: InstitutionalDraftReview): boolean {
   if (review.kind === 'observation') return scope.observation?.correctionAtEffect(review.correction) === true;
+  if (review.kind === 'findings') return scope.findings?.predecessorAtEffect(review.observation.version) === true;
   return review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
 }
 
