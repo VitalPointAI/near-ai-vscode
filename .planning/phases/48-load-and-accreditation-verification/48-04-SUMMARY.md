@@ -155,6 +155,25 @@ directory. The exact test-created container and its private workspace
 were removed after the run. The archive, imported image and logs
 were retained.
 
+## Task 3B command and stage accounting
+
+The separate `sample --no-auth --once` command checks the private
+fixture descriptor, live rootless image and listener, the runner and
+Chromium namespaces, the workspace and the resource caps. It permits
+only fixed fixture origins, refuses redirects before Chromium follows
+them and claims the fixture once before browser launch. It returns
+local timings and the canonical profile identity with a configured
+sample count and stage total of one.
+
+The controller gives the existing per-person accounting only distinct
+completed stage sessions that fall inside each hold window. The ordinary
+rig command supplies no local sample data. Type checking and all 57
+load-test cases passed, with zero skips. The command, isolation checks,
+redirect refusal and stage accounting used local fakes. The approved
+fixture evidence above came from the scratch harness before the command
+was registered. The registered command still needs an authorized
+end-to-end run on a fresh exact fixture.
+
 ## Self-Check: PASSED
 
 The two measured Task 1 commits and their files are present on the
@@ -167,5 +186,5 @@ identity and the completed browser activity above.
 
 ## Open conditions
 
-- **G322.** Hosted target-scale and active-browser measurements still need authorized site work. The registered one-shot sample command and stage active-sample integration still need implementation and regression coverage.
+- **G322.** An authorized end-to-end run of the registered command on a fresh exact test fixture and authorized hosted target-scale and active-browser measurements remain open.
 - **G323.** Representative hub load and resource measurements on the rig remain pending. The measured times above apply to one local fixture.

@@ -32,8 +32,8 @@ reason, and nothing is extrapolated.
 
 Every query and its time range are stored in the run file. Kubernetes times have one-second resolution, so start durations are whole seconds
 in milliseconds; keep the generator host's clock synchronised with the cluster (a negative duration from clock skew is left out). The active
-sample (sessions with a real browser running the activity profile) and the hub load are added by plan 48-04; until then `activeSample` is 0
-and the per-person rows print "no samples".
+sample represents sessions with a completed browser activity profile during the hold. The ordinary rig command currently records
+`activeSample` as 0 and the per-person rows print "no samples". Rig browser and hub measurements are tracked under G322 and G323.
 
 ## Tools on the rig
 
@@ -63,6 +63,20 @@ These tools are on the rig, not in this repository, so the resource checker cann
    interrupted.
 6. Check three sessions by hand against the cluster (creation, Ready and address times), then commit the run file, run
    `node loadtest/src/cli.ts capacity` and commit the regenerated page.
+
+## One-shot local browser fixture
+
+The Phase 48-04 local command is `node loadtest/src/cli.ts sample --no-auth --once`. It requires a separately authorized test-created
+v0.4.41 Workbench fixture and the already verified Chromium 1254 executable. The launcher supplies the absolute path to its mode-0600
+`fixture.json` in `SOVAI_SAMPLE_FIXTURE`. Its fields are `containerId`, `hostNamespace` from the launcher before joining the fixture,
+and the absolute `chromiumExecutable` path. The command checks the live container, private namespace, dedicated workspace, pinned
+image and browser, and resource caps before taking a one-time claim. The fixture marker prevents use of the ordinary `run` command,
+including dry-run. Review the signed artifact and fixture evidence before an authorized trial.
+
+Workbench uses literal `127.0.0.1:3000` with no sign-in. A separate server bound to `127.0.0.1:3001` uses `localhost` as the WebAuthn
+relying party for disposable virtual passkey registration and sign-in. The checksummed activity profile opens three synthetic documents,
+edits and saves one, runs a fixed terminal echo and waits briefly. The command refuses redirects and outside origins. It prints
+Get Started, step and standalone sign-in timings as JSON, with a configured sample count and stage total of one. It creates no rig run file.
 
 ## The test realm
 

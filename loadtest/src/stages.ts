@@ -64,6 +64,8 @@ export interface RunStagesInput {
   readonly clock: Clock;
   readonly signal?: AbortSignal;
   readonly hubs?: (signal?: AbortSignal) => Promise<HubSmoke>;
+  /** Completed local fixture samples supplied as data. Ordinary load runs do not supply these. */
+  readonly localSamples?: readonly { readonly sessionName: string; readonly finishedAt: number }[];
 }
 
 export interface StagesOutcome {
@@ -215,8 +217,15 @@ export async function runStages(input: RunStagesInput): Promise<StagesOutcome> {
         }
         const holdStart = clock.now();
         await hold(input, bulk);
-        const holdEnd = clock.now();
-        const steady = await measure.steady({ sessions: bulk, active: [], window: { start: holdStart, end: holdEnd } });
+        const window = { start: holdStart, end: clock.now() };
+        const stageNames = new Set(bulk.map(({ sessionName }) => sessionName));
+        const active = new Set<string>();
+        for (const { sessionName, finishedAt } of input.localSamples ?? []) {
+          if (stageNames.has(sessionName) && Number.isSafeInteger(finishedAt) && finishedAt >= window.start && finishedAt < window.end) {
+            active.add(sessionName);
+          }
+        }
+        const steady = await measure.steady({ sessions: bulk, active: [...active], window });
         const hub = input.hubs ? await input.hubs(signal) : undefined;
         if (input.hubs) checkSignal(signal);
 
