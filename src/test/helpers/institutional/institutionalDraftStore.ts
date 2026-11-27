@@ -5,11 +5,11 @@ import {
   institutionalActionRegisterDirectory, institutionalBusinessServicesDirectory, institutionalCatalogueDirectory, institutionalCatalogueUnavailable, institutionalLibraryRemitsDirectory, institutionalPlanningDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
   institutionalFindingsDirectory, institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
   prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalFindings, prepareInstitutionalLibraryRemits, prepareInstitutionalObservation, prepareInstitutionalPlanningRegister, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
-} from '../domain/staff/institutionalBrief';
-import { institutionalAccessibilityDirectory, prepareInstitutionalAccessibility } from '../domain/staff/institutionalAccessibilityReview';
-import { institutionalBudgetDirectory, institutionalInventoryDirectory, prepareInstitutionalBudget, prepareInstitutionalInventory } from '../domain/staff/institutionalReconciliation';
-import { institutionalServiceMonitoringDirectory, prepareInstitutionalServiceMonitoring } from '../domain/staff/institutionalServiceMonitoring';
-import { replaceKeepingEdits } from './staffFiles';
+} from './institutionalBrief';
+import { institutionalAccessibilityDirectory, prepareInstitutionalAccessibility } from './institutionalAccessibilityReview';
+import { institutionalBudgetDirectory, institutionalInventoryDirectory, prepareInstitutionalBudget, prepareInstitutionalInventory } from './institutionalReconciliation';
+import { institutionalServiceMonitoringDirectory, prepareInstitutionalServiceMonitoring } from './institutionalServiceMonitoring';
+import { replaceKeepingEdits } from '../../../staff/staffFiles';
 
 type ResolveDraftPath = (root: string, requested: string) => Promise<string>;
 const hexDigest = /^[0-9a-f]{64}$/;

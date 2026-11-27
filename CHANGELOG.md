@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- In About SovAI, Enter closes the dialog when its Close button has keyboard focus.
+
 ## 0.4.41
 
 This maintenance release makes the Linux Workbench easier to start and improves reliability in Team Studio and Compare Models.

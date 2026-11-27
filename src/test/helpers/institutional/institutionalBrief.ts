@@ -1,6 +1,6 @@
-import { canonicalBytes } from '../team/canonical';
-import { verifyPayload, type PayloadSignerRef } from '../team/signedPayload';
-import { STAFF_SLUG } from './parse';
+import { canonicalBytes } from '../../../domain/team/canonical';
+import { verifyPayload, type PayloadSignerRef } from '../../../domain/team/signedPayload';
+import { STAFF_SLUG } from '../../../domain/staff/parse';
 import {
   canonicalDigest, catalogueId, institutionalBriefDigest, institutionalBriefMaxBytes, institutionalSourceHash,
   list, metadataDate, metadataSource, record, requestedCatalogueRows, requireCatalogue, sourceReferences, text,

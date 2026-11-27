@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { canonicalBytes } from '../team/canonical';
+import { canonicalBytes } from '../../../domain/team/canonical';
 import type { InstitutionalBriefReview, InstitutionalBriefSource } from './institutionalBrief';
 
 export const institutionalBriefMaxBytes = 128 * 1024;

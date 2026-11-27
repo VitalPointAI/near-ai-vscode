@@ -1,10 +1,10 @@
-import { canonicalBytes } from '../team/canonical';
+import { canonicalBytes } from '../../../domain/team/canonical';
 import type { InstitutionalBriefBinding, InstitutionalBriefReview, InstitutionalBriefSource, PreparedInstitutionalDraft } from './institutionalBrief';
 import {
   canonicalDigest, catalogueId, institutionalBriefDigest, institutionalBriefMaxBytes, list, metadataSource,
   record, requestedCatalogueRows, requireCatalogue, sourceReferences, type InstitutionalCatalogueSource,
 } from './institutionalEvidence';
-import { STAFF_SLUG } from './parse';
+import { STAFF_SLUG } from '../../../domain/staff/parse';
 
 export const institutionalAccessibilityDirectory = '.planning/staff/institutional/special/accessibility-reviews';
 

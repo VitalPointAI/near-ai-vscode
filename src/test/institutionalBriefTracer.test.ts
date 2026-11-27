@@ -1,3 +1,4 @@
+import { createInstitutionalStaffSetupFixture } from './helpers/institutional/institutionalPicker';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
@@ -8,17 +9,17 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectSyntheticInstitutionalJ8Budget, selectSyntheticInstitutionalJ1Monitoring, selectSyntheticInstitutionalAccessibility, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectSyntheticInstitutionalJ8Budget, selectSyntheticInstitutionalJ1Monitoring, selectSyntheticInstitutionalAccessibility, selectedInstitutionalScope, institutionalChildTools, selectedTeamAgents } from './helpers/institutional/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
-import { institutionalSourceHash, type InstitutionalBriefSource } from '../domain/staff/institutionalBrief';
+import { institutionalSourceHash, type InstitutionalBriefSource } from './helpers/institutional/institutionalBrief';
 import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload } from '../domain/team/signedPayload';
 import { setCasProbe } from '../staff/staffFiles';
-import { readInstitutionalDraftReview } from '../staff/institutionalDraftStore';
+import { readInstitutionalDraftReview, storeInstitutionalDraft, verifyInstitutionalDraftTarget } from './helpers/institutional/institutionalDraftStore';
 import type { AgentTurnRequest } from '../services/agentSession';
 import { StreamInterruptedError, type AgentMessage, type CompletionEvent, type ToolCall, type ToolDefinition } from '../services/nearAiClient';
 import { newTestConversation, testBundleState, testGateRuntime } from './helpers/gatedRuns';
@@ -111,9 +112,9 @@ async function stageInstitutionalSetup(root: string, choice: {
     update: async (key: string, value: unknown) => { profile.set(key, JSON.parse(JSON.stringify(value))); },
   };
   try {
-    const { registerStaffSetup, institutionalStaffSetupFixture } = require('../services/staffSetupCommand') as typeof import('../services/staffSetupCommand');
+    const { registerStaffSetup, SET_UP_ACTION } = require('../services/staffSetupCommand') as typeof import('../services/staffSetupCommand');
     const library = new TeamLibrary(path.join(root, 'unused-library'));
-    registerStaffSetup({ subscriptions: [], globalState } as never, { library, fixture: institutionalStaffSetupFixture });
+    registerStaffSetup({ subscriptions: [], globalState } as never, { library, fixture: createInstitutionalStaffSetupFixture(stub.vscode as never, SET_UP_ACTION) });
     stub.setWorkspaceFolders([root]);
     stub.quickPickAnswers.push(choice.label, '$(check) Set up the team');
     const setup = stub.commands.get('nearAi.setUpStaffTeam');
@@ -236,6 +237,22 @@ async function runFixture(
   };
   const posted: Record<string, unknown>[] = [];
   const conversation = newTestConversation(root, (event) => posted.push(event), path.join(root, '.checkpoints'));
+  conversation.fixtureHost = {
+    teamAgents: selectedTeamAgents,
+    async child(team, input) {
+      const tools = await institutionalChildTools(team, input, {
+        verify: (scope, draft) => verifyInstitutionalDraftTarget(scope, resolveInWorkspace, draft),
+        commit: (scope, draft, verify) => storeInstitutionalDraft(scope, resolveInWorkspace, draft, verify),
+      });
+      return tools === undefined ? undefined : {
+        tools,
+        timing: {
+          stallRetries: 0,
+          ...(input.modelStallMs ? { idleTimeoutMs: input.modelStallMs, turnCeilingMs: DEFAULT_TURN_CEILING_MS } : {}),
+        },
+      };
+    },
+  };
   const runtimes: ReturnType<typeof testGateRuntime>[] = [];
   conversation.gateHost = { async runtimeFor(request) {
     const actor = { ...request.actor, deviceFingerprint: 'fictional-brief' };

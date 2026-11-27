@@ -1060,6 +1060,11 @@ editing the project's profile file cannot redirect a key.
 
 ### Staff products and a person's decisions
 
+The institutional staff tests use fictional sources and a host-supplied
+fixture. The extension package excludes the fixture's implementation.
+Ordinary Staff Setup and agent conversations have no fixture provider.
+The test results cover the isolated fixture and its exact draft authority.
+
 Staff section teams record each product's steps in a ledger in the project
 (`.planning/staff/ledger/products.jsonl`). Every entry is signed with this
 device's key and chained to the one before it. This is what is detected, and

@@ -8,16 +8,16 @@ import {
   prepareInstitutionalActionRegister, prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalBrief, prepareInstitutionalFindings, prepareInstitutionalLibraryRemits, prepareInstitutionalObservation, prepareInstitutionalPlanningRegister,
   validateInstitutionalBriefSource, verifyInstitutionalActionAcceptance, type InstitutionalActionAuthority, type InstitutionalBriefSource,
   type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type InstitutionalObservationReview, type PreparedInstitutionalDraft,
-} from '../../domain/staff/institutionalBrief';
-import { admittedInstitutionalAccessibility, prepareInstitutionalAccessibility } from '../../domain/staff/institutionalAccessibilityReview';
-import { admittedInstitutionalBudget, admittedInstitutionalInventory, prepareInstitutionalBudget, prepareInstitutionalInventory } from '../../domain/staff/institutionalReconciliation';
+} from './institutionalBrief';
+import { admittedInstitutionalAccessibility, prepareInstitutionalAccessibility } from './institutionalAccessibilityReview';
+import { admittedInstitutionalBudget, admittedInstitutionalInventory, prepareInstitutionalBudget, prepareInstitutionalInventory } from './institutionalReconciliation';
 import {
   admittedInstitutionalServiceMonitoring, prepareInstitutionalServiceMonitoring, readInstitutionalServiceMonitoring,
-} from '../../domain/staff/institutionalServiceMonitoring';
-import { canonicalBytes } from '../../domain/team/canonical';
-import { parseTeam, renderTeam, teamAgents, type TeamDefinition } from '../teams';
-import { declareManifest, fromArgument, INTERACTIVE_ONLY, type AgentTool, type ToolContext } from '../tools';
-import { ToolError } from '../workspace';
+} from './institutionalServiceMonitoring';
+import { canonicalBytes } from '../../../domain/team/canonical';
+import { parseTeam, renderTeam, teamAgents, type TeamDefinition } from '../../../agent/teams';
+import { declareManifest, fromArgument, INTERACTIVE_ONLY, type AgentTool, type ToolContext } from '../../../agent/tools';
+import { ToolError } from '../../../agent/workspace';
 
 export const INSTITUTIONAL_COMMAND_GROUP_TEAM = 'institutional-command-group-v1';
 export const INSTITUTIONAL_COMMAND_GROUP_NAME = 'Institutional Command Group';

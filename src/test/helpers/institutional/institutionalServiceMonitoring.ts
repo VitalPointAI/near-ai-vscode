@@ -1,4 +1,4 @@
-import { canonicalBytes } from '../team/canonical';
+import { canonicalBytes } from '../../../domain/team/canonical';
 import type { InstitutionalBriefBinding, InstitutionalBriefReview, InstitutionalBriefSource, PreparedInstitutionalDraft } from './institutionalBrief';
 import {
   canonicalDigest, institutionalBriefDigest, institutionalBriefMaxBytes, institutionalSourceHash, metadataSource, record,

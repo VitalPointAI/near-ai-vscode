@@ -70,7 +70,7 @@ export const TOOL_DEFINING_FILES: readonly string[] = [
   'src/agent/tools.ts', 'src/agent/webTools.ts', 'src/agent/graphicsTools.ts', 'src/agent/extraTools.ts', 'src/agent/securityTool.ts',
   'src/agent/cyberProbes.ts', 'src/agent/cyberExploitTools.ts', 'src/agent/staffTools.ts', 'src/agent/knowledgeTools.ts', 'src/agent/intelWorkbench.ts',
   'src/agent/observationsTools.ts', 'src/agent/watchTools.ts', 'src/agent/copMap.ts', 'src/agent/logisticsTools.ts', 'src/agent/ordersTools.ts', 'src/agent/battleRhythmTools.ts',
-  'src/gsd/tools.ts', 'src/mcp/tools.ts', 'src/agent/staff/institutionalCommand.ts'
+  'src/gsd/tools.ts', 'src/mcp/tools.ts'
 ];
 const TOOL_CARRYING_FILES: readonly string[] = [
   'src/agent/toolCatalog.ts', 'src/agent/loop.ts', 'src/agent/gateAdapter.ts', 'src/services/agentSession.ts', 'src/services/toolsDirectory.ts', 'src/services/cyberRun.ts', 'src/services/mcpRegistry.ts',

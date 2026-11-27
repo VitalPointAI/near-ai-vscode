@@ -1,3 +1,5 @@
+import { persistInstitutionalStaffSetup, planInstitutionalStaffSetup } from './helpers/institutional/institutionalSetup';
+import { createInstitutionalStaffSetupFixture } from './helpers/institutional/institutionalPicker';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, symlink, writeFile } from 'node:fs/promises';
@@ -6,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, institutionalCommandGroupDefinition, institutionalCommandGroupSkill, institutionalRole, selectedTeamAgents } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, institutionalCommandGroupDefinition, institutionalCommandGroupSkill, institutionalRole, selectedTeamAgents } from './helpers/institutional/institutionalCommand';
 import { staffGuidanceIn, withStaffGuidance } from '../agent/staff/guidance';
 import { J2_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, STAFF_TEMPLATES } from '../agent/staff/templates';
 import { builtInStaffServers } from '../agent/staffServers';
@@ -15,7 +17,7 @@ import { parseTeam, TeamLibrary } from '../agent/teams';
 import { PROJECT_TYPES, projectTypeTeam } from '../agent/projectTypes';
 import { defaultStaffSettings, parseStaffSettings } from '../domain/staff/profiles';
 import type { StaffSettings } from '../domain/staff/profiles';
-import { applyStaffSetup, levelChoices, nationChoices, persistInstitutionalStaffSetup, planInstitutionalStaffSetup, planStaffSetup, profileChoices, settingsFrom, staffTeamFileName, staffTeamTarget, templateQuestions } from '../services/staffSetup';
+import { applyStaffSetup, levelChoices, nationChoices, planStaffSetup, profileChoices, settingsFrom, staffTeamFileName, staffTeamTarget, templateQuestions } from '../services/staffSetup';
 import { buildStudioContext, parseStudioMessage } from '../services/teamStudioPage';
 import { TeamUpdater } from '../services/teamUpdates';
 import { buildToolsDirectory, type DirectoryInput } from '../services/toolsDirectory';
@@ -158,7 +160,7 @@ function staffSetupVscode() {
   delete require.cache[commandModule];
   try {
     const command = require(commandModule) as typeof import('../services/staffSetupCommand');
-    return { stub, registerStaffSetup: command.registerStaffSetup, fixture: command.institutionalStaffSetupFixture, uninstall };
+    return { stub, registerStaffSetup: command.registerStaffSetup, fixture: createInstitutionalStaffSetupFixture(stub.vscode as never, command.SET_UP_ACTION), uninstall };
   } catch (error) {
     uninstall();
     throw error;
