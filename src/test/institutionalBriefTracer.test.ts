@@ -111,9 +111,9 @@ async function stageInstitutionalSetup(root: string, choice: {
     update: async (key: string, value: unknown) => { profile.set(key, JSON.parse(JSON.stringify(value))); },
   };
   try {
-    const { registerStaffSetup } = require('../services/staffSetupCommand') as typeof import('../services/staffSetupCommand');
+    const { registerStaffSetup, institutionalStaffSetupFixture } = require('../services/staffSetupCommand') as typeof import('../services/staffSetupCommand');
     const library = new TeamLibrary(path.join(root, 'unused-library'));
-    registerStaffSetup({ subscriptions: [], globalState } as never, undefined, library);
+    registerStaffSetup({ subscriptions: [], globalState } as never, { library, fixture: institutionalStaffSetupFixture });
     stub.setWorkspaceFolders([root]);
     stub.quickPickAnswers.push(choice.label, '$(check) Set up the team');
     const setup = stub.commands.get('nearAi.setUpStaffTeam');

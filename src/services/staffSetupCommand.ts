@@ -130,6 +130,23 @@ export function localityChoices(): Array<Choice<'cloud' | 'local'>> {
 /** Where "Task it now" puts the team's command: the sidebar chat's composer (focused, nothing sent). */
 export interface StaffSetupChat { prefill(text: string): Promise<void> }
 
+export interface StaffSetupFixture {
+  readonly choices: readonly Choice<string>[];
+  stage(root: string, choice: string, state: MementoLike | undefined): Promise<void>;
+}
+
+interface StaffSetupRegistration {
+  readonly chat?: StaffSetupChat;
+  readonly library?: TeamLibrary;
+  /** Supplied only by the isolated host harness, never by a command argument or setting. */
+  readonly fixture?: StaffSetupFixture;
+}
+
+interface StaffSetupWizard extends StaffSetupRegistration {
+  readonly section?: StaffTeamSection | undefined;
+  readonly state?: MementoLike;
+}
+
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
 export function readyMessage(teamName: string, slug: string, archived: boolean): string {
   return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the SovAI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
@@ -195,12 +212,15 @@ async function stageInstitutionalStaffSetup(root: string, team: InstitutionalRol
   }
 }
 
-export async function setUpStaffTeam(
-  library = new TeamLibrary(teamLibraryDir(homeFolder())),
-  section?: StaffTeamSection,
-  chat?: StaffSetupChat,
-  state?: MementoLike
-): Promise<string | undefined> {
+export const institutionalStaffSetupFixture: StaffSetupFixture = {
+  choices: institutionalChoices,
+  async stage(root, choice, state) {
+    if (isInstitutionalRole(choice)) await stageInstitutionalStaffSetup(root, choice, state);
+  },
+};
+
+export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<string | undefined> {
+  const { library = new TeamLibrary(teamLibraryDir(homeFolder())), section, chat, state, fixture } = options;
   const root = await projectFolder();
   if (!root) return undefined;
   const title = 'Set up a staff team';
@@ -209,10 +229,11 @@ export async function setUpStaffTeam(
   const asked = section ? STAFF_TEMPLATES.find((candidate) => candidate.section === section) : undefined;
   const templateId = asked ? asked.id : await pick(title, 'Which staff section?', [
     ...STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })),
-    ...institutionalChoices,
+    ...(fixture?.choices ?? []),
   ], 1, steps);
-  if (templateId !== undefined && isInstitutionalRole(templateId)) {
-    await stageInstitutionalStaffSetup(root, templateId, state);
+  const fixtureChoice = asked ? undefined : fixture?.choices.find(({ value }) => value === templateId);
+  if (fixture && fixtureChoice) {
+    await fixture.stage(root, fixtureChoice.value, state);
     return undefined;
   }
   const template = STAFF_TEMPLATES.find((candidate) => candidate.id === templateId);
@@ -238,10 +259,10 @@ export async function setUpStaffTeam(
   if (questions.redTeam && redTeam === undefined) return undefined;
   const where = await pick(title, 'Where may the members\' models run?', localityChoices(), 6, steps);
   if (!where) return undefined;
-  const options: StaffTemplateOptions = { settings, locality: where, ...(echelon ? { echelon } : {}), ...(variant ? { variant } : {}), ...(redTeam === false ? { redTeam: false } : {}) };
+  const templateOptions: StaffTemplateOptions = { settings, locality: where, ...(echelon ? { echelon } : {}), ...(variant ? { variant } : {}), ...(redTeam === false ? { redTeam: false } : {}) };
 
   let plan: StaffSetupPlan;
-  try { plan = planStaffSetup({ templateId: template.id, options, ...inputs }); } catch (error) { void vscode.window.showErrorMessage(`The staff team was not set up. ${(error as Error).message}`); return undefined; }
+  try { plan = planStaffSetup({ templateId: template.id, options: templateOptions, ...inputs }); } catch (error) { void vscode.window.showErrorMessage(`The staff team was not set up. ${(error as Error).message}`); return undefined; }
 
   if (!await confirmStaffSetup(plan)) return undefined;
 
@@ -284,6 +305,7 @@ export const OPEN_STAFF_ROOM_ACTION = 'Open the Staff Room';
 /** The action on the "team is ready" message that puts `/team:<name> ` in the chat's message box. */
 export const TASK_NOW_ACTION = 'Task it now';
 
-export function registerStaffSetup(context: vscode.ExtensionContext, chat?: StaffSetupChat, library?: TeamLibrary): void {
-  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, (arg?: unknown) => setUpStaffTeam(library, requestedSection(arg), chat, context.globalState)));
+export function registerStaffSetup(context: vscode.ExtensionContext, options: StaffSetupRegistration = {}): void {
+  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, (arg?: unknown) =>
+    setUpStaffTeam({ ...options, section: requestedSection(arg), state: context.globalState })));
 }

@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, institutionalCommandGroupDefinition, institutionalCommandGroupSkill, institutionalRole, selectedTeamAgents } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, institutionalCommandGroupDefinition, institutionalCommandGroupSkill, institutionalRole, selectedTeamAgents } from '../agent/staff/institutionalCommand';
 import { staffGuidanceIn, withStaffGuidance } from '../agent/staff/guidance';
-import { J2_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J5_STAFF_TEMPLATE } from '../agent/staff/templates';
+import { J2_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, STAFF_TEMPLATES } from '../agent/staff/templates';
 import { builtInStaffServers } from '../agent/staffServers';
 import { applyGuidanceUpdate, applyTeamUpdate, detectTemplate, planStaffGuidanceUpdate, planTeamUpdate } from '../agent/teamUpdate';
 import { parseTeam, TeamLibrary } from '../agent/teams';
@@ -158,7 +158,7 @@ function staffSetupVscode() {
   delete require.cache[commandModule];
   try {
     const command = require(commandModule) as typeof import('../services/staffSetupCommand');
-    return { stub, registerStaffSetup: command.registerStaffSetup, uninstall };
+    return { stub, registerStaffSetup: command.registerStaffSetup, fixture: command.institutionalStaffSetupFixture, uninstall };
   } catch (error) {
     uninstall();
     throw error;
@@ -184,13 +184,42 @@ function profileState() {
 
 const institutionalStageKey = (project: string) => `nearAi.staff.institutional.commandGroup.v1.${createHash('sha256').update(project).digest('hex')}`;
 
-test('registered Staff Setup stages only a profile-local record for each selected brigade', async () => {
-  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-setup-')));
-  const library = new TeamLibrary(path.join(temp, 'library'));
+test('ordinary Staff Setup only offers shipped templates and refuses an unexpected fixture choice', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'staff-setup-ordinary-')));
   const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
   const profile = profileState();
   try {
-    registerStaffSetup(profile.context, undefined, library);
+    registerStaffSetup(profile.context);
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([root]);
+    await execute();
+    const [ordinary] = stub.quickPickRequests;
+
+    const window = (stub.vscode as typeof import('vscode')).window;
+    const originalQuickPick = window.showQuickPick;
+    Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async () => {
+      Object.defineProperty(window, 'showQuickPick', { configurable: true, value: originalQuickPick });
+      return { label: 'Institutional Command Group', value: INSTITUTIONAL_COMMAND_GROUP_TEAM };
+    } });
+    stub.quickPickAnswers.push('$(check) Set up the team');
+    await execute();
+
+    assert.deepEqual({
+      choices: ordinary.items.map(({ label }) => label),
+      writes: profile.writes,
+      files: await readdir(root),
+    }, { choices: STAFF_TEMPLATES.map(({ label }) => label), writes: [], files: [] });
+  } finally { uninstall(); }
+});
+
+test('registered Staff Setup stages only a profile-local record for each selected brigade', async () => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-setup-')));
+  const library = new TeamLibrary(path.join(temp, 'library'));
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  try {
+    registerStaffSetup(profile.context, { library, fixture });
     const execute = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(execute, 'the Team Studio command is registered');
     const legacy = { ...defaultStaffSettings(), teams: { j2: 'existing-j2' } };
@@ -241,12 +270,12 @@ test('registered Staff Setup stages only a profile-local record for each selecte
 test('registered Staff Setup stages the fictional action register separately from the legacy J3 link', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-action-setup-')));
   const library = new TeamLibrary(path.join(root, 'unused-library'));
-  const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
   const profile = profileState();
   const slug = INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
   const { definition, skill, lead } = institutionalRole(slug);
   try {
-    registerStaffSetup(profile.context, { async prefill() { assert.fail('the staged role has no start action'); } }, library);
+    registerStaffSetup(profile.context, { library, fixture, chat: { async prefill() { assert.fail('the staged role has no start action'); } } });
     const execute = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(execute);
     stub.setWorkspaceFolders([root]);
@@ -298,7 +327,7 @@ test('a registered J3 write finishes for the confirmed project when selection sw
   const [confirmed, other] = ['confirmed', 'other'].map((name) => path.join(temp, name, 'brigade'));
   await Promise.all([confirmed, other].map((root) => mkdir(root, { recursive: true })));
   const library = new TeamLibrary(path.join(temp, 'unused-library'));
-  const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
   const profile = profileState();
   const team = INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
   const expected = await planInstitutionalStaffSetup({ root: confirmed, team });
@@ -314,7 +343,7 @@ test('a registered J3 write finishes for the confirmed project when selection sw
     await update(key, value);
   };
   try {
-    registerStaffSetup(profile.context, { async prefill() { assert.fail('the staged role has no start action'); } }, library);
+    registerStaffSetup(profile.context, { library, fixture, chat: { async prefill() { assert.fail('the staged role has no start action'); } } });
     const execute = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(execute);
     stub.setWorkspaceFolders([confirmed]);
@@ -347,10 +376,10 @@ test('registered institutional setup never persists after cancellation or a chan
   const library = new TeamLibrary(path.join(temp, 'library'));
   await mkdir(captured);
   await mkdir(switched);
-  const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
   const profile = profileState();
   try {
-    registerStaffSetup(profile.context, undefined, library);
+    registerStaffSetup(profile.context, { library, fixture });
     const execute = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(execute);
     stub.setWorkspaceFolders([captured]);
@@ -388,10 +417,10 @@ test('registered institutional setup holds malformed profile state and unconfirm
   const project = path.join(temp, 'project');
   await mkdir(project);
   const library = new TeamLibrary(path.join(temp, 'library'));
-  const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
   const profile = profileState();
   try {
-    registerStaffSetup(profile.context, undefined, library);
+    registerStaffSetup(profile.context, { library, fixture });
     const execute = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(execute);
     stub.setWorkspaceFolders([project]);
@@ -410,7 +439,7 @@ test('registered institutional setup holds malformed profile state and unconfirm
       await update(name, value);
       throw new Error('fixture write failure');
     };
-    registerStaffSetup(failing.context, undefined, library);
+    registerStaffSetup(failing.context, { library, fixture });
     const failingCommand = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(failingCommand);
     for (let attempt = 0; attempt < 2; attempt += 1) {
