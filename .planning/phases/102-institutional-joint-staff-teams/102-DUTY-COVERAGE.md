@@ -4,7 +4,7 @@
 
 ## Canonical inventory
 
-The three source tables at reviewed blueprint commit `360515a60b041d28d89123bb214d6388b2d41aab` define the duties and their institutional skill and tool requirements. The inventory has 149 unique IDs across 117 J1–J9, 12 Command Group and 20 Special Staff duties.
+The three source tables from the [published blueprint](https://github.com/VitalPointAI/near-ai-vscode/pull/228) define the duties and their institutional skill and tool requirements. The reviewed catalogue bytes at `360515a60b041d28d89123bb214d6388b2d41aab` match the tables published at `b6af516d2d512a432804f4e41b461e78ee6c58a8`. The inventory has 149 unique IDs across 117 J1–J9, 12 Command Group and 20 Special Staff duties.
 
 | Source | Duty IDs |
 | --- | ---: |
@@ -49,6 +49,5 @@ Here, uncovered means there is no verified institutional registered draft eviden
 
 ## Open conditions
 
-- [Blueprint PR #228](https://github.com/VitalPointAI/near-ai-vscode/pull/228) is the publication dependency for the reviewed inventory.
 - **G17** remains open for production role authority, separation of duties and human approval evidence. Additional echelons need their own acceptance. Live delivery has separate authorization.
 - **G62** remains open for authorized access to real sources and proved production workspace confinement.
