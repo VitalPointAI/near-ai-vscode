@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -25,6 +25,10 @@ import { newTestConversation, testBundleState, testGateRuntime } from './helpers
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const inventoryTeam = 'institutional-j4-inventory-counts-v1';
+const inventoryDirectory = '.planning/staff/institutional/j4/inventory-counts';
+const readInventory = 'ReadInstitutionalInventoryCount';
+const saveInventory = 'SaveInstitutionalInventoryDraft';
 const remitTeam = 'institutional-j9-library-remits-v1';
 const remitDirectory = '.planning/staff/institutional/j9/service-remits';
 const readRemit = 'ReadInstitutionalLibraryRemit';
@@ -197,7 +201,7 @@ async function runFixture(
         results.push(message.content);
         toolResults.set(message.tool_call_id, message.content);
       }
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison|Draft a fictional J4-02 office inventory reconciliation/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -205,14 +209,14 @@ async function runFixture(
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
-        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
+        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam || team.slug === inventoryTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === inventoryTeam ? 'inventory-count-drafter' : team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -1512,6 +1516,132 @@ test('registered G9 preserves independent library mandates and holds the exact c
     const held = await runFixture(fixture, team, { steps: [toolCall('expired-library-write', saveRemit, args)] });
     assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'expired-library-write' && entry.action_id === 1));
     assert.equal(held.toolResults.get('expired-library-write'), unavailable);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(directory), [name]);
+  } finally { setCasProbe(undefined); }
+  currentReceipt = receipt;
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+});
+
+
+test('registered G4 reconciles only comparable fictional counts and holds a withdrawn count revision', async () => {
+  const subject = await newFixture();
+  const root = subject.fixture.root;
+  const label = 'Institutional G4 Inventory Counts';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: inventoryTeam, keySegment: 'j4InventoryCounts',
+    checkPrompts(requests) {
+      assert.match(requests[0].items.find((item) => item.label === label)?.detail ?? '', /fictional property custodian/i);
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(check) Set up the team')?.detail ?? '', /office inventory reconciliation draft skill/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional property custodian')?.detail ?? '', /decides how to resolve/i);
+    },
+  });
+  const directory = path.join(root, inventoryDirectory);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const sources = ['custody-review-scope', 'office-count-attestation', 'office-register-attestation'].map((id): InstitutionalBriefSource => {
+    const text = `Synthetic evidence for ${id} that is not part of its metadata projection.`;
+    return { id, revision: 'r1', date: '2026-11-02', label: 'org/Public', project, text, spans: [{ start: 0, end: text.length }] };
+  });
+  const reference = (index: number, role: string) => ({ sourceId: sources[index].id, revision: sources[index].revision, role });
+  const ids = ['item-4b000001', 'item-4b000002', 'item-4b000003', 'item-4b000004', 'item-4b000005'];
+  const hiddenId = 'item-4b000006';
+  const countSource = reference(1, 'fictional-physical-count-attestor');
+  const registerSource = reference(2, 'fictional-register-attestor');
+  const cutoff = '2026-11-03';
+  const nextCutoff = '2026-11-04';
+  const items = ids.map((id, index) => ({
+    id, label: ['Office chairs', 'Paper packs', 'Office folders', 'Desk trays', 'Spare binders'][index],
+    custodyRole: null, condition: 'unknown',
+    count: { itemId: id, quantity: 8, unit: 'items', date: '2026-11-02', cutoff: index === 2 ? null : cutoff, evidence: countSource },
+    register: { itemId: id, quantity: index === 4 ? null : 12, unit: index === 1 ? 'boxes' : 'items', date: '2026-11-02',
+      cutoff: index === 3 ? nextCutoff : cutoff, evidence: registerSource },
+  }));
+  const receipt = {
+    project, directory: staged.directoryDigest, requester: 'fictional-inventory-reviewer', purpose: 'fictional-office-inventory-j4-02',
+    policyRevision: 'inventory-r1', productId: 'office-furniture-reconciliation', cutoffs: [cutoff, nextCutoff],
+    propertyCustodian: reference(0, 'fictional-property-custodian'), recordIds: ids,
+  };
+  let currentReceipt = receipt;
+  let currentItems = [...items, { ...items[0], id: hiddenId, label: 'Private supply entry' }];
+  let activeSources = sources;
+  const withdrawCount = () => { activeSources = sources.map((entry) => entry.id === countSource.sourceId ? { ...entry, revision: 'r2' } : entry); };
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => activeSources,
+    currentInventory: () => ({ receipt: currentReceipt, items: currentItems }) };
+  const primary = items[0];
+  for (const invalid of [
+    { ...primary, register: { ...primary.register, evidence: { ...countSource, role: registerSource.role } } },
+    { ...primary, count: { ...primary.count, itemId: ids[1] } },
+    { ...primary, count: { ...primary.count, quantity: Number.MAX_SAFE_INTEGER + 1 } },
+  ]) {
+    currentItems = [invalid, ...items.slice(1)];
+    await assert.rejects(selectSyntheticInstitutionalJ4Inventory(fixture), { message: 'This catalogue metadata is unavailable.' });
+  }
+  currentItems = [...items, { ...items[0], id: hiddenId, label: 'Private supply entry' }];
+  const team = await selectSyntheticInstitutionalJ4Inventory(fixture);
+  const args = { productId: receipt.productId, recordIds: ids };
+  const valid = await runFixture(fixture, team, { steps: [
+    ...ids.map((id, index) => toolCall(`inventory-${index}`, readInventory, { recordId: id })),
+    toolCall('hidden-inventory', readInventory, { recordId: hiddenId }),
+    toolCall('missing-inventory', readInventory, { recordId: 'item-4b000007' }),
+    toolCall('refuse-model-amounts', saveInventory, { ...args, quantity: 12, approved: true }),
+    toolCall('save-inventory', saveInventory, args),
+  ] });
+  assert.deepEqual(valid.offers[0], [readInventory, saveInventory].sort());
+  const unavailable = valid.toolResults.get('hidden-inventory');
+  assert.ok(unavailable);
+  assert.match(unavailable, /unavailable/i);
+  assert.equal(valid.toolResults.get('missing-inventory'), unavailable);
+  assert.equal(valid.toolResults.get('refuse-model-amounts'), unavailable);
+  const [name] = await readdir(directory);
+  assert.ok(name);
+  const bytes = await readFile(path.join(directory, name));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(name, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'J4-02');
+  assert.equal(draft.propertyCustodian.role, 'fictional-property-custodian');
+  assert.equal(draft.custodianDecision, 'pending');
+  const [known, wrongUnit, missingCutoff, unequalCutoffs, missingQuantity] = draft.body.records;
+  assert.deepEqual(draft.body.records, ids.map((_id, index) => JSON.parse(valid.toolResults.get(`inventory-${index}`)!)));
+  assert.deepEqual(known.quantityComparison, { state: 'comparable', difference: -4, unit: 'items', cutoff });
+  assert.equal(known.count.evidence.sourceId, countSource.sourceId);
+  assert.equal(known.register.evidence.sourceId, registerSource.sourceId);
+  assert.equal(known.custodyRole, null);
+  assert.equal(known.condition, 'unknown');
+  assert.deepEqual(known.unresolved, ['custody-unknown', 'condition-unknown']);
+  for (const [row, reason] of [[wrongUnit, 'unit-mismatch'], [missingCutoff, 'cutoff-missing'],
+    [unequalCutoffs, 'cutoff-mismatch'], [missingQuantity, 'quantity-missing']] as const) {
+    assert.deepEqual(row.quantityComparison, { state: 'unresolved', reason });
+  }
+  assert.equal(missingQuantity.register.quantity, null);
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+  for (const hidden of [hiddenId, 'Private supply entry', sources[1].text]) {
+    assert.ok(!JSON.stringify([valid.catalogueOffers[0], valid.results, draft, review]).includes(hidden));
+  }
+  assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'save-inventory')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${inventoryDirectory}/${name}`] });
+
+  const heldRead = await runFixture(fixture, team, {
+    steps: [toolCall('withdrawn-inventory-read', readInventory, { recordId: ids[0] })],
+    onChildTurn(turn) { if (turn === 0) withdrawCount(); },
+  });
+  assert.equal(heldRead.toolResults.get('withdrawn-inventory-read'), unavailable);
+  assert.ok(!heldRead.results.some((entry) => entry.includes(items[0].label) || entry.includes(countSource.sourceId)));
+
+  activeSources = sources;
+  currentReceipt = { ...receipt, policyRevision: 'inventory-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; withdrawCount(); } });
+  try {
+    const held = await runFixture(fixture, team, { steps: [toolCall('withdrawn-inventory-write', saveInventory, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'withdrawn-inventory-write' && entry.action_id === 1));
+    assert.equal(held.toolResults.get('withdrawn-inventory-write'), unavailable);
     assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
     assert.deepEqual(await readdir(directory), [name]);
   } finally { setCasProbe(undefined); }

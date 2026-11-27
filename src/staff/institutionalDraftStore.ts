@@ -6,6 +6,7 @@ import {
   institutionalFindingsDirectory, institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
   prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalFindings, prepareInstitutionalLibraryRemits, prepareInstitutionalObservation, prepareInstitutionalPlanningRegister, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
 } from '../domain/staff/institutionalBrief';
+import { institutionalInventoryDirectory, prepareInstitutionalInventory } from '../domain/staff/institutionalReconciliation';
 import { replaceKeepingEdits } from './staffFiles';
 
 type ResolveDraftPath = (root: string, requested: string) => Promise<string>;
@@ -13,6 +14,7 @@ const hexDigest = /^[0-9a-f]{64}$/;
 const readLeafFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 function directoryOf(scope: InstitutionalDraftScope): string {
+  if (scope.inventory) return institutionalInventoryDirectory;
   if (scope.libraryRemits) return institutionalLibraryRemitsDirectory;
   if (scope.planningEvidence) return institutionalPlanningDirectory;
   if (scope.businessServices) return institutionalBusinessServicesDirectory;
@@ -83,8 +85,9 @@ function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected
   const { body, productId } = payload as Record<string, unknown>;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return changed();
   const sources = scope.currentSources();
-  const expected = scope.libraryRemits
-    ? prepareInstitutionalLibraryRemits({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.libraryRemits())
+  const expected = scope.inventory
+    ? prepareInstitutionalInventory({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.inventory())
+    : scope.libraryRemits ? prepareInstitutionalLibraryRemits({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.libraryRemits())
     : scope.planningEvidence ? prepareInstitutionalPlanningRegister({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.planningEvidence())
     : scope.businessServices ? prepareInstitutionalBusinessServices({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.businessServices())
     : scope.catalogue ? prepareInstitutionalCatalogue({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.catalogue())
@@ -124,7 +127,7 @@ async function requireCurrentPredecessor(scope: InstitutionalDraftScope): Promis
 function exactPredecessorLeaf(scope: InstitutionalDraftScope, review: InstitutionalDraftReview): boolean {
   if (review.kind === 'observation') return scope.observation?.correctionAtEffect(review.correction) === true;
   if (review.kind === 'findings') return scope.findings?.predecessorAtEffect(review.observation.version) === true;
-  return review.kind === 'library-service-remits' || review.kind === 'planning-evidence' || review.kind === 'business-services' || review.kind === 'records-catalogue' || review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
+  return review.kind === 'inventory-counts' || review.kind === 'library-service-remits' || review.kind === 'planning-evidence' || review.kind === 'business-services' || review.kind === 'records-catalogue' || review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
 }
 
 export async function verifyInstitutionalDraftTarget(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalDraft): Promise<void> {
@@ -173,7 +176,7 @@ export async function readInstitutionalDraftReview(scope: InstitutionalDraftScop
     if (!exactPredecessorLeaf(scope, review)) return changed();
     return review;
   }).catch((error: unknown) => {
-    if (scope.planningEvidence || scope.libraryRemits) throw new Error(institutionalCatalogueUnavailable);
+    if (scope.planningEvidence || scope.libraryRemits || scope.inventory) throw new Error(institutionalCatalogueUnavailable);
     throw error;
   });
 }

@@ -1,7 +1,16 @@
-import { createHash } from 'node:crypto';
 import { canonicalBytes } from '../team/canonical';
 import { verifyPayload, type PayloadSignerRef } from '../team/signedPayload';
 import { STAFF_SLUG } from './parse';
+import {
+  canonicalDigest, catalogueId, institutionalBriefDigest, institutionalBriefMaxBytes, institutionalSourceHash,
+  list, metadataDate, metadataSource, record, requestedCatalogueRows, requireCatalogue, sourceReferences, text,
+  type InstitutionalCatalogueSource,
+} from './institutionalEvidence';
+import type { InstitutionalInventoryEvidence, InstitutionalInventoryReview } from './institutionalReconciliation';
+
+export {
+  institutionalBriefDigest, institutionalBriefMaxBytes, institutionalCatalogueUnavailable, institutionalSourceHash, isInstitutionalCatalogueRecordId,
+} from './institutionalEvidence';
 
 export const institutionalBriefDirectory = '.planning/staff/institutional/command/briefs';
 export const institutionalActionRegisterDirectory = '.planning/staff/institutional/j3/action-registers';
@@ -10,9 +19,7 @@ export const institutionalLibraryRemitsDirectory = '.planning/staff/institutiona
 export const institutionalPlanningDirectory = '.planning/staff/institutional/j5/evidence-assumptions';
 export const institutionalBusinessServicesDirectory = '.planning/staff/institutional/j6/business-services';
 export const institutionalCatalogueDirectory = '.planning/staff/institutional/j2/catalogue';
-export const institutionalCatalogueUnavailable = 'This catalogue metadata is unavailable.';
 export const institutionalFindingsDirectory = '.planning/staff/institutional/j7/after-action';
-export const institutionalBriefMaxBytes = 128 * 1024;
 
 export interface InstitutionalBriefSource {
   readonly id: string;
@@ -56,6 +63,7 @@ export interface InstitutionalDraftScope {
   readonly businessServices?: () => InstitutionalBusinessServicesEvidence;
   readonly planningEvidence?: () => InstitutionalPlanningEvidence;
   readonly libraryRemits?: () => InstitutionalLibraryRemitEvidence;
+  readonly inventory?: () => InstitutionalInventoryEvidence;
   readonly findings?: {
     readonly current: () => InstitutionalFindingsEvidence;
     readonly predecessorCurrent: () => Promise<boolean>;
@@ -149,7 +157,7 @@ interface InstitutionalLibraryRemitReview extends Omit<InstitutionalBriefReview,
   readonly liaisonDecision: 'pending';
 }
 
-export type InstitutionalDraftReview = InstitutionalLibraryRemitReview | InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
+export type InstitutionalDraftReview = InstitutionalInventoryReview | InstitutionalLibraryRemitReview | InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;
@@ -161,28 +169,6 @@ export interface PreparedInstitutionalBrief extends PreparedInstitutionalDraft {
   readonly path: string;
   readonly text: string;
   readonly review: InstitutionalBriefReview;
-}
-
-function record(value: unknown, fields: readonly string[]): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== fields.length ||
-      !fields.every((field) => Object.hasOwn(value, field))) throw new Error('The decision brief fields do not match the institutional draft form.');
-  return value as Record<string, unknown>;
-}
-
-function text(value: unknown, limit = 1000): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > limit || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
-    throw new Error('The decision brief contains missing or invalid text.');
-  }
-  return value;
-}
-
-function list<T>(value: unknown, parse: (entry: unknown) => T, min = 0): T[] {
-  if (!Array.isArray(value) || value.length < min || value.length > 12) throw new Error('The decision brief contains an invalid list.');
-  return value.map(parse);
-}
-
-export function institutionalBriefDigest(value: string | Buffer): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 /** Trait checks are limited to the admitted fictional public scope of this tracer. */
@@ -197,10 +183,6 @@ export function validateInstitutionalBriefSource(source: InstitutionalBriefSourc
     source.spans.every(({ start, end }) => Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end <= source.text.length && start < end);
 }
 
-export function institutionalSourceHash(source: InstitutionalBriefSource): string {
-  return institutionalBriefDigest(canonicalBytes(source));
-}
-
 function admittedCitations(sources: readonly InstitutionalBriefSource[]) {
   const cited = new Map<string, InstitutionalBriefSource>();
   function citation(input: unknown): InstitutionalCitation {
@@ -212,12 +194,6 @@ function admittedCitations(sources: readonly InstitutionalBriefSource[]) {
     return { sourceId: source.id, revision: source.revision, start: start as number, end: end as number, quote: quote as string };
   }
   return { citation, used: (): InstitutionalBriefReview['sources'] => sourceReferences([...cited.values()]) };
-}
-
-function sourceReferences(sources: readonly InstitutionalBriefSource[]): InstitutionalBriefReview['sources'] {
-  return [...sources].sort((a, b) => a.id.localeCompare(b.id)).map((source) => ({
-    id: source.id, revision: source.revision, date: source.date, label: source.label, hash: institutionalSourceHash(source),
-  }));
 }
 
 /** Prepare a single canonical payload and the exact gate path derived from it. */
@@ -326,10 +302,6 @@ function day(value: unknown): string {
   requireAction(typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) &&
     new Date(value).toISOString().slice(0, 10) === value);
   return value;
-}
-
-function canonicalDigest(value: unknown): string {
-  return institutionalBriefDigest(canonicalBytes(value));
 }
 
 /** Parse only cited action facts. The verified chair disposition controls the admitted values. */
@@ -697,16 +669,8 @@ export function prepareInstitutionalFindings(
   return { path: `${institutionalFindingsDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }
 
-
 const catalogueFields = ['title', 'category', 'description', 'platform-status'] as const;
 type CatalogueField = typeof catalogueFields[number];
-
-interface InstitutionalCatalogueSource {
-  readonly role: string;
-  readonly sourceId: string;
-  readonly revision: string;
-  readonly hash: string;
-}
 
 interface InstitutionalCatalogueRow {
   readonly id: string;
@@ -729,26 +693,6 @@ export interface InstitutionalCatalogueEvidence {
   readonly records: readonly InstitutionalCatalogueRow[];
 }
 
-function requireCatalogue(condition: unknown): asserts condition {
-  if (!condition) throw new Error(institutionalCatalogueUnavailable);
-}
-
-export function isInstitutionalCatalogueRecordId(value: unknown): value is string {
-  return typeof value === 'string' && /^item-[a-f0-9]{8}$/.test(value);
-}
-
-function catalogueId(value: unknown): string {
-  requireCatalogue(isInstitutionalCatalogueRecordId(value));
-  return value;
-}
-
-function metadataSource(sources: readonly InstitutionalBriefSource[], entry: unknown, role: string): InstitutionalCatalogueSource {
-  const evidence = record(entry, ['sourceId', 'revision', 'role']);
-  const source = sources.find(({ id, revision }) => id === evidence.sourceId && revision === evidence.revision);
-  requireCatalogue(source && evidence.role === role);
-  return { role, sourceId: source.id, revision: source.revision, hash: institutionalSourceHash(source) };
-}
-
 function metadataGrants<Field extends string>(input: unknown, allowedFields: readonly Field[]): ReadonlyMap<string, readonly Field[]> {
   const grants = list(input, (entry) => {
     const grant = record(entry, ['id', 'fields']);
@@ -763,20 +707,6 @@ function metadataGrants<Field extends string>(input: unknown, allowedFields: rea
   const grantsById = new Map(grants);
   requireCatalogue(grantsById.size === grants.length);
   return grantsById;
-}
-
-function requestedCatalogueRows<Row extends { id: string }>(
-  input: unknown, accepted: { readonly productId: string; readonly records: readonly Row[] },
-): Row[] {
-  const request = record(input, ['productId', 'recordIds']);
-  requireCatalogue(request.productId === accepted.productId);
-  const ids = list(request.recordIds, catalogueId, 1);
-  requireCatalogue(new Set(ids).size === ids.length);
-  return ids.sort().map((id) => {
-    const row = accepted.records.find((entry) => entry.id === id);
-    requireCatalogue(row);
-    return row;
-  });
 }
 
 export function admittedInstitutionalCatalogue(
@@ -838,7 +768,6 @@ export function prepareInstitutionalCatalogue(
   return { path: `${institutionalCatalogueDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }
 
-
 const businessServiceFields = ['title', 'owner', 'review-date', 'support-hours', 'user-groups', 'dependencies', 'support-route'] as const;
 
 interface InstitutionalServiceRecord {
@@ -863,12 +792,6 @@ export interface InstitutionalBusinessServicesEvidence {
   readonly policyRevision: string;
   readonly portfolioOwner: InstitutionalCatalogueSource;
   readonly records: readonly InstitutionalServiceRecord[];
-}
-
-function metadataDate(value: unknown): string {
-  const date = text(value, 10);
-  requireCatalogue(/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date);
-  return date;
 }
 
 export function admittedInstitutionalBusinessServices(
@@ -938,7 +861,6 @@ export function prepareInstitutionalBusinessServices(
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalBusinessServicesDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }
-
 
 type InstitutionalPlanningRow = {
   readonly id: string;
@@ -1066,7 +988,6 @@ export function prepareInstitutionalPlanningRegister(
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalPlanningDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }
-
 
 const remitPurpose = 'fictional-library-remit-comparison-j9-cl02' as const;
 const libraryScopes = ['branch-room-bookings', 'mobile-library-visits', 'reading-session-registration'] as const;
