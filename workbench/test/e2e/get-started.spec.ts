@@ -311,6 +311,8 @@ test('Team Studio staff setup previews the selected project in the User language
   const selection = await openLanguageSetting(page);
   await expect(selection).toContainText('English (Canada)');
   await pickLanguage(selection, 'ArrowDown', 'Français (Canada)');
+  await expect(page.locator('.sterling-welcome')).toHaveAttribute('lang', 'fr-CA');
+  await page.close();
 
   const reopenedContext = await browser.newContext({ baseURL });
   try {
@@ -320,8 +322,10 @@ test('Team Studio staff setup previews the selected project in the User language
       if (/\] Start of \d+ plugins?:/.test(message.text())) pluginsStarted = true;
     });
     await workbench.goto('/');
-    await expect.poll(() => pluginsStarted, { timeout: 90_000 }).toBe(true);
+    await expect(workbench.getByRole('menubar')).toBeVisible({ timeout: 90_000 });
+    // The hosted plug-in waits for the workspace trust choice before it reports startup.
     await declineWorkspaceTrust(workbench);
+    await expect.poll(() => pluginsStarted, { timeout: 90_000 }).toBe(true);
     await workbench.keyboard.press('F1');
     const palette = workbench.locator('.quick-input-widget input');
     await expect(palette).toBeVisible();
