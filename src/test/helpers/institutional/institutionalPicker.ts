@@ -1,10 +1,10 @@
 import type * as vscode from 'vscode';
 import type { StaffSetupFixture } from '../../../services/staffSetupCommand';
 import type { MementoLike } from '../../../services/stateHome';
-import { planInstitutionalStaffSetup, persistInstitutionalStaffSetup, type InstitutionalStaffSetupPlan } from './institutionalSetup';
+import { planInstitutionalJointTierSetup, persistInstitutionalJointTierSetup, planInstitutionalStaffSetup, persistInstitutionalStaffSetup, type InstitutionalStaffSetupPlan } from './institutionalSetup';
 import {
   INSTITUTIONAL_ACCESSIBILITY_TEAM, INSTITUTIONAL_COMMAND_GROUP_PROFILE, INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J1_MONITORING_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J4_INVENTORY_TEAM, INSTITUTIONAL_J5_EVIDENCE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J8_BUDGET_TEAM, INSTITUTIONAL_J9_REMIT_TEAM,
-  institutionalRole, isInstitutionalRole, type InstitutionalRoleId,
+  INSTITUTIONAL_LEGAL_REFERENCES_TEAM, INSTITUTIONAL_POLICY_SOURCES_TEAM, INSTITUTIONAL_JOINT_TIER_TEAM, institutionalJointTiers, institutionalRole, isInstitutionalRole, type InstitutionalRoleId,
 } from './institutionalCommand';
 
 const catalogueStewardDecision = 'The fictional domain steward decides what the metadata means and which fields people can see.';
@@ -23,7 +23,11 @@ const monitoringHumanDecisions = 'The fictional HR services supervisor validates
 
 const accessibilityHumanDecisions = 'The fictional accessibility adviser owns accessibility advice. The fictional help-sheet product owner decides remediation.';
 
-const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J5_EVIDENCE_TEAM, INSTITUTIONAL_J9_REMIT_TEAM, INSTITUTIONAL_J4_INVENTORY_TEAM, INSTITUTIONAL_J8_BUDGET_TEAM, INSTITUTIONAL_J1_MONITORING_TEAM, INSTITUTIONAL_ACCESSIBILITY_TEAM] as const).map((value) => ({
+const legalReferencesOwners = 'The fictional legal adviser owns advice. A separate fictional reference custodian supplies confirmed record references.';
+
+const policySourcesOwners = 'The fictional institutional policy adviser owns advice and signoff. A separate fictional public reference custodian supplies confirmed source references.';
+
+const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J5_EVIDENCE_TEAM, INSTITUTIONAL_J9_REMIT_TEAM, INSTITUTIONAL_J4_INVENTORY_TEAM, INSTITUTIONAL_J8_BUDGET_TEAM, INSTITUTIONAL_J1_MONITORING_TEAM, INSTITUTIONAL_ACCESSIBILITY_TEAM, INSTITUTIONAL_LEGAL_REFERENCES_TEAM, INSTITUTIONAL_POLICY_SOURCES_TEAM] as const).map((value) => ({
   value,
   label: institutionalRole(value).label,
   detail: value === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM
@@ -37,6 +41,8 @@ const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J
     : value === INSTITUTIONAL_J8_BUDGET_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office budget evidence reconciliation for a local test fixture. ${budgetHumanDecisions}`
     : value === INSTITUTIONAL_J1_MONITORING_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office help aggregate for a local test fixture. ${monitoringHumanDecisions}`
     : value === INSTITUTIONAL_ACCESSIBILITY_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional help-sheet review for a local test fixture. ${accessibilityHumanDecisions}`
+    : value === INSTITUTIONAL_LEGAL_REFERENCES_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office bibliography for a local test fixture. ${legalReferencesOwners}`
+    : value === INSTITUTIONAL_POLICY_SOURCES_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office policy source comparison for a local test fixture. ${policySourcesOwners}`
     : `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Local draft setup for a test fixture.`,
 }));
 
@@ -53,7 +59,11 @@ export function createInstitutionalStaffSetupFixture(vscode: typeof import('vsco
     const isBudget = plan.institutional.binding.team === INSTITUTIONAL_J8_BUDGET_TEAM;
     const isServiceMonitoring = plan.institutional.binding.team === INSTITUTIONAL_J1_MONITORING_TEAM;
     const isAccessibility = plan.institutional.binding.team === INSTITUTIONAL_ACCESSIBILITY_TEAM;
-    const humanDetail = isAccessibility ? 'Owns accessibility advice on the help-sheet evidence draft.'
+    const isLegalReferences = plan.institutional.binding.team === INSTITUTIONAL_LEGAL_REFERENCES_TEAM;
+    const isPolicySources = plan.institutional.binding.team === INSTITUTIONAL_POLICY_SOURCES_TEAM;
+    const humanDetail = isPolicySources ? 'Owns institutional policy advice and signoff. Reviews the open consultation item.'
+      : isLegalReferences ? 'Owns interpretation and legal advice. Reviews the bibliography and unresolved factual question.'
+      : isAccessibility ? 'Owns accessibility advice on the help-sheet evidence draft.'
       : isServiceMonitoring ? 'Validates the office help aggregate.'
       : isBudget ? 'Validates the budget evidence draft.'
       : isInventory ? inventoryCustodianDecision
@@ -66,11 +76,13 @@ export function createInstitutionalStaffSetupFixture(vscode: typeof import('vsco
       ? 'Reviews the action register draft. The fictional chair owns the decision, and the assigned person acknowledges any action.'
       : 'Reviews the draft and decides through the authorized process.';
     return [
-      { label: isActionRegister || isLessons || isCatalogue || isBusinessServices || isPlanningEvidence || isLibraryRemits || isInventory || isBudget || isServiceMonitoring || isAccessibility ? 'Human review' : 'A person decides', kind: vscode.QuickPickItemKind.Separator },
+      { label: isActionRegister || isLessons || isCatalogue || isBusinessServices || isPlanningEvidence || isLibraryRemits || isInventory || isBudget || isServiceMonitoring || isAccessibility || isLegalReferences || isPolicySources ? 'Human review' : 'A person decides', kind: vscode.QuickPickItemKind.Separator },
       { label: `$(person) ${roster.humanLead}`, description: 'human lead', detail: humanDetail },
       ...(isBudget ? [{ label: '$(person) Fictional comptroller', description: 'independent human reviewer', detail: 'Decides on release through separate human review.' }] : []),
       ...(isServiceMonitoring ? [{ label: '$(person) Fictional feed custodian', description: 'independent source owner', detail: 'Owns source correction through a human review.' }] : []),
       ...(isAccessibility ? [{ label: '$(person) Fictional help-sheet product owner', description: 'independent product owner', detail: 'Decides remediation through separate human review.' }] : []),
+      ...(isLegalReferences ? [{ label: '$(person) Fictional reference custodian', description: 'independent source owner', detail: 'Supplies confirmed record references.' }] : []),
+      ...(isPolicySources ? [{ label: '$(person) Fictional public reference custodian', description: 'independent source owner', detail: 'Supplies confirmed source references.' }] : []),
       { label: 'Agent drafts', kind: vscode.QuickPickItemKind.Separator },
       ...roster.members.map((member) => ({ label: `$(hubot) ${member.name}`, description: member.role, detail: 'Requires an approved local test fixture.' })),
     ];
@@ -87,12 +99,16 @@ export function createInstitutionalStaffSetupFixture(vscode: typeof import('vsco
     const isBudget = plan.institutional.binding.team === INSTITUTIONAL_J8_BUDGET_TEAM;
     const isServiceMonitoring = plan.institutional.binding.team === INSTITUTIONAL_J1_MONITORING_TEAM;
     const isAccessibility = plan.institutional.binding.team === INSTITUTIONAL_ACCESSIBILITY_TEAM;
-    const skill = isAccessibility ? 'help-sheet accessibility review draft' : isServiceMonitoring ? 'office help aggregate draft' : isBudget ? 'office budget evidence reconciliation draft' : isInventory ? 'office inventory reconciliation draft' : isLibraryRemits ? 'library service remit comparison draft' : isPlanningEvidence ? 'evidence and assumptions register draft' : isBusinessServices ? 'business-service catalogue draft' : isCatalogue ? 'office records catalogue draft' : isLessons ? 'office-hours observation draft' : isActionRegister ? 'office-hours action register draft' : 'decision brief';
+    const isLegalReferences = plan.institutional.binding.team === INSTITUTIONAL_LEGAL_REFERENCES_TEAM;
+    const isPolicySources = plan.institutional.binding.team === INSTITUTIONAL_POLICY_SOURCES_TEAM;
+    const skill = isPolicySources ? 'office policy source comparison draft' : isLegalReferences ? 'office reference bibliography draft' : isAccessibility ? 'help-sheet accessibility review draft' : isServiceMonitoring ? 'office help aggregate draft' : isBudget ? 'office budget evidence reconciliation draft' : isInventory ? 'office inventory reconciliation draft' : isLibraryRemits ? 'library service remit comparison draft' : isPlanningEvidence ? 'evidence and assumptions register draft' : isBusinessServices ? 'business-service catalogue draft' : isCatalogue ? 'office records catalogue draft' : isLessons ? 'office-hours observation draft' : isActionRegister ? 'office-hours action register draft' : 'decision brief';
     const detail = `Stages the ${INSTITUTIONAL_COMMAND_GROUP_PROFILE} definition and ${skill} skill in this editor profile.`;
     const confirm = { label: `$(check) ${setUpAction}`, detail };
     const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], {
       title: `${plan.roster.teamName}: check the roster`,
-      placeHolder: isAccessibility ? `The member drafts the help-sheet review. ${accessibilityHumanDecisions} Choose the setup action to stage this role.`
+      placeHolder: isPolicySources ? `The member compares two attributed sources and leaves consultation open. ${policySourcesOwners} Choose the setup action to stage this role.`
+        : isLegalReferences ? `The member drafts a bibliography and leaves the factual question open. ${legalReferencesOwners} Choose the setup action to stage this role.`
+        : isAccessibility ? `The member drafts the help-sheet review. ${accessibilityHumanDecisions} Choose the setup action to stage this role.`
         : isServiceMonitoring ? `The member drafts the office help aggregate. ${monitoringHumanDecisions} Choose the setup action to stage this role.`
         : isBudget ? `The member drafts the office budget evidence reconciliation. ${budgetHumanDecisions} Choose the setup action to stage this role.`
         : isInventory ? `The member drafts the office inventory reconciliation. ${inventoryCustodianDecision} Choose the setup action to stage this role.`
@@ -127,6 +143,7 @@ export function createInstitutionalStaffSetupFixture(vscode: typeof import('vsco
         : team === INSTITUTIONAL_J8_BUDGET_TEAM ? 'The office budget evidence reconciliation draft requires the approved local test fixture before the member can run.'
         : team === INSTITUTIONAL_J1_MONITORING_TEAM ? 'The office help aggregate draft requires the approved local test fixture before the member can run.'
         : team === INSTITUTIONAL_ACCESSIBILITY_TEAM ? 'The help-sheet accessibility review draft requires the approved local test fixture before the member can run.'
+        : team === INSTITUTIONAL_LEGAL_REFERENCES_TEAM ? 'The office reference bibliography draft requires the approved local test fixture before the member can run.'
         : 'The draft member requires the approved local test fixture before it can run.';
       void vscode.window.showInformationMessage(`${status} ${readiness}`);
     } catch (error) {
@@ -134,10 +151,35 @@ export function createInstitutionalStaffSetupFixture(vscode: typeof import('vsco
     }
   }
 
+  async function stageInstitutionalJointTier(root: string, state: MementoLike | undefined): Promise<void> {
+    if (!state) {
+      void vscode.window.showErrorMessage('Local storage for this editor is unavailable.');
+      return;
+    }
+    try {
+      const plan = planInstitutionalJointTierSetup(root, state);
+      const selected = await vscode.window.showQuickPick(institutionalJointTiers.map(({ level, label }) => ({
+        value: level, label, ...(plan.previous?.level === level && !plan.held ? { detail: 'Currently configured.' } : {}),
+      })), { title: 'Institutional Joint Tier (2/3)', placeHolder: 'Which joint tier does this local fixture use?', ignoreFocusOut: true });
+      const choice = institutionalJointTiers.find(({ level }) => level === selected?.value);
+      if (!choice) return;
+      const confirm = { label: '$(check) Confirm joint tier', detail: `Configure ${choice.label} for this project’s local test fixture.` };
+      if (await vscode.window.showQuickPick([confirm], { title: 'Joint staff: confirm level', ignoreFocusOut: true }) !== confirm) return;
+      const projectStillSelected = () => vscode.workspace.workspaceFolders?.some((folder) => folder.uri.fsPath === root) === true;
+      await persistInstitutionalJointTierSetup(plan, choice.level, state, projectStillSelected);
+      const project = projectStillSelected() ? 'this project' : `the confirmed project "${root}"`;
+      void vscode.window.showInformationMessage(`${choice.label} configured for ${project}. The level probe requires the approved local test fixture.`);
+    } catch (error) {
+      void vscode.window.showErrorMessage(`Joint staff setup is on hold. ${(error as Error).message}`);
+    }
+  }
+
   return {
-    choices: institutionalChoices,
+    choices: [...institutionalChoices, { value: INSTITUTIONAL_JOINT_TIER_TEAM, label: 'Institutional Joint Tier',
+      detail: 'Choose L1 Joint or L0 Strategic joint for a local test fixture. Both use J.' }],
     async stage(root, choice, state) {
-      if (isInstitutionalRole(choice)) await stageInstitutionalStaffSetup(root, choice, state);
+      if (choice === INSTITUTIONAL_JOINT_TIER_TEAM) await stageInstitutionalJointTier(root, state);
+      else if (isInstitutionalRole(choice)) await stageInstitutionalStaffSetup(root, choice, state);
     },
   };
 }

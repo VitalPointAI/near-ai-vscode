@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { bundleHash, type BundleState } from '../../../domain/gate/bundle';
+import type { ActorRef } from '../../../domain/gate/decide';
 import {
   admittedInstitutionalBusinessServices, admittedInstitutionalCatalogue, admittedInstitutionalFindings, admittedInstitutionalLibraryRemits, admittedInstitutionalObservation, admittedInstitutionalPlanningEvidence, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, institutionalObservationDirectory,
   institutionalCatalogueUnavailable, institutionalObservationInput, institutionalSourceHash, isInstitutionalCatalogueRecordId,
@@ -10,6 +12,7 @@ import {
   type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type InstitutionalObservationReview, type PreparedInstitutionalDraft,
 } from './institutionalBrief';
 import { admittedInstitutionalAccessibility, prepareInstitutionalAccessibility } from './institutionalAccessibilityReview';
+import { admittedInstitutionalLegalReferences, admittedInstitutionalPolicySources, prepareInstitutionalLegalReferences, prepareInstitutionalPolicySources } from './institutionalAdviserEvidence';
 import { admittedInstitutionalBudget, admittedInstitutionalInventory, prepareInstitutionalBudget, prepareInstitutionalInventory } from './institutionalReconciliation';
 import {
   admittedInstitutionalServiceMonitoring, prepareInstitutionalServiceMonitoring, readInstitutionalServiceMonitoring,
@@ -18,6 +21,13 @@ import { canonicalBytes } from '../../../domain/team/canonical';
 import { parseTeam, renderTeam, teamAgents, type TeamDefinition } from '../../../agent/teams';
 import { declareManifest, fromArgument, INTERACTIVE_ONLY, type AgentTool, type ToolContext } from '../../../agent/tools';
 import { ToolError } from '../../../agent/workspace';
+
+export const INSTITUTIONAL_JOINT_TIER_TEAM = 'institutional-joint-tier-fixture-v1';
+export const institutionalJointTiers = [
+  { level: 'L1', name: 'Joint', designation: 'J', label: 'L1 Joint (J)' },
+  { level: 'L0', name: 'Strategic joint', designation: 'J', label: 'L0 Strategic joint (J)' },
+] as const;
+export type InstitutionalJointTier = typeof institutionalJointTiers[number]['level'];
 
 export const INSTITUTIONAL_COMMAND_GROUP_TEAM = 'institutional-command-group-v1';
 export const INSTITUTIONAL_COMMAND_GROUP_NAME = 'Institutional Command Group';
@@ -34,7 +44,9 @@ export const INSTITUTIONAL_J4_INVENTORY_TEAM = 'institutional-j4-inventory-count
 export const INSTITUTIONAL_J8_BUDGET_TEAM = 'institutional-j8-budget-evidence-v1';
 export const INSTITUTIONAL_J1_MONITORING_TEAM = 'institutional-j1-service-monitoring-v1';
 export const INSTITUTIONAL_ACCESSIBILITY_TEAM = 'institutional-ss-accessibility-v1';
-export type InstitutionalRoleId = typeof INSTITUTIONAL_ACCESSIBILITY_TEAM | typeof INSTITUTIONAL_J1_MONITORING_TEAM | typeof INSTITUTIONAL_J8_BUDGET_TEAM | typeof INSTITUTIONAL_J4_INVENTORY_TEAM | typeof INSTITUTIONAL_J9_REMIT_TEAM | typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
+export const INSTITUTIONAL_LEGAL_REFERENCES_TEAM = 'institutional-ss-legal-references-v1';
+export const INSTITUTIONAL_POLICY_SOURCES_TEAM = 'institutional-ss-policy-sources-v1';
+export type InstitutionalRoleId = typeof INSTITUTIONAL_POLICY_SOURCES_TEAM | typeof INSTITUTIONAL_LEGAL_REFERENCES_TEAM | typeof INSTITUTIONAL_ACCESSIBILITY_TEAM | typeof INSTITUTIONAL_J1_MONITORING_TEAM | typeof INSTITUTIONAL_J8_BUDGET_TEAM | typeof INSTITUTIONAL_J4_INVENTORY_TEAM | typeof INSTITUTIONAL_J9_REMIT_TEAM | typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
 
 const description = 'Prepare a local institutional decision brief for human review.';
 const instructions = 'Prepare a CG-07 decision brief using only evidence admitted for this project. Separate sourced facts, assumptions and alternatives. Preserve attributed disagreement. Leave the decision with the Command Group lead.';
@@ -80,6 +92,10 @@ const monitoringName = 'Institutional G1 Service Monitoring';
 const monitoringInstructions = 'Draft a fictional J1-05 office help aggregate from admitted summary evidence. Leave validation to the human HR services supervisor and source correction to the feed custodian.';
 const accessibilityName = 'Institutional Special Staff Accessibility Review';
 const accessibilityInstructions = 'Draft a fictional SS-18 help-sheet accessibility review from the admitted fixture observations. Keep observations, issues and evidence gaps distinct for the human accessibility adviser and product owner.';
+const policySourcesName = 'Institutional Special Staff Policy Sources';
+const policySourcesInstructions = 'Draft a fictional SS-16 public office source comparison. Keep the documented provision and commentary separately attributed. Leave consultation open and advice and signoff with the human policy adviser.';
+const legalReferencesName = 'Institutional Special Staff Legal References';
+const legalReferencesInstructions = 'Draft a fictional SS-01 office reference bibliography with the admitted citations and open factual edition question. The human legal adviser owns interpretation and advice.';
 const institutionalRoles = {
   [INSTITUTIONAL_COMMAND_GROUP_TEAM]: {
     label: INSTITUTIONAL_COMMAND_GROUP_NAME, member: INSTITUTIONAL_COMMAND_GROUP_MEMBER, lead: INSTITUTIONAL_COMMAND_GROUP_LEAD,
@@ -176,6 +192,24 @@ const institutionalRoles = {
       'Use the approved fixture checklist and leave advice and remediation decisions pending with their human owners.', ''].join('\n'),
     keySegment: 'specialAccessibilityReview', read: 'ReadInstitutionalAccessibilityEvidence', save: 'SaveInstitutionalAccessibilityReviewDraft',
   },
+  [INSTITUTIONAL_LEGAL_REFERENCES_TEAM]: {
+    label: legalReferencesName, member: 'legal-references-drafter', lead: 'Fictional legal adviser',
+    definition: renderTeam(legalReferencesName, 'Prepare a local bibliography of fictional office booking references.', [{
+      name: 'legal-references-drafter', role: 'Office reference bibliography drafter', instructions: legalReferencesInstructions,
+    }], { private: true }),
+    skill: ['# Fictional legal references (SS-01)', '', legalReferencesInstructions,
+      'Retain original-source edition and date information and keep the factual question open.', ''].join('\n'),
+    keySegment: 'specialLegalReferences', read: 'ReadInstitutionalLegalReference', save: 'SaveInstitutionalLegalReferencesDraft',
+  },
+  [INSTITUTIONAL_POLICY_SOURCES_TEAM]: {
+    label: policySourcesName, member: 'policy-sources-drafter', lead: 'Fictional institutional policy adviser',
+    definition: renderTeam(policySourcesName, 'Compare two fictional office help sources for local human review.', [{
+      name: 'policy-sources-drafter', role: 'Institutional policy source comparison drafter', instructions: policySourcesInstructions,
+    }], { private: true }),
+    skill: ['# Fictional institutional policy sources (SS-16)', '', policySourcesInstructions,
+      'Preserve exact original wording, revision and citation for each source.', ''].join('\n'),
+    keySegment: 'specialPolicySources', read: 'ReadInstitutionalPolicySource', save: 'SaveInstitutionalPolicySourcesDraft',
+  },
 } as const;
 
 export function isInstitutionalRole(team: string): team is InstitutionalRoleId {
@@ -188,6 +222,48 @@ export function institutionalRole(team: InstitutionalRoleId) {
 
 export function institutionalDigest(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+const jointTierMember = 'joint-tier-reader';
+const jointTierProbe = 'ReadInstitutionalJointTier';
+const jointTierDefinition = renderTeam('Institutional Joint Tier', 'Read back the confirmed fictional joint tier.', [{
+  name: jointTierMember,
+  role: 'Joint tier reader',
+  instructions: 'Read the fictional institutional joint tier selection for the current confirmed project.',
+}], { private: true });
+
+export interface InstitutionalJointTierBinding {
+  readonly version: 1;
+  readonly rootDigest: string;
+  readonly directoryDigest: string;
+  readonly fixtureDigest: string;
+  readonly level: InstitutionalJointTier;
+  readonly designation: 'J';
+  readonly transitionId: string;
+}
+
+export function institutionalJointTierDirectory(root: string): string | undefined {
+  try {
+    if (path.resolve(root) !== root || realpathSync(root) !== root) return undefined;
+    const identity = lstatSync(root, { bigint: true });
+    if (!identity.isDirectory() || realpathSync(root) !== root) return undefined;
+    return institutionalDigest(`${identity.dev}:${identity.ino}:${identity.birthtimeNs}`);
+  } catch { return undefined; }
+}
+
+export function institutionalJointTierBinding(
+  root: string, directoryDigest: string, level: InstitutionalJointTier, transitionId: string,
+): InstitutionalJointTierBinding {
+  return { version: 1, rootDigest: institutionalDigest(root), directoryDigest, fixtureDigest: institutionalDigest(jointTierDefinition),
+    level, designation: 'J', transitionId };
+}
+
+export function readInstitutionalJointTierBinding(value: unknown, root: string, directoryDigest: string): InstitutionalJointTierBinding | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { level, transitionId } = value as Partial<InstitutionalJointTierBinding>;
+  if ((level !== 'L1' && level !== 'L0') || typeof transitionId !== 'string' ||
+      transitionId.length !== 32 || !/^[a-f0-9]{32}$/.test(transitionId)) return undefined;
+  return exactInstitutionalBinding(value, institutionalJointTierBinding(root, directoryDigest, level, transitionId));
 }
 
 export interface InstitutionalRoleBinding<T extends InstitutionalRoleId = InstitutionalRoleId> {
@@ -221,9 +297,13 @@ export function institutionalCommandGroupBinding(canonicalRoot: string, director
 
 /** Checks the exact setup-owned binding. Matching metadata is not run authority. */
 export function readInstitutionalRoleBinding<T extends InstitutionalRoleBinding>(value: unknown, expected: T): T | undefined {
+  return exactInstitutionalBinding(value, expected);
+}
+
+function exactInstitutionalBinding<T extends object>(value: unknown, expected: T): T | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const record = value as Record<string, unknown>;
-  const fields = Object.keys(expected) as Array<keyof InstitutionalRoleBinding>;
+  const record = value as Record<keyof T, unknown>;
+  const fields = Object.keys(expected) as Array<keyof T>;
   if (Object.keys(record).length !== fields.length ||
     fields.some((field) => !Object.hasOwn(record, field) || record[field] !== expected[field])) return undefined;
   return expected;
@@ -243,6 +323,43 @@ export interface InstitutionalCommandFixture {
   readonly readStaged: () => unknown;
   readonly currentSources: () => readonly InstitutionalBriefSource[];
   readonly withStableParents: <T>(operation: () => Promise<T>) => Promise<T>;
+}
+
+interface InstitutionalPolicySourcesFixture extends InstitutionalCommandFixture {
+  readonly currentPolicySources: () => unknown;
+  readonly currentReviewActor: () => ActorRef | undefined;
+  readonly currentReviewPolicy: () => BundleState;
+}
+
+type PolicyReviewHost = Pick<InstitutionalPolicySourcesFixture, 'currentReviewActor' | 'currentReviewPolicy'>;
+interface PolicyReviewAuthority {
+  readonly current: (child?: Pick<ToolContext, 'agentId' | 'agentLabel'>) => string | undefined;
+  readonly confirmed: Map<string, string>;
+}
+
+function policyReviewAuthority(fixture: InstitutionalCommandFixture, host: PolicyReviewHost, member: string): PolicyReviewAuthority {
+  return { confirmed: new Map(), current: (child) => {
+    try {
+      const actor = host.currentReviewActor();
+      if (actor?.kind !== 'sub-agent' || actor.agentLabel !== member || typeof actor.agentId !== 'string' || !actor.agentId ||
+          typeof actor.deviceFingerprint !== 'string' || !actor.deviceFingerprint || typeof actor.sessionId !== 'string' || !actor.sessionId ||
+          (child && (actor.agentId !== child.agentId || actor.agentLabel !== child.agentLabel))) return undefined;
+      const state = host.currentReviewPolicy();
+      if (state.state !== 'valid' || state.hash !== fixture.policyHash || state.expiresAt !== state.bundle.expiresAt ||
+          !(Date.parse(state.expiresAt) > Date.now()) || bundleHash(state.bundle) !== state.hash) return undefined;
+      const settings = fixture.currentActionSettings();
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings) ||
+          !Object.hasOwn(settings, 'mode') || !Object.hasOwn(settings, 'emergencyStop')) return undefined;
+      const { mode, emergencyStop } = settings as { mode: unknown; emergencyStop: unknown };
+      if (typeof mode !== 'string' || emergencyStop !== false) return undefined;
+      const { agentId, agentLabel, deviceFingerprint, sessionId } = actor;
+      return institutionalBriefDigest(canonicalBytes({ agentId, agentLabel, deviceFingerprint, sessionId, policyHash: state.hash, mode }));
+    } catch { return undefined; }
+  } };
+}
+
+interface InstitutionalLegalReferencesFixture extends InstitutionalCommandFixture {
+  readonly currentLegalReferences: () => unknown;
 }
 
 interface InstitutionalAccessibilityFixture extends InstitutionalCommandFixture {
@@ -294,7 +411,7 @@ interface InstitutionalFindingsFixture extends InstitutionalCommandFixture {
   };
 }
 
-const fixtureSelections = new WeakMap<TeamDefinition, { readonly fixture: InstitutionalCommandFixture; readonly scope: InstitutionalDraftScope }>();
+const fixtureSelections = new WeakMap<TeamDefinition, { readonly fixture: InstitutionalCommandFixture; readonly scope: InstitutionalDraftScope; readonly policyReview?: PolicyReviewAuthority }>();
 const stale = 'The institutional command fixture no longer matches the staged project, source or run.';
 
 async function captureInstitutionalBinding(root: string, team: InstitutionalRoleId): Promise<InstitutionalRoleBinding> {
@@ -354,15 +471,29 @@ export async function selectSyntheticInstitutionalAccessibility(fixture: Institu
   return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_ACCESSIBILITY_TEAM, { currentAccessibilityReview: fixture.currentAccessibilityReview });
 }
 
+export async function selectSyntheticInstitutionalLegalReferences(fixture: InstitutionalLegalReferencesFixture): Promise<TeamDefinition> {
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_LEGAL_REFERENCES_TEAM, { currentLegalReferences: fixture.currentLegalReferences });
+}
+
+export async function selectSyntheticInstitutionalPolicySources(fixture: InstitutionalPolicySourcesFixture): Promise<TeamDefinition> {
+  const { currentPolicySources, currentReviewActor, currentReviewPolicy } = fixture;
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_POLICY_SOURCES_TEAM, {
+    currentPolicySources, policyReviewHost: { currentReviewActor, currentReviewPolicy },
+  });
+}
+
 async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFixture, teamId: InstitutionalRoleId, {
-  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence, currentLibraryRemits, currentLibraryRemitTime, currentInventory, currentBudget, currentServiceMonitoring, currentAccessibilityReview,
+  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence, currentLibraryRemits, currentLibraryRemitTime, currentInventory, currentBudget, currentServiceMonitoring, currentAccessibilityReview, currentLegalReferences, currentPolicySources, policyReviewHost,
 }: { authority?: InstitutionalActionRegisterFixture['actionAuthority']; currentObservation?: () => unknown;
   findingsAuthority?: InstitutionalFindingsFixture['findingsAuthority']; currentCatalogue?: () => unknown; currentBusinessServices?: () => unknown; currentPlanningEvidence?: () => unknown;
-  currentLibraryRemits?: () => unknown; currentLibraryRemitTime?: () => unknown; currentInventory?: () => unknown; currentBudget?: () => unknown; currentServiceMonitoring?: () => unknown; currentAccessibilityReview?: () => unknown } = {}): Promise<TeamDefinition> {
+  currentLibraryRemits?: () => unknown; currentLibraryRemitTime?: () => unknown; currentInventory?: () => unknown; currentBudget?: () => unknown; currentServiceMonitoring?: () => unknown; currentAccessibilityReview?: () => unknown; currentLegalReferences?: () => unknown; currentPolicySources?: () => unknown; policyReviewHost?: PolicyReviewHost } = {}): Promise<TeamDefinition> {
   const exact = await captureInstitutionalBinding(fixture.root, teamId);
   if (!readInstitutionalRoleBinding(fixture.readStaged(), exact) || typeof fixture.withStableParents !== 'function' ||
       typeof fixture.currentSources !== 'function' || typeof fixture.currentActionSettings !== 'function' || !fixture.runId || !fixture.model ||
       !/^[a-f0-9]{64}$/.test(fixture.policyHash) || (teamId === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM && !authority) ||
+      (teamId === INSTITUTIONAL_POLICY_SOURCES_TEAM && (typeof currentPolicySources !== 'function' ||
+        typeof policyReviewHost?.currentReviewActor !== 'function' || typeof policyReviewHost?.currentReviewPolicy !== 'function')) ||
+      (teamId === INSTITUTIONAL_LEGAL_REFERENCES_TEAM && typeof currentLegalReferences !== 'function') ||
       (teamId === INSTITUTIONAL_ACCESSIBILITY_TEAM && typeof currentAccessibilityReview !== 'function') ||
       (teamId === INSTITUTIONAL_J1_MONITORING_TEAM && typeof currentServiceMonitoring !== 'function') ||
       (teamId === INSTITUTIONAL_J8_BUDGET_TEAM && typeof currentBudget !== 'function') ||
@@ -425,6 +556,16 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
     try { return admittedInstitutionalAccessibility(currentAccessibilityReview(), binding, currentSources()); }
     catch { throw new ToolError(institutionalCatalogueUnavailable); }
   });
+  const legalReferences = currentLegalReferences && (() => {
+    try { return admittedInstitutionalLegalReferences(currentLegalReferences(), binding, currentSources()); }
+    catch { throw new ToolError(institutionalCatalogueUnavailable); }
+  });
+  const policySources = currentPolicySources && (() => {
+    try { return admittedInstitutionalPolicySources(currentPolicySources(), binding, currentSources()); }
+    catch { throw new ToolError(institutionalCatalogueUnavailable); }
+  });
+  policySources?.();
+  legalReferences?.();
   accessibility?.();
   serviceMonitoring?.();
   budget?.();
@@ -523,9 +664,14 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
     });
     findings.current();
   }
-  fixtureSelections.set(team, { fixture: provider, scope: Object.freeze({
+  const policyReview = policyReviewHost && policyReviewAuthority(provider, policyReviewHost, role.member);
+  fixtureSelections.set(team, { fixture: provider, policyReview, scope: Object.freeze({
+    ...(policyReview ? { policyReviewIsCurrent: (version: string) => {
+      const authorized = policyReview.confirmed.get(version);
+      return authorized !== undefined && policyReview.current() === authorized;
+    } } : {}),
     root: fixture.root, binding, withStableParents: fixture.withStableParents, currentSources, stagedIsCurrent,
-    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}), ...(libraryRemits ? { libraryRemits } : {}), ...(inventory ? { inventory } : {}), ...(budget ? { budget } : {}), ...(serviceMonitoring ? { serviceMonitoring } : {}), ...(accessibility ? { accessibility } : {}),
+    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}), ...(libraryRemits ? { libraryRemits } : {}), ...(inventory ? { inventory } : {}), ...(budget ? { budget } : {}), ...(serviceMonitoring ? { serviceMonitoring } : {}), ...(accessibility ? { accessibility } : {}), ...(legalReferences ? { legalReferences } : {}), ...(policySources ? { policySources } : {}),
     bindingIsCurrent: async () => {
       const sampled = await captureInstitutionalBinding(provider.root, teamId);
       return sampled.directoryDigest === exact.directoryDigest && stagedIsCurrent();
@@ -538,8 +684,92 @@ export function selectedInstitutionalScope(team: TeamDefinition): InstitutionalD
   return fixtureSelections.get(team)?.scope;
 }
 
+interface InstitutionalJointTierFixture extends Pick<InstitutionalCommandFixture,
+  'root' | 'runId' | 'model' | 'policyHash' | 'currentActionSettings' | 'withStableParents'> {
+  readonly readConfiguredTier: () => unknown;
+}
+
+const jointTierSelections = new WeakMap<TeamDefinition, {
+  readonly fixture: InstitutionalJointTierFixture;
+  readonly confirmed: InstitutionalJointTierBinding;
+}>();
+const jointTierUnavailable = 'The configured joint tier is unavailable.';
+
+export async function selectSyntheticInstitutionalJointTier(fixture: InstitutionalJointTierFixture): Promise<TeamDefinition> {
+  const directory = institutionalJointTierDirectory(fixture.root);
+  if (!directory || !fixture.runId || !fixture.model || !/^[a-f0-9]{64}$/.test(fixture.policyHash) ||
+      typeof fixture.currentActionSettings !== 'function' || typeof fixture.withStableParents !== 'function' ||
+      typeof fixture.readConfiguredTier !== 'function') throw new ToolError(jointTierUnavailable);
+  let confirmed: InstitutionalJointTierBinding | undefined;
+  try { confirmed = readInstitutionalJointTierBinding(fixture.readConfiguredTier(), fixture.root, directory); }
+  catch { throw new ToolError(jointTierUnavailable); }
+  if (!confirmed) throw new ToolError(jointTierUnavailable);
+  const team = parseTeam(jointTierDefinition, `${INSTITUTIONAL_JOINT_TIER_TEAM}.md`);
+  for (const member of team.members) {
+    member.tools = [jointTierProbe];
+    Object.freeze(member.tools);
+    Object.freeze(member);
+  }
+  Object.freeze(team.members);
+  Object.freeze(team);
+  jointTierSelections.set(team, { fixture: Object.freeze({ ...fixture }), confirmed: Object.freeze(confirmed) });
+  return team;
+}
+
+interface InstitutionalChildSelection {
+  root: string;
+  runId: string;
+  label: string;
+  model: string;
+  local: boolean;
+  onTeam: boolean;
+  detached: boolean;
+}
+
+function jointTierTool(team: TeamDefinition, selection: InstitutionalChildSelection): AgentTool {
+  const selected = jointTierSelections.get(team);
+  if (!selected || !selection.local || !selection.onTeam || selection.detached || selection.label !== jointTierMember ||
+      selected.fixture.root !== selection.root || selected.fixture.runId !== selection.runId || selected.fixture.model !== selection.model) {
+    throw new ToolError(jointTierUnavailable);
+  }
+  const { fixture, confirmed } = selected;
+  const current = () => {
+    try {
+      return institutionalJointTierDirectory(fixture.root) === confirmed.directoryDigest &&
+        Boolean(exactInstitutionalBinding(fixture.readConfiguredTier(), confirmed));
+    } catch { return false; }
+  };
+  if (!current()) throw new ToolError(jointTierUnavailable);
+  const tier = institutionalJointTiers.find(({ level }) => level === confirmed.level)!;
+  const fresh = (context: ToolContext) => Boolean(context.agentId && context.agentLabel === jointTierMember &&
+    context.root === fixture.root && !context.signal.aborted && current());
+  return {
+    name: jointTierProbe,
+    description: 'Read the confirmed fictional joint tier.',
+    parameters: exactSchema({}),
+    capability: 'plan',
+    manifest: declareManifest({ tool: jointTierProbe, effects: [{ verb: 'plan' }], contexts: INTERACTIVE_ONLY }),
+    fixtureGate: () => ({ policyHash: fixture.policyHash, currentActionSettings: fixture.currentActionSettings, effect: { verb: 'plan' } }),
+    parse(raw) {
+      if (Object.keys(raw).length) throw new ToolError(jointTierUnavailable);
+      return raw;
+    },
+    title: () => 'Read confirmed joint tier',
+    forbidden: (_input, context) => fresh(context) ? undefined : jointTierUnavailable,
+    async run(input, context) {
+      try {
+        return await fixture.withStableParents(async () => {
+          if (!context.verifyFixtureGate?.(input) || !fresh(context)) throw new ToolError(jointTierUnavailable);
+          return JSON.stringify({ level: tier.level, name: tier.name, designation: tier.designation });
+        });
+      } catch { throw new ToolError(jointTierUnavailable); }
+    },
+  };
+}
+
 export function selectedTeamAgents(team: TeamDefinition | undefined): ReturnType<typeof teamAgents> {
-  if (!team || (isInstitutionalRole(team.slug) && !fixtureSelections.has(team))) return [];
+  if (!team || (isInstitutionalRole(team.slug) && !fixtureSelections.has(team)) ||
+      (team.slug === INSTITUTIONAL_JOINT_TIER_TEAM && !jointTierSelections.has(team))) return [];
   return teamAgents(team);
 }
 
@@ -645,18 +875,19 @@ const findingsSchema = exactSchema({
 });
 
 export async function institutionalChildTools(
-  team: TeamDefinition | undefined, selection: { root: string; runId: string; label: string; model: string; local: boolean; onTeam: boolean; detached: boolean },
+  team: TeamDefinition | undefined, selection: InstitutionalChildSelection,
   store: {
     verify: (scope: InstitutionalDraftScope, draft: PreparedInstitutionalDraft) => Promise<void>;
     commit: (scope: InstitutionalDraftScope, draft: PreparedInstitutionalDraft, verifyBeforeInstall: () => boolean) => Promise<InstitutionalDraftReview>;
   },
-): Promise<[AgentTool<string>, AgentTool<PreparedInstitutionalDraft>] | undefined> {
+): Promise<[AgentTool] | [AgentTool<string>, AgentTool<PreparedInstitutionalDraft>] | undefined> {
+  if (team?.slug === INSTITUTIONAL_JOINT_TIER_TEAM) return [jointTierTool(team, selection)];
   if (!team || !isInstitutionalRole(team.slug)) return undefined;
   const role = institutionalRole(team.slug);
   const selected = fixtureSelections.get(team);
   if (!selected || !selection.local || !selection.onTeam || selection.detached || selection.label !== role.member ||
       selected.scope.root !== selection.root || selected.fixture.runId !== selection.runId || selected.fixture.model !== selection.model) throw new ToolError(stale);
-  const { scope, fixture: { policyHash, currentActionSettings } } = selected;
+  const { scope, policyReview, fixture: { policyHash, currentActionSettings } } = selected;
   if (!await scope.bindingIsCurrent() || (scope.actionRegister && !await scope.actionRegister.predecessorCurrent()) ||
       (scope.findings && !await scope.findings.predecessorCurrent())) throw new ToolError(stale);
   const approvedCatalogue = scope.catalogue?.();
@@ -667,10 +898,12 @@ export async function institutionalChildTools(
   const approvedBudget = scope.budget?.();
   const approvedServiceMonitoring = scope.serviceMonitoring?.();
   const approvedAccessibility = scope.accessibility?.();
+  const approvedLegalReferences = scope.legalReferences?.();
+  const approvedPolicySources = scope.policySources?.();
   const approvedMetadata = approvedCatalogue ?? approvedBusinessServices ?? approvedPlanningEvidence ?? approvedLibraryRemits ??
-    approvedInventory ?? approvedBudget ?? approvedServiceMonitoring ?? approvedAccessibility;
+    approvedInventory ?? approvedBudget ?? approvedServiceMonitoring ?? approvedAccessibility ?? approvedLegalReferences ?? approvedPolicySources;
   const currentMetadata = scope.catalogue ?? scope.businessServices ?? scope.planningEvidence ?? scope.libraryRemits ??
-    scope.inventory ?? scope.budget ?? scope.serviceMonitoring ?? scope.accessibility;
+    scope.inventory ?? scope.budget ?? scope.serviceMonitoring ?? scope.accessibility ?? scope.legalReferences ?? scope.policySources;
   const metadataDigest = approvedMetadata && institutionalBriefDigest(canonicalBytes(approvedMetadata));
   const accepted = scope.actionRegister?.current();
   const approvedObservation = scope.observation?.current();
@@ -714,6 +947,8 @@ export async function institutionalChildTools(
       if (approvedBudget) catalogueDraft = prepareInstitutionalBudget(raw, scope.binding, sources, approvedBudget);
       if (approvedServiceMonitoring) catalogueDraft = prepareInstitutionalServiceMonitoring(raw, scope.binding, sources, approvedServiceMonitoring);
       if (approvedAccessibility) catalogueDraft = prepareInstitutionalAccessibility(raw, scope.binding, sources, approvedAccessibility);
+      if (approvedLegalReferences) catalogueDraft = prepareInstitutionalLegalReferences(raw, scope.binding, sources, approvedLegalReferences);
+      if (approvedPolicySources) catalogueDraft = prepareInstitutionalPolicySources(raw, scope.binding, sources, approvedPolicySources);
     } catch { throw new ToolError(institutionalCatalogueUnavailable); }
     const draft = catalogueDraft ?? (approvedFindings ? prepareInstitutionalFindings(raw, scope.binding, sources, approvedFindings)
       : approvedObservation ? prepareInstitutionalObservation(raw, scope.binding, sources, approvedObservation)
@@ -721,6 +956,10 @@ export async function institutionalChildTools(
       : prepareInstitutionalBrief(raw, scope.binding, sources));
     draft.review.sources.forEach(Object.freeze);
     Object.freeze(draft.review.sources);
+    if (draft.review.kind === 'legal-references' || draft.review.kind === 'policy-sources') {
+      Object.freeze(draft.review.adviser);
+      Object.freeze(draft.review.custodian);
+    }
     if (draft.review.kind === 'accessibility-review') {
       Object.freeze(draft.review.sheet.evidence);
       Object.freeze(draft.review.sheet);
@@ -760,7 +999,9 @@ export async function institutionalChildTools(
     return Object.freeze(draft);
   };
   const read: AgentTool<string> = {
-    name: readEvidence, description: approvedAccessibility ? 'Read one authorized fictional help-sheet observation by opaque ID.'
+    name: readEvidence, description: approvedPolicySources ? 'Read one admitted fictional institutional policy source by opaque ID.'
+      : approvedLegalReferences ? 'Read one authorized fictional office reference by opaque ID.'
+      : approvedAccessibility ? 'Read one authorized fictional help-sheet observation by opaque ID.'
       : approvedServiceMonitoring ? 'Read the approved fictional office help aggregate by opaque ID.'
       : approvedBudget ? 'Read authorized fictional office budget evidence by opaque ID.'
       : approvedInventory ? 'Read one authorized fictional office count and register entry by opaque ID.'
@@ -781,7 +1022,7 @@ export async function institutionalChildTools(
       if (Object.keys(raw).length !== 1 || typeof raw.sourceId !== 'string' || !quoteSources.some((source) => source.id === raw.sourceId)) throw new ToolError('This evidence is unavailable.');
       return raw.sourceId;
     },
-    title: () => approvedAccessibility ? 'Read approved help-sheet observation' : approvedServiceMonitoring ? 'Read approved office help aggregate' : approvedBudget ? 'Read approved office budget evidence' : approvedInventory ? 'Read approved office inventory evidence' : approvedLibraryRemits ? 'Read approved library service remit' : approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
+    title: () => approvedPolicySources ? 'Read approved policy source' : approvedLegalReferences ? 'Read approved office reference' : approvedAccessibility ? 'Read approved help-sheet observation' : approvedServiceMonitoring ? 'Read approved office help aggregate' : approvedBudget ? 'Read approved office budget evidence' : approvedInventory ? 'Read approved office inventory evidence' : approvedLibraryRemits ? 'Read approved library service remit' : approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
       : approvedCatalogue ? 'Read approved record metadata' : 'Read admitted brief evidence',
     async forbidden(_id, context) { return approvedMetadata || await fresh(context) ? undefined : stale; },
     async run(id, context) {
@@ -814,7 +1055,9 @@ export async function institutionalChildTools(
     },
   };
   const save: AgentTool<PreparedInstitutionalDraft> = {
-    name: saveDraft, description: approvedAccessibility ? 'Save the fictional help-sheet accessibility review for its human adviser and product owner.'
+    name: saveDraft, description: approvedPolicySources ? 'Save a local source comparison and open consultation item for human review.'
+      : approvedLegalReferences ? 'Save the local fictional bibliography and open factual question for human review.'
+      : approvedAccessibility ? 'Save the fictional help-sheet accessibility review for its human adviser and product owner.'
       : approvedServiceMonitoring ? 'Save the approved fictional office help aggregate for human validation.'
       : approvedBudget ? 'Save fictional office budget evidence for the human finance reporting officer.'
       : approvedInventory ? 'Save a fictional office inventory comparison for the human property custodian.'
@@ -829,7 +1072,7 @@ export async function institutionalChildTools(
     manifest: declareManifest({ tool: saveDraft, effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_ONLY }),
     fixtureGate: (draft) => ({ policyHash, currentActionSettings, effect: { verb: 'workspaceWrite', path: draft.path } }),
     parse: project,
-    title: () => approvedAccessibility ? 'Save local help-sheet accessibility draft' : approvedServiceMonitoring ? 'Save local office help aggregate draft' : approvedBudget ? 'Save local office budget evidence draft' : approvedInventory ? 'Save local office inventory reconciliation draft' : approvedLibraryRemits ? 'Save local library remit comparison draft' : approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
+    title: () => approvedPolicySources ? 'Save local policy source comparison' : approvedLegalReferences ? 'Save local reference bibliography' : approvedAccessibility ? 'Save local help-sheet accessibility draft' : approvedServiceMonitoring ? 'Save local office help aggregate draft' : approvedBudget ? 'Save local office budget evidence draft' : approvedInventory ? 'Save local office inventory reconciliation draft' : approvedLibraryRemits ? 'Save local library remit comparison draft' : approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
       : approvedCatalogue ? 'Save local records catalogue draft' : approvedFindings ? 'Save local candidate findings draft' : approvedObservation ? 'Save local observation draft' : accepted ? 'Save local action register draft' : 'Save local decision brief draft',
     async forbidden(draft, context) {
       const unavailable = approvedMetadata ? institutionalCatalogueUnavailable : stale;
@@ -839,12 +1082,19 @@ export async function institutionalChildTools(
     async run(draft, context) {
       const unavailable = approvedMetadata ? institutionalCatalogueUnavailable : stale;
       if (!await fresh(context) || !context.verifyFixtureGate?.(draft, draft.path)) throw new ToolError(unavailable);
-      const stillCurrent = () => currentFacts(context) && Boolean(context.verifyFixtureGate?.(draft, draft.path));
+      // The private review proof records the current host authority for this exact
+      // successful effect. It neither extends the per-call gate nor grants anything.
+      const authorization = policyReview?.current(context);
+      const previous = policyReview?.confirmed.get(draft.review.version);
+      if (policyReview && (!authorization || (previous && previous !== authorization))) throw new ToolError(unavailable);
+      const stillCurrent = () => currentFacts(context) && Boolean(context.verifyFixtureGate?.(draft, draft.path)) &&
+        (!policyReview || policyReview.current(context) === authorization);
       const review = await store.commit(scope, draft, stillCurrent).catch((error: unknown) => {
         if (approvedMetadata) throw new ToolError(unavailable);
         throw error;
       });
       if (approvedMetadata && !stillCurrent()) throw new ToolError(unavailable);
+      if (policyReview && authorization) policyReview.confirmed.set(review.version, authorization);
       return JSON.stringify({ state: 'draft', review });
     },
   };
