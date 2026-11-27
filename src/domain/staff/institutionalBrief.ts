@@ -6,6 +6,8 @@ import { STAFF_SLUG } from './parse';
 export const institutionalBriefDirectory = '.planning/staff/institutional/command/briefs';
 export const institutionalActionRegisterDirectory = '.planning/staff/institutional/j3/action-registers';
 export const institutionalObservationDirectory = '.planning/staff/institutional/j7/observations';
+export const institutionalCatalogueDirectory = '.planning/staff/institutional/j2/catalogue';
+export const institutionalCatalogueUnavailable = 'This catalogue metadata is unavailable.';
 export const institutionalFindingsDirectory = '.planning/staff/institutional/j7/after-action';
 export const institutionalBriefMaxBytes = 128 * 1024;
 
@@ -47,6 +49,7 @@ export interface InstitutionalDraftScope {
     /** Called with the fixture interlock held immediately before a J7 effect. */
     readonly correctionAtEffect: (correction: InstitutionalObservationCorrection | null) => boolean;
   };
+  readonly catalogue?: () => InstitutionalCatalogueEvidence;
   readonly findings?: {
     readonly current: () => InstitutionalFindingsEvidence;
     readonly predecessorCurrent: () => Promise<boolean>;
@@ -103,7 +106,16 @@ export interface InstitutionalFindingsReview extends Omit<InstitutionalBriefRevi
   readonly requiredApproval: InstitutionalFindingsEvidence['approver'];
 }
 
-export type InstitutionalDraftReview = InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
+interface InstitutionalCatalogueReview extends Omit<InstitutionalBriefReview, 'duty' | 'kind'> {
+  readonly duty: 'J2-IS01';
+  readonly kind: 'records-catalogue';
+  readonly policyRevision: string;
+  readonly scopeDigest: string;
+  readonly steward: InstitutionalCatalogueSource;
+  readonly stewardship: 'pending';
+}
+
+export type InstitutionalDraftReview = InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;
@@ -649,4 +661,132 @@ export function prepareInstitutionalFindings(
   requireFindings(bytes.length <= institutionalBriefMaxBytes);
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalFindingsDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
+}
+
+
+const catalogueFields = ['title', 'category', 'description', 'platform-status'] as const;
+type CatalogueField = typeof catalogueFields[number];
+
+interface InstitutionalCatalogueSource {
+  readonly role: string;
+  readonly sourceId: string;
+  readonly revision: string;
+  readonly hash: string;
+}
+
+interface InstitutionalCatalogueRow {
+  readonly id: string;
+  readonly fields: Partial<Record<Exclude<CatalogueField, 'platform-status'>, string>>;
+  readonly scope: 'confirmed' | 'uncertain';
+  readonly availability: 'documented' | 'unknown';
+  readonly freshness: 'current' | 'stale' | 'unknown';
+  readonly handling: 'local-review-only';
+  readonly custodian: InstitutionalCatalogueSource;
+  readonly steward: InstitutionalCatalogueSource;
+  readonly platformStatus?: { readonly state: 'documented' | 'unknown'; readonly source: InstitutionalCatalogueSource };
+}
+
+export interface InstitutionalCatalogueEvidence {
+  readonly requester: 'fictional-catalogue-reviewer';
+  readonly purpose: 'fictional-office-records-j2-is01';
+  readonly productId: string;
+  readonly policyRevision: string;
+  readonly steward: InstitutionalCatalogueSource;
+  readonly records: readonly InstitutionalCatalogueRow[];
+}
+
+function requireCatalogue(condition: unknown): asserts condition {
+  if (!condition) throw new Error(institutionalCatalogueUnavailable);
+}
+
+export function isInstitutionalCatalogueRecordId(value: unknown): value is string {
+  return typeof value === 'string' && /^item-[a-f0-9]{8}$/.test(value);
+}
+
+function catalogueId(value: unknown): string {
+  requireCatalogue(isInstitutionalCatalogueRecordId(value));
+  return value;
+}
+
+export function admittedInstitutionalCatalogue(
+  raw: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[],
+): InstitutionalCatalogueEvidence {
+  const { receipt, inventory } = record(raw, ['receipt', 'inventory']);
+  const authorization = record(receipt, ['project', 'directory', 'requester', 'purpose', 'policyRevision', 'productId', 'steward', 'grants']);
+  const { requester, purpose } = authorization;
+  requireCatalogue(authorization.project === binding.project && authorization.directory === binding.directory &&
+    requester === 'fictional-catalogue-reviewer' && purpose === 'fictional-office-records-j2-is01');
+  const sourceEvidence = (entry: unknown, role: string): InstitutionalCatalogueSource => {
+    const evidence = record(entry, ['sourceId', 'revision', 'role']);
+    const source = sources.find(({ id, revision }) => id === evidence.sourceId && revision === evidence.revision);
+    requireCatalogue(source && evidence.role === role);
+    return { role, sourceId: source.id, revision: source.revision, hash: institutionalSourceHash(source) };
+  };
+  const steward = sourceEvidence(authorization.steward, 'fictional-domain-steward');
+  const grants = list(authorization.grants, (entry) => {
+    const grant = record(entry, ['id', 'fields']);
+    const fields = list(grant.fields, (field) => {
+      requireCatalogue(catalogueFields.some((allowed) => allowed === field));
+      return field as CatalogueField;
+    });
+    requireCatalogue(new Set(fields).size === fields.length);
+    return { id: catalogueId(grant.id), fields };
+  });
+  requireCatalogue(new Set(grants.map(({ id }) => id)).size === grants.length);
+  const eligible = new Map(grants.map(({ id, fields }) => [id, fields]));
+  const rows = list(inventory, (entry) => {
+    requireCatalogue(entry && typeof entry === 'object' && !Array.isArray(entry));
+    return entry as Record<string, unknown>;
+  });
+  const records: InstitutionalCatalogueRow[] = [];
+  for (const row of rows) {
+    if (typeof row.id !== 'string' || row.confirmed !== true) continue;
+    const fields = eligible.get(row.id);
+    if (!fields) continue;
+    const { id, scope, availability, freshness, handling } = row;
+    requireCatalogue((scope === 'confirmed' || scope === 'uncertain') &&
+      (availability === 'documented' || availability === 'unknown') &&
+      (freshness === 'current' || freshness === 'stale' || freshness === 'unknown') && handling === 'local-review-only');
+    requireCatalogue(row.fields && typeof row.fields === 'object' && !Array.isArray(row.fields));
+    const descriptive = row.fields as Record<string, unknown>;
+    const projected: InstitutionalCatalogueRow['fields'] = {};
+    for (const field of fields) {
+      if (field !== 'platform-status' && Object.hasOwn(descriptive, field)) projected[field] = text(descriptive[field], 240);
+    }
+    const custodian = sourceEvidence(row.custodian, 'fictional-records-custodian');
+    requireCatalogue(custodian.sourceId !== steward.sourceId);
+    let platformStatus: InstitutionalCatalogueRow['platformStatus'];
+    if (fields.includes('platform-status') && row.platformStatus !== undefined) {
+      const status = record(row.platformStatus, ['state', 'source']);
+      requireCatalogue(status.state === 'documented' || status.state === 'unknown');
+      platformStatus = { state: status.state, source: sourceEvidence(status.source, 'fictional-platform-steward') };
+    }
+    records.push({ id, fields: projected, scope, availability, freshness, handling, custodian, steward, ...(platformStatus && { platformStatus }) });
+  }
+  requireCatalogue(new Set(records.map(({ id }) => id)).size === records.length);
+  return { requester, purpose, productId: slug(authorization.productId), policyRevision: revision(authorization.policyRevision), steward,
+    records: records.sort((a, b) => a.id.localeCompare(b.id)) };
+}
+
+export function prepareInstitutionalCatalogue(
+  input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalCatalogueEvidence,
+): PreparedInstitutionalDraft {
+  const request = record(input, ['productId', 'recordIds']);
+  requireCatalogue(request.productId === accepted.productId);
+  const ids = list(request.recordIds, catalogueId, 1);
+  requireCatalogue(new Set(ids).size === ids.length);
+  const records = ids.sort().map((id) => {
+    const row = accepted.records.find((entry) => entry.id === id);
+    requireCatalogue(row);
+    return row;
+  });
+  const evidenceIds = new Set([accepted.steward.sourceId, ...records.flatMap(({ custodian, platformStatus }) =>
+    platformStatus ? [custodian.sourceId, platformStatus.source.sourceId] : [custodian.sourceId])]);
+  const identity = { ...binding, duty: 'J2-IS01' as const, echelon: 'L3' as const, kind: 'records-catalogue' as const,
+    productId: accepted.productId, policyRevision: accepted.policyRevision, scopeDigest: canonicalDigest(accepted),
+    steward: accepted.steward, stewardship: 'pending' as const, sources: sourceReferences(sources.filter(({ id }) => evidenceIds.has(id))) };
+  const bytes = canonicalBytes({ schema: 1, ...identity, body: { records } });
+  requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
+  const version = institutionalBriefDigest(bytes);
+  return { path: `${institutionalCatalogueDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }

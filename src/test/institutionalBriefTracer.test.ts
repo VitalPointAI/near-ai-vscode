@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -25,6 +25,10 @@ import { newTestConversation, testBundleState, testGateRuntime } from './helpers
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const catalogueTeam = 'institutional-j2-records-catalogue-v1';
+const catalogueDirectory = '.planning/staff/institutional/j2/catalogue';
+const readCatalogue = 'ReadInstitutionalRecordMetadata';
+const saveCatalogue = 'SaveInstitutionalRecordsCatalogueDraft';
 const draftDirectory = '.planning/staff/institutional/command/briefs';
 const observationTeam = 'institutional-j7-lessons-v1';
 const observationDirectory = '.planning/staff/institutional/j7/observations';
@@ -61,7 +65,10 @@ const toolCall = (id: string, name: string, input: unknown): ToolCall => ({
   id, type: 'function', function: { name, arguments: JSON.stringify(input) },
 });
 
-async function stageInstitutionalSetup(root: string, choice: { label: string; team: string; keySegment?: string } = {
+async function stageInstitutionalSetup(root: string, choice: {
+  label: string; team: string; keySegment?: string;
+  checkPrompts?: (requests: ReturnType<typeof createVscodeStub>['quickPickRequests']) => void;
+} = {
   label: 'Institutional Command Group', team: INSTITUTIONAL_COMMAND_GROUP_TEAM,
 }) {
   const stub = createVscodeStub();
@@ -84,6 +91,7 @@ async function stageInstitutionalSetup(root: string, choice: { label: string; te
     const setup = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(setup);
     await setup();
+    choice.checkPrompts?.(stub.quickPickRequests);
     assert.equal(profile.size, 1, 'the registered setup stages only the selected institutional role');
     const [[key, raw]] = [...profile.entries()];
     const record = raw as Record<string, unknown>;
@@ -163,6 +171,8 @@ async function runFixture(
   const root = options.root ?? fixture.root;
   const offers: string[][] = [];
   const readOffers: unknown[] = [];
+  const catalogueOffers: Record<string, unknown>[][] = [];
+  const toolResults = new Map<string, string>();
   const results: string[] = [];
   const childRequests: { model: string; idle?: number; turn?: number; admitted: boolean }[] = [];
   let parentTurn = 0;
@@ -170,8 +180,12 @@ async function runFixture(
   const client = {
     async *streamCompletion(selectedModel: string, messages: AgentMessage[], tools: ToolDefinition[], signal: AbortSignal,
       deadlines: { idleTimeoutMs?: number; turnTimeoutMs?: number }): AsyncGenerator<CompletionEvent> {
-      results.push(...messages.filter((message) => message.role === 'tool').map((message) => String(message.content)));
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings/.test(String(messages[0].content));
+      for (const message of messages) {
+        if (message.role !== 'tool') continue;
+        results.push(message.content);
+        toolResults.set(message.tool_call_id, message.content);
+      }
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -179,13 +193,14 @@ async function runFixture(
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
+        if (team.slug === catalogueTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -210,7 +225,7 @@ async function runFixture(
   } satisfies AgentTurnRequest;
   options.onStart?.(() => conversation.stop());
   try { await conversation.send(request); } finally { conversation.dispose(); }
-  return { offers, readOffers, results, posted, childRequests, requestPolicy, decisions: runtimes.flatMap((runtime): DecisionRecord[] => runtime.records) };
+  return { offers, readOffers, catalogueOffers, toolResults, results, posted, childRequests, requestPolicy, decisions: runtimes.flatMap((runtime): DecisionRecord[] => runtime.records) };
 }
 
 test('registered setup passes the exact staged record into a real confined child and reviews its draft', async () => {
@@ -1002,4 +1017,121 @@ test('exact J7-10 candidate findings stay open for independent human validation'
     assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
   } finally { setCasProbe(undefined); }
   await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|admitted|changed/);
+});
+
+test('registered G2 catalogue projects exact fictional metadata and gives the same unavailable result for hidden and missing records', async () => {
+  const subject = await newFixture();
+  const { root } = subject.fixture;
+  const label = 'Institutional G2 Records Catalogue';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: catalogueTeam, keySegment: 'j2RecordsCatalogue',
+    checkPrompts(requests) {
+      const choice = requests[0].items.find((item) => item.label === label);
+      assert.match(choice?.detail ?? '', /fictional domain steward decides .*which fields people can see/i);
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      const action = confirmation.items.find((item) => item.label === '$(check) Set up the team');
+      assert.match(action?.detail ?? '', /stages the .*office records catalogue draft skill in this editor profile/i);
+      assert.match(confirmation.placeHolder ?? '', /domain steward decides .*choose .* to stage/i);
+      const steward = confirmation.items.find((item) => item.label === '$(person) Fictional domain steward');
+      assert.match(steward?.detail ?? '', /reviews the catalogue draft.*which fields people can see/i);
+    },
+  });
+  const directory = path.join(root, catalogueDirectory);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const source = (id: string, text: string): InstitutionalBriefSource => ({
+    id, revision: 'r1', date: '2026-11-02', label: 'org/Public', project, text, spans: [{ start: 0, end: text.length }],
+  });
+  const sources = [
+    source('office-steward-receipt', 'The fictional domain steward recorded this metadata scope.'),
+    source('office-custodian-inventory', 'The fictional custodian confirmed an administrative inventory reference.'),
+  ];
+  const evidence = ({ id, revision }: InstitutionalBriefSource, role: string) => ({ sourceId: id, revision, role });
+  const steward = evidence(sources[0], 'fictional-domain-steward');
+  const id = 'item-4d37a801';
+  const ineligible = 'item-7e50ab12';
+  const missing = 'item-13d958be';
+  const hiddenField = 'Unshared desk procedure';
+  const hiddenRow = 'Unshared paper schedule';
+  const row = {
+    id, confirmed: true, fields: { title: 'Fictional office opening-hours register', description: hiddenField },
+    scope: 'uncertain', availability: 'documented', freshness: 'current', handling: 'local-review-only',
+    custodian: evidence(sources[1], 'fictional-records-custodian'),
+  };
+  const inventory = [row, { ...row, id: ineligible, confirmed: false, fields: { title: hiddenRow } }];
+  const receipt = {
+    project, directory: staged.directoryDigest, requester: 'fictional-catalogue-reviewer', purpose: 'fictional-office-records-j2-is01',
+    policyRevision: 'catalogue-r1', productId: 'office-records-catalogue', steward,
+    grants: [{ id, fields: ['title'] }, { id: ineligible, fields: ['title'] }],
+  };
+  let current = receipt;
+  const removeTitle = () => { current = { ...receipt, grants: [{ id, fields: [] }, receipt.grants[1]] }; };
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => sources,
+    currentCatalogue: () => ({ receipt: current, inventory }) };
+  const team = await selectSyntheticInstitutionalJ2Catalogue(fixture);
+  const args = { productId: receipt.productId, recordIds: [id] };
+  const valid = await runFixture(fixture, team, { steps: [
+    toolCall('ineligible-record', readCatalogue, { recordId: ineligible }),
+    toolCall('nonexistent-record', readCatalogue, { recordId: missing }),
+    toolCall('eligible-record', readCatalogue, { recordId: id }),
+    toolCall('model-fields-refused', saveCatalogue, { ...args, fields: { title: 'Model supplied value' } }),
+    toolCall('catalogue', saveCatalogue, args),
+  ] });
+  assert.deepEqual(valid.offers[0], [readCatalogue, saveCatalogue].sort());
+  const unavailable = valid.toolResults.get('ineligible-record');
+  assert.ok(unavailable);
+  assert.match(unavailable, /unavailable/i);
+  assert.equal(unavailable, valid.toolResults.get('nonexistent-record'));
+  const hiddenLookups = valid.decisions.filter((entry) => ['ineligible-record', 'nonexistent-record'].includes(entry.api.request.uid));
+  assert.equal(hiddenLookups.length, 2);
+  assert.deepEqual(hiddenLookups.map((entry) => entry.unmapped.nearAi.capability), [{ verb: 'plan' }, { verb: 'plan' }]);
+  const result = JSON.parse(valid.toolResults.get('eligible-record')!);
+  assert.deepEqual(result.fields, { title: row.fields.title });
+  assert.equal(result.scope, 'uncertain');
+  assert.equal(result.availability, 'documented');
+  assert.equal(result.freshness, 'current');
+  assert.equal(result.handling, 'local-review-only');
+  assert.equal(result.custodian.role, 'fictional-records-custodian');
+  assert.equal(result.steward.role, 'fictional-domain-steward');
+  assert.equal(result.custodian.revision, 'r1');
+  assert.ok(!valid.decisions.some((entry) => entry.api.request.uid === 'model-fields-refused' && entry.action_id === 1));
+  const files = await readdir(directory);
+  assert.equal(files.length, 1);
+  const [file] = files;
+  const bytes = await readFile(path.join(directory, file));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(file, `${version}.json`);
+  const stored = JSON.parse(bytes.toString());
+  assert.deepEqual(stored.body.records, [result]);
+  assert.equal(stored.duty, 'J2-IS01');
+  assert.equal(stored.steward.role, 'fictional-domain-steward');
+  assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'catalogue')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${catalogueDirectory}/${file}`] });
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+  const visibleOutputs = JSON.stringify([valid.catalogueOffers[0], hiddenLookups, unavailable, result, stored, review]);
+  for (const value of [ineligible, missing, hiddenField, hiddenRow, sources[1].text, '"description"', '"count"']) {
+    assert.ok(!visibleOutputs.includes(value), `unexpected exposed metadata: ${value}`);
+  }
+
+  const staleRead = await runFixture(fixture, team, {
+    steps: [toolCall('withdrawn-title', readCatalogue, { recordId: id })],
+    onChildTurn(turn) { if (turn === 0) removeTitle(); },
+  });
+  assert.equal(staleRead.toolResults.get('withdrawn-title'), unavailable);
+  assert.ok(!staleRead.results.some((entry) => entry.includes(row.fields.title)));
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|unavailable|changed/);
+
+  current = { ...receipt, policyRevision: 'catalogue-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; removeTitle(); } });
+  try {
+    const held = await runFixture(fixture, team, { steps: [toolCall('late-catalogue', saveCatalogue, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'late-catalogue' && entry.action_id === 1));
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(directory), [file]);
+  } finally { setCasProbe(undefined); }
 });

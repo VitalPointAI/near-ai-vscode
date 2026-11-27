@@ -2,9 +2,9 @@ import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  institutionalActionRegisterDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
+  institutionalActionRegisterDirectory, institutionalCatalogueDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
   institutionalFindingsDirectory, institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
-  prepareInstitutionalFindings, prepareInstitutionalObservation, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
+  prepareInstitutionalCatalogue, prepareInstitutionalFindings, prepareInstitutionalObservation, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
 } from '../domain/staff/institutionalBrief';
 import { replaceKeepingEdits } from './staffFiles';
 
@@ -13,6 +13,7 @@ const hexDigest = /^[0-9a-f]{64}$/;
 const readLeafFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 function directoryOf(scope: InstitutionalDraftScope): string {
+  if (scope.catalogue) return institutionalCatalogueDirectory;
   if (scope.findings) return institutionalFindingsDirectory;
   return scope.observation ? institutionalObservationDirectory : scope.actionRegister ? institutionalActionRegisterDirectory : institutionalBriefDirectory;
 }
@@ -79,14 +80,24 @@ function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected
   const { body, productId } = payload as Record<string, unknown>;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return changed();
   const sources = scope.currentSources();
-  const expected = scope.findings
-    ? prepareInstitutionalFindings({ ...body, productId }, scope.binding, sources, scope.findings.current())
+  const expected = scope.catalogue
+    ? prepareInstitutionalCatalogue({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.catalogue())
+    : scope.findings ? prepareInstitutionalFindings({ ...body, productId }, scope.binding, sources, scope.findings.current())
     : scope.observation ? prepareInstitutionalObservation(institutionalObservationInput(body, productId), scope.binding, sources, scope.observation.current())
     : scope.actionRegister
       ? prepareInstitutionalActionRegister({ productId, rows: storedActionRows(body) }, scope.binding, sources, scope.actionRegister.current())
       : prepareInstitutionalBrief({ ...body, productId }, scope.binding, sources);
   if (expected.path !== pathExpected || !bytes.equals(Buffer.from(expected.text))) return changed();
   return expected;
+}
+
+function storedCatalogueIds(body: object): unknown[] {
+  const { records } = body as { records?: unknown };
+  if (!Array.isArray(records) || records.length > 12) return changed();
+  return records.map((row: unknown) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return changed();
+    return (row as { id?: unknown }).id;
+  });
 }
 
 function storedActionRows(body: object): unknown[] {
@@ -107,7 +118,7 @@ async function requireCurrentPredecessor(scope: InstitutionalDraftScope): Promis
 function exactPredecessorLeaf(scope: InstitutionalDraftScope, review: InstitutionalDraftReview): boolean {
   if (review.kind === 'observation') return scope.observation?.correctionAtEffect(review.correction) === true;
   if (review.kind === 'findings') return scope.findings?.predecessorAtEffect(review.observation.version) === true;
-  return review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
+  return review.kind === 'records-catalogue' || review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
 }
 
 export async function verifyInstitutionalDraftTarget(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalDraft): Promise<void> {
