@@ -11,8 +11,8 @@ import { STAFF_TEMPLATES } from '../agent/staff/templates';
 import type { StaffTemplateOptions } from '../agent/staff/templates';
 import type { StaffTeamSection } from '../domain/staff/profiles';
 import {
-  applyStaffSetup, existingStaffSettings, requestedSection, levelChoices, nationChoices, planningTypeChoices, planStaffSetup, profileChoices, readStaffSetupInputs, settingsFrom,
-  SET_UP_STAFF_TEAM_COMMAND, staffTeamTarget, templateQuestions, type Choice, type StaffSetupPlan
+  applyStaffSetup, existingStaffSettings, requestedSection, levelChoices, nationChoices, planningTypeChoices, planStaffSetup, profileChoices, readStaffSetupInputs, readStudioStaffInputs, reviewStudioStaffSetup, settingsFrom,
+  SET_UP_STAFF_TEAM_COMMAND, staffTeamTarget, studioSharedTeamMessage, templateQuestions, type Choice, type StaffSetupPlan, type StudioStaffSelection
 } from './staffSetup';
 import type { MementoLike } from './stateHome';
 import { hasLoadedScenario, loadScenarioIntoProject, readScenarioFile, STARTER_SCENARIO_FILE } from './staffScenarioLoader';
@@ -74,16 +74,18 @@ interface StaffSetupRegistration {
 
 interface StaffSetupWizard extends StaffSetupRegistration {
   readonly section?: StaffTeamSection | undefined;
+  readonly studio?: StudioStaffSelection;
   readonly state?: MementoLike;
 }
 
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
-export function readyMessage(teamName: string, slug: string, archived: boolean): string {
-  return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the SovAI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
+export function readyMessage(teamName: string, slug: string, archived: boolean, project = 'this project', shortcuts = true): string {
+  const followUp = shortcuts ? 'Task it now to put its command in the SovAI chat, or open the Staff Room.' : 'Open the project in its own window to use the team.';
+  return `${teamName} is set up for ${project} as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} ${followUp}${archived ? ' The earlier file is in your teams archive.' : ''}`;
 }
 
-async function confirmStaffSetup(plan: StaffSetupPlan): Promise<boolean> {
-  const detail = `Writes ${plan.roster.fileName}.md to your teams, PROFILE.md and the skills under .planning/staff/, the staff settings in project.json and the section's guidance in AGENTS.md.`;
+async function confirmStaffSetup(plan: StaffSetupPlan, project?: string): Promise<boolean> {
+  const detail = `${project ? `Project: ${project}. ` : ''}Writes ${plan.roster.fileName}.md to your teams, PROFILE.md and the skills under .planning/staff/, the staff settings in project.json and the section's guidance in AGENTS.md.`;
   const confirm = { label: `$(check) ${SET_UP_ACTION}`, detail };
   const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], {
     title: `${plan.roster.teamName}: check the roster`,
@@ -94,13 +96,14 @@ async function confirmStaffSetup(plan: StaffSetupPlan): Promise<boolean> {
 }
 
 export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<string | undefined> {
-  const { library = new TeamLibrary(teamLibraryDir(homeFolder())), section, chat, state, fixture } = options;
-  const root = await projectFolder();
+  const { library = new TeamLibrary(teamLibraryDir(homeFolder())), section, chat, state, fixture, studio } = options;
+  const root = studio?.root ?? await projectFolder();
   if (!root) return undefined;
   const title = 'Set up a staff team';
   const steps = 6;
 
   const asked = section ? STAFF_TEMPLATES.find((candidate) => candidate.section === section) : undefined;
+  if (studio && (!asked || !studio.isCurrent())) return undefined;
   const templateId = asked ? asked.id : await pick(title, 'Which staff section?', [
     ...STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })),
     ...(fixture?.choices ?? []),
@@ -112,9 +115,20 @@ export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<st
   }
   const template = STAFF_TEMPLATES.find((candidate) => candidate.id === templateId);
   if (!template) return undefined;
-  const inputs = await readStaffSetupInputs(root);
+  const problem = (error: unknown) => { void vscode.window.showErrorMessage(`The staff team was not set up. ${error instanceof Error ? error.message : String(error)}`); };
+  let studioInputs: Awaited<ReturnType<typeof readStudioStaffInputs>> | undefined;
+  try {
+    if (studio) studioInputs = await readStudioStaffInputs(studio);
+  } catch (error) {
+    problem(error);
+    return undefined;
+  }
+  const inputs = studioInputs ?? await readStaffSetupInputs(root);
   const existing = existingStaffSettings(inputs.projectJson);
-  const profile = await pick(title, 'Which doctrine profile? Its terms, steps and annex letters follow it.', profileChoices(template), 2, steps);
+  const profiles = profileChoices(template);
+  const preferredProfile = studio && existing ? profiles.findIndex(({ value }) => value === existing.profile) : -1;
+  if (preferredProfile > 0) profiles.unshift(...profiles.splice(preferredProfile, 1));
+  const profile = await pick(title, 'Which doctrine profile? Its terms, steps and annex letters follow it.', profiles, 2, steps);
   if (!profile) return undefined;
   const level = await pick(title, 'Which level?', levelChoices(template, profile), 3, steps);
   if (!level) return undefined;
@@ -138,26 +152,42 @@ export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<st
   let plan: StaffSetupPlan;
   try { plan = planStaffSetup({ templateId: template.id, options: templateOptions, ...inputs }); } catch (error) { void vscode.window.showErrorMessage(`The staff team was not set up. ${(error as Error).message}`); return undefined; }
 
-  if (!await confirmStaffSetup(plan)) return undefined;
+  let review: Awaited<ReturnType<typeof reviewStudioStaffSetup>> | undefined;
+  try {
+    if (studio && studioInputs) {
+      review = await reviewStudioStaffSetup(studio, studioInputs, plan);
+      const target = await staffTeamTarget(library, plan);
+      if (target.exists) throw new Error(studioSharedTeamMessage(target.file));
+      if (!studio.isCurrent()) return undefined;
+    }
+  } catch (error) {
+    problem(error);
+    return undefined;
+  }
+  if (!await confirmStaffSetup(plan, studio?.name)) return undefined;
 
   const target = await staffTeamTarget(library, plan);
-  if (target.exists) {
+  if (!studio && target.exists) {
     const replace = await vscode.window.showWarningMessage(`${plan.roster.fileName}.md is already in your teams. Replace it?`, { modal: true, detail: 'The current file moves to your teams archive first, where you can restore it. Nothing is deleted.' }, REPLACE_TEAM_ACTION);
     if (replace !== REPLACE_TEAM_ACTION) return undefined;
   }
   try {
-    const result = await applyStaffSetup(root, library, plan, { replace: target.exists });
+    const result = await applyStaffSetup(root, library, plan, review ? { studioReview: review } : { replace: target.exists });
     const slug = path.basename(result.teamFile, '.md');
+    const mayNavigate = () => !studio || studio.isPrimary();
+    const shortcuts = mayNavigate();
     const actions = chat ? [TASK_NOW_ACTION, OPEN_STAFF_ROOM_ACTION] : [OPEN_STAFF_ROOM_ACTION];
-    void Promise.resolve(vscode.window.showInformationMessage(readyMessage(plan.roster.teamName, slug, Boolean(result.archived)), ...actions))
+    const message = readyMessage(plan.roster.teamName, slug, Boolean(result.archived), studio?.name, shortcuts);
+    void Promise.resolve(vscode.window.showInformationMessage(message, ...(shortcuts ? actions : [])))
       .then((choice) => {
+        if (!shortcuts || !mayNavigate()) return;
         if (choice === TASK_NOW_ACTION && chat) void chat.prefill(`/team:${slug}`);
         if (choice === OPEN_STAFF_ROOM_ACTION) void vscode.commands.executeCommand(OPEN_STAFF_ROOM_COMMAND);
       }, () => undefined);
-    await offerStarterScenario(root);
+    if (!studio) await offerStarterScenario(root);
     return result.teamFile;
   } catch (error) {
-    void vscode.window.showErrorMessage(`The staff team was not set up. ${(error as Error).message}`);
+    problem(error);
     return undefined;
   }
 }

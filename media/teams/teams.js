@@ -37,6 +37,8 @@
   const NO_SAVED_TEAMS = 'You have no saved teams yet. Save a team as one of your teams in Team Studio to reuse it in any project.';
   let savedDraft = null;
   let work = null; // the team being built or edited
+  let staffPreview;
+  let staffPreviewRequest = 0;
   let seq = 0;
   let reviewTimer = null;
   // Improve with AI (0.4.27): its own sequence numbers, so a reply to an older request is dropped.
@@ -555,8 +557,7 @@
     // 0.4.19 review: it said "This takes a few minutes", and six members on three models can run for hours. The host asks first and states the ceiling
     // worked out from the runs, so the button only says the run is coming, not how long it takes.
     actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost', id: 'optimise-all' }));
-    // A military staff section (J2 intelligence or J5 plans) for this project's doctrine profile: the questions are asked in VS Code, then it is listed here.
-    actions.append(button('Set up a staff team', () => { announce('Choose the section, doctrine profile and level in the questions at the top of the window.'); vscode.postMessage({ type: 'staff-setup' }); }, { label: 'Set up a military staff team (J2 intelligence or J5 plans) for this project\'s doctrine profile', id: 'staff-setup' }));
+    actions.append(button('Set up staff', openStaffPreview, { id: 'staff-preview-open' }));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
@@ -2299,6 +2300,101 @@
     return null;
   }
 
+  function openStaffPreview() {
+    const request = ++staffPreviewRequest;
+    staffPreview = { request, scope: 'section' };
+    pendingFocus = 'staff-preview-title';
+    vscode.postMessage({ type: 'staff-preview-open', request });
+    render();
+  }
+
+  function leaveStaffPreview() {
+    if (!staffPreview) return;
+    vscode.postMessage({ type: 'staff-preview-leave', request: staffPreview.request });
+    staffPreview = undefined;
+    pendingFocus = 'staff-preview-open';
+    render();
+  }
+
+  function renderStaffPreview(root) {
+    const panel = el('section', 'panel staff-preview');
+    const title = el('h2', '', 'Staff setup preview');
+    title.id = 'staff-preview-title';
+    title.setAttribute('tabindex', '-1');
+    panel.setAttribute('aria-labelledby', title.id);
+    panel.append(title);
+    const { data, scope, busy, finished, section } = staffPreview;
+    if (data?.error) {
+      panel.append(el('p', '', data.error));
+    } else if (!data) {
+      panel.append(el('p', 'hint', 'Waiting for a project…'));
+    } else {
+      panel.append(el('h3', '', data.project));
+      if (data.profile) panel.append(el('p', '', data.profile + ' · ' + data.level));
+      else panel.append(el('p', '', 'No staff profile is saved for this project.'));
+      panel.append(el('p', 'hint', data.modelLocation));
+      const scopes = el('div', 'actions staff-preview-scopes');
+      scopes.setAttribute('role', 'group');
+      scopes.setAttribute('aria-label', 'Staff setup scope');
+      for (const [value, label] of [['section', 'One section'], ['complete', 'Complete staff']]) {
+        const control = button(label, () => {
+          staffPreview.scope = value;
+          pendingFocus = 'staff-preview-title';
+          render();
+        });
+        control.setAttribute('aria-pressed', String(scope === value));
+        control.disabled = Boolean(busy);
+        scopes.append(control);
+      }
+      panel.append(scopes);
+      const rows = el('ul', 'choice-grid staff-preview-rows');
+      for (const row of data.rows) {
+        if (scope === 'section' && !row.template) continue;
+        const card = el('li', '', '');
+        if (scope === 'section') {
+          const pick = button(row.label, () => {
+            staffPreview.section = row.id;
+            pendingFocus = 'staff-section-' + row.id;
+            render();
+          }, { id: 'staff-section-' + row.id });
+          pick.setAttribute('aria-pressed', String(section === row.id));
+          pick.disabled = Boolean(busy);
+          card.append(pick);
+        } else {
+          card.append(el('h4', '', row.label));
+        }
+        card.append(el('p', '', row.status));
+        if (row.team) card.append(el('p', '', row.team));
+        if (row.decisionRole) card.append(el('p', 'hint', row.decisionRole));
+        rows.append(card);
+      }
+      if (scope === 'complete') panel.append(el('p', 'hint', 'Review the coverage for this project. Whole-staff setup is unavailable.'));
+      panel.append(rows);
+      if (busy) panel.append(el('p', 'hint', 'Continue in the editor’s setup questions.'));
+      else if (finished) {
+        panel.append(el('p', '', finished === 'applied' ? 'The section is set up.' : 'Setup did not finish. Review the project to try again.'));
+        if (finished !== 'applied') panel.append(button('Review again', openStaffPreview));
+      } else if (scope === 'section') {
+        const next = button('Continue to section setup', () => {
+          staffPreview.busy = true;
+          vscode.postMessage({ type: 'staff-preview-continue', request: staffPreview.request, session: data.session, section });
+          announce('Continue in the editor’s setup questions.');
+          render();
+        }, { primary: true, id: 'staff-preview-continue' });
+        next.disabled = !section;
+        panel.append(next);
+      }
+    }
+    panel.append(button('Leave setup', leaveStaffPreview, { id: 'staff-preview-leave' }));
+    root.append(panel);
+  }
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !staffPreview) return;
+    event.preventDefault();
+    leaveStaffPreview();
+  });
+
   function render() {
     const active = document.activeElement && document.activeElement.id;
     slots.length = 0;
@@ -2306,7 +2402,8 @@
     const main = $('main');
     main.replaceChildren();
     if (!ctx) { main.append(el('p', 'hint', 'Loading…')); return; }
-    if (!work) renderLibrary(main);
+    if (staffPreview) renderStaffPreview(main);
+    else if (!work) renderLibrary(main);
     else if (work.mode === 'wizard') renderWizard(main);
     else renderEditor(main);
     fillReview();
@@ -2336,6 +2433,21 @@
     // Only under the extension-host tests, which load the layout probe: report this page's layout.
     if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (message.type) {
+      case 'staff-preview-state':
+        if (staffPreview?.request !== message.request) break;
+        staffPreview.data = message;
+        staffPreview.busy = false;
+        announce(message.error || 'Staff setup preview ready.');
+        render();
+        break;
+      case 'staff-preview-result':
+        if (staffPreview?.request !== message.request || staffPreview.data?.session !== message.session || !staffPreview.busy) break;
+        staffPreview.busy = false;
+        staffPreview.finished = message.applied ? 'applied' : 'held';
+        pendingFocus = message.applied ? 'staff-preview-title' : 'staff-section-' + staffPreview.section;
+        announce(message.applied ? 'The section is set up.' : 'Setup did not finish. Review the project to try again.');
+        render();
+        break;
       case 'state':
         ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null; picker = message.picker || null; dash = message.dashboard || null;
         applyView(message.view);

@@ -13,6 +13,8 @@ import type { GateRuntime } from '../domain/gate/decide';
 import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
+import { createStaffSetupPreview } from './teamStudioStaffSetup';
+import { setUpStaffTeam } from './staffSetupCommand';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
@@ -154,6 +156,20 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
   registerLayoutProbe('teams', panel.webview);
   const studio = attachTeamStudio(panel, {
     library, root: rootNow,
+    staffSetupPreview: createStaffSetupPreview({
+      folders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({ root: folder.uri.fsPath, name: folder.name })),
+      pick: async (folders) => (await vscode.window.showQuickPick(
+        folders.map((folder) => ({ label: folder.name, description: folder.root, folder })),
+        { title: 'Which project’s staff would you like to review?' }
+      ))?.folder,
+      libraryDir: library.directory,
+      startSection: async (section, project) => {
+        const file = await setUpStaffTeam({ section, studio: project, chat: sidebar, library });
+        if (file) await studio.refresh().catch(() => undefined);
+        return Boolean(file);
+      },
+      post: (message) => { void panel.webview.postMessage(message); }
+    }),
     onDidChangeFolder: (listener) => vscode.workspace.onDidChangeWorkspaceFolders(() => listener()),
     gather: () => gatherDirectoryInput(context, auth),
     knowledgeBase: async () => { const root = rootNow(); return Boolean(root && await stat(path.join(root, '.near-kb')).catch(() => undefined)); },
