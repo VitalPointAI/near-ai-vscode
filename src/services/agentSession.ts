@@ -21,7 +21,7 @@ import { isDefaultMark } from '../gate/sessionMark';
 import { chatLabelOf } from './threadStore';
 import { noteChatProjectMark } from '../domain/gate/lowerings';
 import type { GateRuntime } from '../domain/gate/decide';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, DEFAULT_TURN_CEILING_MS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
@@ -38,7 +38,7 @@ import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, offeredTools, Todo, ToolContext } from '../agent/tools';
 import type { CyberRunAccess } from './cyberRun';
 import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
-import { displayPath, ToolError } from '../agent/workspace';
+import { displayPath, resolveInWorkspace, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
 import { agentModelFor, expandPrompt, fallbackModelsFor, GsdAgent, GsdSkill, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
@@ -67,7 +67,7 @@ import { BADGE_CHECK_TIMEOUT_MS, TRUST_BADGE_TEXT, trustBadgeFor, trustBadgeFrom
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
-import { TeamDefinition, teamAgents, teamLeadPrompt, teamMembersNote } from '../agent/teams';
+import { TeamDefinition, teamLeadPrompt, teamMembersNote } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
 import { teamKnowledgeKey } from '../agent/teams';
@@ -79,6 +79,8 @@ import { SpendAccount } from './spendAccount';
 import { nanoToUsd, totalNanoUsd, withSpendTag } from './spendLedger';
 import { staffTeamInfo, staffTools, WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
 import { staffHostFor } from '../staff/staffHost';
+import { storeInstitutionalDraft, verifyInstitutionalDraftTarget } from '../staff/institutionalDraftStore';
+import { institutionalChildTools, selectedTeamAgents } from '../agent/staff/institutionalCommand';
 import { observationStoreFor } from '../staff/observationStore';
 import { attend } from '../staff/watchAttendance';
 import { watchHostFor } from '../staff/watchHost';
@@ -1349,15 +1351,9 @@ export class AgentConversation {
     // One definition per name, the first one wins. The agents a workflow step adds for this run (the red-team stage) come first, with or without a team
     // (#46 review), so neither a team file in the repository nor an Open-GSD agent of the same name can replace them; then the team's members, which win
     // over Open-GSD's agents of the same name; then Open-GSD's.
-    const members = this.teamMembersOf(request);
+    const members = selectedTeamAgents(request.team ?? request.memberTeam);
     const all = [...(request.projectAgents ?? []), ...members, ...(request.gsd?.agents ?? [])];
     return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
-  }
-
-  /** The members of the team this run leads or works with. */
-  private teamMembersOf(request: AgentTurnRequest): GsdAgent[] {
-    const team = request.team ?? request.memberTeam;
-    return team ? teamAgents(team) : [];
   }
 
   /**
@@ -1469,7 +1465,7 @@ export class AgentConversation {
     if (!agents.length) return base;
     const gsd = request.gsd;
     // The team's members, and those offered as members: a member whose name a project agent took is not offered, since that name runs the project agent.
-    const memberNames = this.teamMembersOf(request).map((agent) => agent.name);
+    const memberNames = selectedTeamAgents(request.team ?? request.memberTeam).map((agent) => agent.name);
     const offeredMembers = memberNames.filter((name) => !(request.projectAgents ?? []).some((agent) => agent.name === name));
     let all: AgentTool<any>[] = [];
     const extra = gsdTools({
@@ -1550,7 +1546,11 @@ export class AgentConversation {
         const writeOnly = spawn.agent?.writeOnly;
         const limited = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (OBSERVATIONS_TOOL_NAMES.includes(tool.name) && tool.capability === 'read') || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
         // Offered only what it may call: a staff server's tools only when this member's own tools line grants them (the call-time gate stays).
-        const allowed = offeredTools(limited, label);
+        const institutional = await institutionalChildTools(request.team ?? request.memberTeam,
+          { root: this.root, runId, label, model, local: request.local === true && request.route?.kind === 'local', onTeam, detached: Boolean(spawn.isolation || spawn.background || spawn.parentId !== context.agentId) },
+          { verify: (scope, draft) => verifyInstitutionalDraftTarget(scope, resolveInWorkspace, draft),
+            commit: (scope, draft, verify) => storeInstitutionalDraft(scope, resolveInWorkspace, draft, verify) });
+        const allowed = institutional ?? offeredTools(limited, label);
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
@@ -1648,9 +1648,9 @@ export class AgentConversation {
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(childGate ? { gate: childGate } : {}),
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
-              // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
-              ...(request.modelStallMs ? { stallMs: request.modelStallMs, ...(stallBackup ? { backupModel: stallBackup } : {}) } : {}),
-              ...(fallbacks.length ? { fallbackModels: fallbacks, modelAnswering: (candidate: string) => this.modelTrouble.answering(candidate), modelTrouble: (left: string) => this.modelTrouble.mark(left) } : {}),
+              ...(institutional ? { stallRetries: 0, ...(request.modelStallMs ? { idleTimeoutMs: request.modelStallMs, turnCeilingMs: DEFAULT_TURN_CEILING_MS } : {}) } : {}),
+              ...(!institutional && request.modelStallMs ? { stallMs: request.modelStallMs, ...(stallBackup ? { backupModel: stallBackup } : {}) } : {}),
+              ...(!institutional && fallbacks.length ? { fallbackModels: fallbacks, modelAnswering: (candidate: string) => this.modelTrouble.answering(candidate), modelTrouble: (left: string) => this.modelTrouble.mark(left) } : {}),
               beforeTool: (signal) => this.whileRunPaused(signal),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
