@@ -6716,6 +6716,18 @@
       ],
       "remediation": "Hosted workbench sessions send prompts and context up to Protected A or B to the model servers your organization's signed policy lists (the model-servers exchange), but compliance/levels.json does not list model-endpoints in the hosted levels, so the model servers have no rows there and no section in the hosted applicability map. Plan 48.1-06 (D-12) adds model-endpoints to hosted-protected-a, hosted-protected-b and hosted-itsp-10-171. When it lands, the applicability map gains a model-endpoints section at those levels that your organization must review before it takes effect, and the existing hosted sections, whose reasons name the components that carry each facet, must be re-checked and signed again. This closes when 48.1-06 has landed and the hosted stages are signed with the model-endpoints section.",
       "title": "The hosted levels do not yet assess the model servers"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-11"
+      ],
+      "id": "G561",
+      "ownerRole": "maintainers",
+      "poam": "g561",
+      "remediation": "Workbench staff setup has been checked in Canadian English and French, including unchanged project scope and cancellation. A qualified Canadian French reviewer must verify the terminology and instructions. Record equivalent workflows and outputs for remaining Canadian Workbench surfaces before declaring full LANG-01 acceptance.",
+      "title": "Canadian Workbench language coverage needs qualified review"
     }
   ]
 }

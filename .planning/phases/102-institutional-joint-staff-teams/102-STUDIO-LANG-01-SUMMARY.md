@@ -27,6 +27,6 @@ The exact bundled case passed in 9.7 seconds with zero skips. It switched live f
 
 ## Open conditions
 
-- **LANG-01** still needs qualified Canadian French review and coverage of the remaining Workbench surfaces.
+- **G561** tracks LANG-01 acceptance. It still needs qualified Canadian French review and coverage of the remaining Workbench surfaces.
 - **G17** remains open for verified appointments and actual role authority.
 - **G62** remains open for production workspace confinement and reconciliation of shared-library links.
