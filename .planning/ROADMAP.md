@@ -1818,7 +1818,7 @@ Plans:
 ### Stage E: the model factory (Phases 98-99)
 
 ### Phase 98: Model factory v1, first specialist from chat and run logs
-**Goal**: One specialist goes from proposal card to live for one role, trained on your organization's own machine, matching or beating the incumbent, with rollback tested.
+**Goal**: One specialist goes from proposal card to live for one role, trained on suitable approved hardware from your organization's network, matching or beating the incumbent, with rollback tested. The Model Factory also owns the planned classification and protection adviser's training and fine-tuning.
 **Depends on**: Phase 85 (the host trainer); Phase 74 (contracts). It needs none of Phases 88 to 97, so it runs beside them. Owner decisions 11, 12 and 13.
 **Requirements**: FAC-01, FAC-02, FAC-03, FAC-04, FAC-05, FAC-06, FAC-07, FAC-08, FAC-09
 **Success Criteria** (what must be TRUE):
@@ -1826,8 +1826,8 @@ Plans:
   2. A session below the model's label cannot route to it, and requests fall back to the incumbent while the host is down. (FAC-08)
   3. One click takes a specialist to shadow and a second to canary (auto-promotion off by default), and a rollback restores the previous model in one click with a recorded reason. (FAC-06)
   4. No training job calls any network destination outside the machine it runs on. (FAC-01)
-  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts, and teacher calls follow the label's routing. (FAC-02, FAC-09)
-**Research flags**: The pinned ROCm and PyTorch pairing from Phase 85.
+  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts. If no approved target fits the workload, the proposal shows why it is infeasible. Teacher calls follow the label's routing. (FAC-02, FAC-09)
+**Research flags**: Phase 85 measures the reference ROCm and PyTorch pairing. Check the chosen target's backend, capacity and approval for each workload.
 **Plans:** 0 plans
 **UI hint**: yes
 
