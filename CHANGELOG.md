@@ -2,8 +2,14 @@
 
 ## Unreleased
 
-- In About SovAI, Enter closes the dialog when its Close button has keyboard focus.
-- Workbench Documentation opens published guides and section links locally, shows both architecture blueprints at full size, and opens the gap register in Compliance.
+## 0.4.42
+
+This Workbench update makes documentation easier to use offline and follows Canadian English and French settings in more places.
+
+- Documentation includes published guides, the component catalogue, and both architecture blueprints. Linked bundled pages open locally, both blueprints open at full size, and the gap register opens in Compliance.
+- About SovAI shows the running version. About, Get Started, and Team Studio follow the Canadian English or French setting. Enter closes About when its Close button has keyboard focus.
+- Team Studio shows the selected project and its available staff sections before setup.
+- Compliance table headings stay on one line. On narrow screens, the table scrolls horizontally within its own area.
 
 ## 0.4.41
 
