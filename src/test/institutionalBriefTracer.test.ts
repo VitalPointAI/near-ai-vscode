@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectSyntheticInstitutionalJ8Budget, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectSyntheticInstitutionalJ8Budget, selectSyntheticInstitutionalJ1Monitoring, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -25,6 +25,10 @@ import { newTestConversation, testBundleState, testGateRuntime } from './helpers
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const monitoringTeam = 'institutional-j1-service-monitoring-v1';
+const monitoringDirectory = '.planning/staff/institutional/j1/service-monitoring';
+const readMonitoring = 'ReadInstitutionalServiceAggregate';
+const saveMonitoring = 'SaveInstitutionalServiceMonitoringDraft';
 const budgetTeam = 'institutional-j8-budget-evidence-v1';
 const budgetDirectory = '.planning/staff/institutional/j8/budget-evidence';
 const readBudget = 'ReadInstitutionalBudgetEvidence';
@@ -205,7 +209,7 @@ async function runFixture(
         results.push(message.content);
         toolResults.set(message.tool_call_id, message.content);
       }
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison|Draft a fictional J4-02 office inventory reconciliation|Draft a fictional J8-02 office budget evidence reconciliation/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison|Draft a fictional J4-02 office inventory reconciliation|Draft a fictional J8-02 office budget evidence reconciliation|Draft a fictional J1-05 office help aggregate/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -213,14 +217,14 @@ async function runFixture(
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
-        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam || team.slug === inventoryTeam || team.slug === budgetTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
+        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam || team.slug === inventoryTeam || team.slug === budgetTeam || team.slug === monitoringTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === budgetTeam ? 'budget-evidence-drafter' : team.slug === inventoryTeam ? 'inventory-count-drafter' : team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === monitoringTeam ? 'service-monitoring-drafter' : team.slug === budgetTeam ? 'budget-evidence-drafter' : team.slug === inventoryTeam ? 'inventory-count-drafter' : team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -1808,4 +1812,155 @@ test('registered G8 reconciles the fictional reporting basis and refuses withdra
   } finally { setCasProbe(undefined); }
   currentReceipt = receipt;
   await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+});
+
+
+async function newServiceMonitoringFixture() {
+  const subject = await newFixture();
+  const root = subject.fixture.root;
+  const label = 'Institutional G1 Service Monitoring';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: monitoringTeam, keySegment: 'j1ServiceMonitoring',
+    checkPrompts(requests) {
+      assert.match(requests[0].items.find((item) => item.label === label)?.detail ?? '', /fictional HR services supervisor/i);
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(check) Set up the team')?.detail ?? '', /office help aggregate draft skill/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional HR services supervisor')?.detail ?? '', /validates/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional feed custodian')?.detail ?? '', /source correction/i);
+    },
+  });
+  const directory = path.join(root, monitoringDirectory);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const roles = [
+    ['office-help-validation', 'fictional-hr-services-supervisor'],
+    ['office-help-custody', 'fictional-feed-custodian'],
+    ['office-help-snapshot', 'fictional-aggregate-attestor'],
+    ['office-help-availability', 'fictional-feed-availability-attestor'],
+  ];
+  const sources = roles.map(([id]): InstitutionalBriefSource => {
+    const text = `Fictional office-help fixture proof for ${id}.`;
+    return { id, revision: 'r1', date: '2026-11-30', label: 'org/Public', project, text, spans: [{ start: 0, end: text.length }] };
+  });
+  const reference = (index: number) => ({ sourceId: sources[index].id, revision: 'r1', role: roles[index][1] });
+  const recordId = 'item-1b000001';
+  const productId = 'office-help-aggregate';
+  const basis = { period: '2026-11', cutoff: '2026-11-30', clockBasis: 'utc-day-close', partition: 'closed-or-unresolved' };
+  const receipt = {
+    project, directory: staged.directoryDigest, purpose: 'fictional-office-help-j1-05', productId, recordId, ...basis,
+    requester: 'fictional-service-monitoring-reviewer', approval: 'office-help-fixture-r1',
+    supervisor: reference(0), feedCustodian: reference(1),
+  };
+  const initialCounts = { closed: 67, unresolved: 53, intake: 120 };
+  const initial = { state: 'available', ...initialCounts, evidence: reference(2) };
+  let sample: unknown = initial;
+  let activeSources = sources;
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => activeSources,
+    currentServiceMonitoring: () => ({ receipt, sample }) };
+  const team = await selectSyntheticInstitutionalJ1Monitoring(fixture);
+  return {
+    fixture, team, directory, recordId, productId, basis, sources, initialCounts,
+    setCounts: (counts: typeof initialCounts) => { sample = { ...initial, ...counts }; },
+    markMissing: () => { sample = { state: 'missing', evidence: reference(3) }; },
+    withdraw: () => { activeSources = sources.map((entry) => entry.id === sources[2].id ? { ...entry, revision: 'r2' } : entry); },
+    restore: () => { sample = initial; activeSources = sources; },
+  };
+}
+
+test('registered G1 suppresses small or divergent office-help snapshots under one fixed reporting key', async () => {
+  const subject = await newServiceMonitoringFixture();
+  const { fixture, team, directory, recordId, productId, sources } = subject;
+  const args = { productId, recordIds: [recordId] };
+  const rerun = async (runId: string, steps: ToolCall[]) => {
+    const nextFixture = { ...fixture, runId };
+    return runFixture(nextFixture, await selectSyntheticInstitutionalJ1Monitoring(nextFixture), { steps });
+  };
+  const admitted = await runFixture(fixture, team, { steps: [
+    toolCall('unknown-monitoring-id', readMonitoring, { recordId: 'item-1b000002' }),
+    toolCall('monitoring-read', readMonitoring, { recordId }),
+    toolCall('monitoring-save', saveMonitoring, args),
+  ] });
+  assert.deepEqual(admitted.offers[0], [readMonitoring, saveMonitoring].sort());
+  const unavailable = admitted.toolResults.get('unknown-monitoring-id');
+  assert.ok(unavailable);
+  assert.match(unavailable, /unavailable/i);
+  const [name] = await readdir(directory);
+  assert.ok(name);
+  const bytes = await readFile(path.join(directory, name));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(name, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'J1-05');
+  assert.equal(draft.validation, 'pending');
+  assert.equal(draft.supervisor.role, 'fictional-hr-services-supervisor');
+  assert.equal(draft.feedCustodian.role, 'fictional-feed-custodian');
+  assert.notEqual(draft.supervisor.sourceId, draft.feedCustodian.sourceId);
+  const [snapshot] = draft.body.records;
+  assert.deepEqual(snapshot, JSON.parse(admitted.toolResults.get('monitoring-read')!));
+  assert.deepEqual(snapshot.basis, subject.basis);
+  assert.deepEqual(snapshot.counts, subject.initialCounts);
+  assert.deepEqual(snapshot.resolvedFraction, { numerator: 67, denominator: 120 });
+  assert.equal(snapshot.evidence.sourceId, sources[2].id);
+  assert.deepEqual(admitted.decisions.find((entry) => entry.api.request.uid === 'monitoring-save')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${monitoringDirectory}/${name}`] });
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+
+  const repeated = await rerun('run-office-help-repeat', [toolCall('repeat-monitoring-save', saveMonitoring, args)]);
+  assert.equal(JSON.parse(repeated.toolResults.get('repeat-monitoring-save')!).review.version, version);
+  assert.deepEqual(await readdir(directory), [name]);
+  assert.deepEqual(await readFile(path.join(directory, name)), bytes);
+
+  subject.markMissing();
+  const missing = await rerun('run-office-help-missing', [
+    toolCall('missing-feed-read', readMonitoring, { recordId }),
+    toolCall('missing-feed-save', saveMonitoring, args),
+  ]);
+  assert.deepEqual(JSON.parse(missing.toolResults.get('missing-feed-read')!), { state: 'unknown' });
+  assert.equal(missing.toolResults.get('missing-feed-save'), unavailable);
+  assert.deepEqual(await readdir(directory), [name]);
+
+  const heldSnapshots = [{ closed: 2, unresolved: 198, intake: 200 }, { closed: 207, unresolved: 0, intake: 207 },
+    { closed: 73, unresolved: 61, intake: 134 }];
+  for (const [index, counts] of heldSnapshots.entries()) {
+    subject.setCounts(counts);
+    const held = await rerun(`run-office-help-hold-${index}`, [
+      toolCall('held-monitoring-read', readMonitoring, { recordId }),
+      toolCall('held-monitoring-save', saveMonitoring, args),
+    ]);
+    assert.equal(held.toolResults.get('held-monitoring-read'), unavailable);
+    assert.equal(held.toolResults.get('held-monitoring-save'), unavailable);
+    assert.deepEqual(held.catalogueOffers[0], admitted.catalogueOffers[0]);
+    assert.ok(!held.decisions.some((entry) => entry.api.request.uid === 'held-monitoring-save' && entry.action_id === 1));
+    const shown = JSON.stringify([held.catalogueOffers[0], held.results, held.decisions]);
+    for (const hint of [recordId, ...sources.map(({ id }) => id), 'resolvedFraction', '"intake"', version, 'institutional/j1']) {
+      assert.ok(!shown.includes(hint), `unexpected held report hint ${hint}`);
+    }
+    assert.deepEqual(await readdir(directory), [name]);
+    assert.deepEqual(await readFile(path.join(directory, name)), bytes);
+  }
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+
+  subject.restore();
+  const heldRead = await runFixture(fixture, team, {
+    steps: [toolCall('withdrawn-monitoring-read', readMonitoring, { recordId })],
+    onChildTurn(turn) { if (turn === 0) subject.withdraw(); },
+  });
+  assert.equal(heldRead.toolResults.get('withdrawn-monitoring-read'), unavailable);
+  assert.ok(!heldRead.results.some((entry) => entry.includes(sources[2].id) || entry.includes('resolvedFraction')));
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+
+  const isolated = await newServiceMonitoringFixture();
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; isolated.withdraw(); } });
+  try {
+    const held = await runFixture(isolated.fixture, isolated.team, { steps: [toolCall('withdrawn-monitoring-write', saveMonitoring, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'withdrawn-monitoring-write' && entry.action_id === 1));
+    assert.equal(held.toolResults.get('withdrawn-monitoring-write'), unavailable);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(isolated.directory), []);
+  } finally { setCasProbe(undefined); }
 });

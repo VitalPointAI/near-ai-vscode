@@ -10,6 +10,9 @@ import {
   type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type InstitutionalObservationReview, type PreparedInstitutionalDraft,
 } from '../../domain/staff/institutionalBrief';
 import { admittedInstitutionalBudget, admittedInstitutionalInventory, prepareInstitutionalBudget, prepareInstitutionalInventory } from '../../domain/staff/institutionalReconciliation';
+import {
+  admittedInstitutionalServiceMonitoring, prepareInstitutionalServiceMonitoring, readInstitutionalServiceMonitoring,
+} from '../../domain/staff/institutionalServiceMonitoring';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { parseTeam, renderTeam, teamAgents, type TeamDefinition } from '../teams';
 import { declareManifest, fromArgument, INTERACTIVE_ONLY, type AgentTool, type ToolContext } from '../tools';
@@ -28,7 +31,8 @@ export const INSTITUTIONAL_J5_EVIDENCE_TEAM = 'institutional-j5-evidence-assumpt
 export const INSTITUTIONAL_J9_REMIT_TEAM = 'institutional-j9-library-remits-v1';
 export const INSTITUTIONAL_J4_INVENTORY_TEAM = 'institutional-j4-inventory-counts-v1';
 export const INSTITUTIONAL_J8_BUDGET_TEAM = 'institutional-j8-budget-evidence-v1';
-export type InstitutionalRoleId = typeof INSTITUTIONAL_J8_BUDGET_TEAM | typeof INSTITUTIONAL_J4_INVENTORY_TEAM | typeof INSTITUTIONAL_J9_REMIT_TEAM | typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
+export const INSTITUTIONAL_J1_MONITORING_TEAM = 'institutional-j1-service-monitoring-v1';
+export type InstitutionalRoleId = typeof INSTITUTIONAL_J1_MONITORING_TEAM | typeof INSTITUTIONAL_J8_BUDGET_TEAM | typeof INSTITUTIONAL_J4_INVENTORY_TEAM | typeof INSTITUTIONAL_J9_REMIT_TEAM | typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
 
 const description = 'Prepare a local institutional decision brief for human review.';
 const instructions = 'Prepare a CG-07 decision brief using only evidence admitted for this project. Separate sourced facts, assumptions and alternatives. Preserve attributed disagreement. Leave the decision with the Command Group lead.';
@@ -70,6 +74,8 @@ const inventoryName = 'Institutional G4 Inventory Counts';
 const inventoryInstructions = 'Draft a fictional J4-02 office inventory reconciliation from independently attested count and register evidence. Keep unresolved cases open for the human property custodian.';
 const budgetName = 'Institutional G8 Budget Evidence';
 const budgetInstructions = 'Draft a fictional J8-02 office budget evidence reconciliation from independently attested status and control evidence. Leave discrepancies open for the finance reporting officer and release for the comptroller.';
+const monitoringName = 'Institutional G1 Service Monitoring';
+const monitoringInstructions = 'Draft a fictional J1-05 office help aggregate from admitted summary evidence. Leave validation to the human HR services supervisor and source correction to the feed custodian.';
 const institutionalRoles = {
   [INSTITUTIONAL_COMMAND_GROUP_TEAM]: {
     label: INSTITUTIONAL_COMMAND_GROUP_NAME, member: INSTITUTIONAL_COMMAND_GROUP_MEMBER, lead: INSTITUTIONAL_COMMAND_GROUP_LEAD,
@@ -148,6 +154,15 @@ const institutionalRoles = {
       'Compare verified values within the same category, approved period and fictional accounting unit. Keep unresolved differences open.', ''].join('\n'),
     keySegment: 'j8BudgetEvidence', read: 'ReadInstitutionalBudgetEvidence', save: 'SaveInstitutionalBudgetEvidenceDraft',
   },
+  [INSTITUTIONAL_J1_MONITORING_TEAM]: {
+    label: monitoringName, member: 'service-monitoring-drafter', lead: 'Fictional HR services supervisor',
+    definition: renderTeam(monitoringName, 'Prepare a local draft of the approved fictional office-help aggregate.', [{
+      name: 'service-monitoring-drafter', role: 'Office help aggregate drafter', instructions: monitoringInstructions,
+    }], { private: true }),
+    skill: ['# Fictional office help aggregate (J1-05)', '', monitoringInstructions,
+      'Use only the admitted reporting basis. Leave unknown values unresolved for human review.', ''].join('\n'),
+    keySegment: 'j1ServiceMonitoring', read: 'ReadInstitutionalServiceAggregate', save: 'SaveInstitutionalServiceMonitoringDraft',
+  },
 } as const;
 
 export function isInstitutionalRole(team: string): team is InstitutionalRoleId {
@@ -215,6 +230,10 @@ export interface InstitutionalCommandFixture {
   readonly readStaged: () => unknown;
   readonly currentSources: () => readonly InstitutionalBriefSource[];
   readonly withStableParents: <T>(operation: () => Promise<T>) => Promise<T>;
+}
+
+interface InstitutionalServiceMonitoringFixture extends InstitutionalCommandFixture {
+  readonly currentServiceMonitoring: () => unknown;
 }
 
 interface InstitutionalBudgetFixture extends InstitutionalCommandFixture {
@@ -310,15 +329,20 @@ export async function selectSyntheticInstitutionalJ8Budget(fixture: Institutiona
   return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J8_BUDGET_TEAM, { currentBudget: fixture.currentBudget });
 }
 
+export async function selectSyntheticInstitutionalJ1Monitoring(fixture: InstitutionalServiceMonitoringFixture): Promise<TeamDefinition> {
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J1_MONITORING_TEAM, { currentServiceMonitoring: fixture.currentServiceMonitoring });
+}
+
 async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFixture, teamId: InstitutionalRoleId, {
-  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence, currentLibraryRemits, currentLibraryRemitTime, currentInventory, currentBudget,
+  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence, currentLibraryRemits, currentLibraryRemitTime, currentInventory, currentBudget, currentServiceMonitoring,
 }: { authority?: InstitutionalActionRegisterFixture['actionAuthority']; currentObservation?: () => unknown;
   findingsAuthority?: InstitutionalFindingsFixture['findingsAuthority']; currentCatalogue?: () => unknown; currentBusinessServices?: () => unknown; currentPlanningEvidence?: () => unknown;
-  currentLibraryRemits?: () => unknown; currentLibraryRemitTime?: () => unknown; currentInventory?: () => unknown; currentBudget?: () => unknown } = {}): Promise<TeamDefinition> {
+  currentLibraryRemits?: () => unknown; currentLibraryRemitTime?: () => unknown; currentInventory?: () => unknown; currentBudget?: () => unknown; currentServiceMonitoring?: () => unknown } = {}): Promise<TeamDefinition> {
   const exact = await captureInstitutionalBinding(fixture.root, teamId);
   if (!readInstitutionalRoleBinding(fixture.readStaged(), exact) || typeof fixture.withStableParents !== 'function' ||
       typeof fixture.currentSources !== 'function' || typeof fixture.currentActionSettings !== 'function' || !fixture.runId || !fixture.model ||
       !/^[a-f0-9]{64}$/.test(fixture.policyHash) || (teamId === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM && !authority) ||
+      (teamId === INSTITUTIONAL_J1_MONITORING_TEAM && typeof currentServiceMonitoring !== 'function') ||
       (teamId === INSTITUTIONAL_J8_BUDGET_TEAM && typeof currentBudget !== 'function') ||
       (teamId === INSTITUTIONAL_J4_INVENTORY_TEAM && typeof currentInventory !== 'function') ||
       (teamId === INSTITUTIONAL_J9_REMIT_TEAM && (typeof currentLibraryRemits !== 'function' || typeof currentLibraryRemitTime !== 'function')) ||
@@ -339,7 +363,13 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
   Object.freeze(team);
   const binding = Object.freeze({ project: exact.rootDigest, directory: exact.directoryDigest, team: exact.team, teamVersion: exact.teamDigest, skillVersion: exact.skillDigest });
   const provider = Object.freeze({ ...fixture });
-  const currentSources = () => admitted(provider.currentSources(), binding.project);
+  const currentSources = () => {
+    try { return admitted(provider.currentSources(), binding.project); }
+    catch (error) {
+      if (currentServiceMonitoring) return [];
+      throw error;
+    }
+  };
   const stagedIsCurrent = () => Boolean(readInstitutionalRoleBinding(provider.readStaged(), exact));
   const catalogue = currentCatalogue && (() => {
     try { return admittedInstitutionalCatalogue(currentCatalogue(), binding, currentSources()); }
@@ -365,6 +395,11 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
     try { return admittedInstitutionalBudget(currentBudget(), binding, currentSources()); }
     catch { throw new ToolError(institutionalCatalogueUnavailable); }
   });
+  const serviceMonitoring = currentServiceMonitoring && (() => {
+    try { return admittedInstitutionalServiceMonitoring(currentServiceMonitoring(), binding, currentSources()); }
+    catch { return { state: 'unavailable', records: [] } as const; }
+  });
+  serviceMonitoring?.();
   budget?.();
   inventory?.();
   libraryRemits?.();
@@ -463,7 +498,7 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
   }
   fixtureSelections.set(team, { fixture: provider, scope: Object.freeze({
     root: fixture.root, binding, withStableParents: fixture.withStableParents, currentSources, stagedIsCurrent,
-    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}), ...(libraryRemits ? { libraryRemits } : {}), ...(inventory ? { inventory } : {}), ...(budget ? { budget } : {}),
+    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}), ...(libraryRemits ? { libraryRemits } : {}), ...(inventory ? { inventory } : {}), ...(budget ? { budget } : {}), ...(serviceMonitoring ? { serviceMonitoring } : {}),
     bindingIsCurrent: async () => {
       const sampled = await captureInstitutionalBinding(provider.root, teamId);
       return sampled.directoryDigest === exact.directoryDigest && stagedIsCurrent();
@@ -603,8 +638,11 @@ export async function institutionalChildTools(
   const approvedLibraryRemits = scope.libraryRemits?.();
   const approvedInventory = scope.inventory?.();
   const approvedBudget = scope.budget?.();
-  const approvedMetadata = approvedCatalogue ?? approvedBusinessServices ?? approvedPlanningEvidence ?? approvedLibraryRemits ?? approvedInventory ?? approvedBudget;
-  const currentMetadata = scope.catalogue ?? scope.businessServices ?? scope.planningEvidence ?? scope.libraryRemits ?? scope.inventory ?? scope.budget;
+  const approvedServiceMonitoring = scope.serviceMonitoring?.();
+  const approvedMetadata = approvedCatalogue ?? approvedBusinessServices ?? approvedPlanningEvidence ?? approvedLibraryRemits ??
+    approvedInventory ?? approvedBudget ?? approvedServiceMonitoring;
+  const currentMetadata = scope.catalogue ?? scope.businessServices ?? scope.planningEvidence ?? scope.libraryRemits ??
+    scope.inventory ?? scope.budget ?? scope.serviceMonitoring;
   const metadataDigest = approvedMetadata && institutionalBriefDigest(canonicalBytes(approvedMetadata));
   const accepted = scope.actionRegister?.current();
   const approvedObservation = scope.observation?.current();
@@ -646,6 +684,7 @@ export async function institutionalChildTools(
       if (approvedLibraryRemits) catalogueDraft = prepareInstitutionalLibraryRemits(raw, scope.binding, sources, approvedLibraryRemits);
       if (approvedInventory) catalogueDraft = prepareInstitutionalInventory(raw, scope.binding, sources, approvedInventory);
       if (approvedBudget) catalogueDraft = prepareInstitutionalBudget(raw, scope.binding, sources, approvedBudget);
+      if (approvedServiceMonitoring) catalogueDraft = prepareInstitutionalServiceMonitoring(raw, scope.binding, sources, approvedServiceMonitoring);
     } catch { throw new ToolError(institutionalCatalogueUnavailable); }
     const draft = catalogueDraft ?? (approvedFindings ? prepareInstitutionalFindings(raw, scope.binding, sources, approvedFindings)
       : approvedObservation ? prepareInstitutionalObservation(raw, scope.binding, sources, approvedObservation)
@@ -653,6 +692,10 @@ export async function institutionalChildTools(
       : prepareInstitutionalBrief(raw, scope.binding, sources));
     draft.review.sources.forEach(Object.freeze);
     Object.freeze(draft.review.sources);
+    if (draft.review.kind === 'service-monitoring') {
+      Object.freeze(draft.review.supervisor);
+      Object.freeze(draft.review.feedCustodian);
+    }
     if (draft.review.kind === 'budget-evidence') {
       Object.freeze(draft.review.reportingOfficer);
       Object.freeze(draft.review.comptroller);
@@ -682,7 +725,8 @@ export async function institutionalChildTools(
     return Object.freeze(draft);
   };
   const read: AgentTool<string> = {
-    name: readEvidence, description: approvedBudget ? 'Read authorized fictional office budget evidence by opaque ID.'
+    name: readEvidence, description: approvedServiceMonitoring ? 'Read the approved fictional office help aggregate by opaque ID.'
+      : approvedBudget ? 'Read authorized fictional office budget evidence by opaque ID.'
       : approvedInventory ? 'Read one authorized fictional office count and register entry by opaque ID.'
       : approvedLibraryRemits ? 'Read one authorized fictional library service remit by opaque ID.'
       : approvedPlanningEvidence ? 'Read one authorized fictional office migration evidence entry by opaque ID.'
@@ -701,7 +745,7 @@ export async function institutionalChildTools(
       if (Object.keys(raw).length !== 1 || typeof raw.sourceId !== 'string' || !quoteSources.some((source) => source.id === raw.sourceId)) throw new ToolError('This evidence is unavailable.');
       return raw.sourceId;
     },
-    title: () => approvedBudget ? 'Read approved office budget evidence' : approvedInventory ? 'Read approved office inventory evidence' : approvedLibraryRemits ? 'Read approved library service remit' : approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
+    title: () => approvedServiceMonitoring ? 'Read approved office help aggregate' : approvedBudget ? 'Read approved office budget evidence' : approvedInventory ? 'Read approved office inventory evidence' : approvedLibraryRemits ? 'Read approved library service remit' : approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
       : approvedCatalogue ? 'Read approved record metadata' : 'Read admitted brief evidence',
     async forbidden(_id, context) { return approvedMetadata || await fresh(context) ? undefined : stale; },
     async run(id, context) {
@@ -710,7 +754,9 @@ export async function institutionalChildTools(
           if (!await fresh(context)) throw new ToolError(institutionalCatalogueUnavailable);
           return await scope.withStableParents(async () => {
             if (!currentFacts(context) || !context.verifyFixtureGate?.(id)) throw new ToolError(institutionalCatalogueUnavailable);
-            const record = approvedMetadata.records.find((entry) => entry.id === id);
+            const record = approvedServiceMonitoring
+              ? readInstitutionalServiceMonitoring(approvedServiceMonitoring, id)
+              : approvedMetadata.records.find((entry) => entry.id === id);
             if (!record) throw new ToolError(institutionalCatalogueUnavailable);
             return JSON.stringify(record);
           });
@@ -732,7 +778,8 @@ export async function institutionalChildTools(
     },
   };
   const save: AgentTool<PreparedInstitutionalDraft> = {
-    name: saveDraft, description: approvedBudget ? 'Save fictional office budget evidence for the human finance reporting officer.'
+    name: saveDraft, description: approvedServiceMonitoring ? 'Save the approved fictional office help aggregate for human validation.'
+      : approvedBudget ? 'Save fictional office budget evidence for the human finance reporting officer.'
       : approvedInventory ? 'Save a fictional office inventory comparison for the human property custodian.'
       : approvedLibraryRemits ? 'Save a fictional library service remit comparison for the human liaison lead.'
       : approvedPlanningEvidence ? 'Save an evidence and assumptions register draft for the human plan owner.'
@@ -745,7 +792,7 @@ export async function institutionalChildTools(
     manifest: declareManifest({ tool: saveDraft, effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_ONLY }),
     fixtureGate: (draft) => ({ policyHash, currentActionSettings, effect: { verb: 'workspaceWrite', path: draft.path } }),
     parse: project,
-    title: () => approvedBudget ? 'Save local office budget evidence draft' : approvedInventory ? 'Save local office inventory reconciliation draft' : approvedLibraryRemits ? 'Save local library remit comparison draft' : approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
+    title: () => approvedServiceMonitoring ? 'Save local office help aggregate draft' : approvedBudget ? 'Save local office budget evidence draft' : approvedInventory ? 'Save local office inventory reconciliation draft' : approvedLibraryRemits ? 'Save local library remit comparison draft' : approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
       : approvedCatalogue ? 'Save local records catalogue draft' : approvedFindings ? 'Save local candidate findings draft' : approvedObservation ? 'Save local observation draft' : accepted ? 'Save local action register draft' : 'Save local decision brief draft',
     async forbidden(draft, context) {
       const unavailable = approvedMetadata ? institutionalCatalogueUnavailable : stale;

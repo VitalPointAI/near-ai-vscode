@@ -8,6 +8,8 @@ import {
 } from './institutionalEvidence';
 import type { InstitutionalBudgetEvidence, InstitutionalBudgetReview, InstitutionalInventoryEvidence, InstitutionalInventoryReview } from './institutionalReconciliation';
 
+import type { InstitutionalServiceMonitoringEvidence, InstitutionalServiceMonitoringReview } from './institutionalServiceMonitoring';
+
 export {
   institutionalBriefDigest, institutionalBriefMaxBytes, institutionalCatalogueUnavailable, institutionalSourceHash, isInstitutionalCatalogueRecordId,
 } from './institutionalEvidence';
@@ -65,6 +67,7 @@ export interface InstitutionalDraftScope {
   readonly libraryRemits?: () => InstitutionalLibraryRemitEvidence;
   readonly inventory?: () => InstitutionalInventoryEvidence;
   readonly budget?: () => InstitutionalBudgetEvidence;
+  readonly serviceMonitoring?: () => InstitutionalServiceMonitoringEvidence;
   readonly findings?: {
     readonly current: () => InstitutionalFindingsEvidence;
     readonly predecessorCurrent: () => Promise<boolean>;
@@ -158,7 +161,7 @@ interface InstitutionalLibraryRemitReview extends Omit<InstitutionalBriefReview,
   readonly liaisonDecision: 'pending';
 }
 
-export type InstitutionalDraftReview = InstitutionalBudgetReview | InstitutionalInventoryReview | InstitutionalLibraryRemitReview | InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
+export type InstitutionalDraftReview = InstitutionalServiceMonitoringReview | InstitutionalBudgetReview | InstitutionalInventoryReview | InstitutionalLibraryRemitReview | InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;
