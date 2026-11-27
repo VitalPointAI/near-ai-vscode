@@ -1,9 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.4.40
 
-- The Workbench setup check reports available space on the filesystem it can see at Docker's
-  configured data directory, alongside the CPU and memory readings.
+This update makes the Linux Workbench easier to start and improves reliability in Team Studio and Compare Models. It also adds deployment guidance and evidence for teams evaluating Sterling Sovereign AI on their own infrastructure.
+
+### Workbench setup
+
+- The Linux launcher checks prerequisites and starts the Workbench image identified by the approved digest, with a local browser address and an owned workspace.
+- The setup check reports CPU, memory and available space on the filesystem it can inspect at Docker's configured data directory.
+- The documentation covers first launch, shutdown, and running Workbench and the sync hub on one development machine.
+- Workbench offers retry feedback when a sidebar shortcut cannot open its page.
+
+### Working with teams and models
+
+- Team Studio keeps saved replacement state with the project being saved even if the selected project changes.
+- Compare Models starts one comparison at a time. Repeated clicks while it prepares a run no longer create extra starts or cost prompts.
+
+### Deployment and assurance
+
+- The offline on-premises lab has a verified configuration preview. This provides configuration evidence for a future site trial.
+- The repository records capability gate verification and its remaining operational checks, along with updates to the staff collaboration and site control evidence.
 
 ## 0.4.39
 
