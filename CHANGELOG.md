@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.43
+
+This Workbench release adds offline documentation and extends Canadian English and French support.
+
+- Documentation opens published guides, the component catalogue, and both architecture blueprints locally. The blueprints open at full size, and the gap register opens in Compliance.
+- About SovAI shows the running version. About, Get Started, and Team Studio follow your Canadian English or French setting. Enter closes About when the Close button has keyboard focus.
+- Team Studio shows the selected project and its available staff sections before setup.
+- Compliance table headings stay on one line. On narrow screens, the table scrolls within its own area.
+
 ## 0.4.42
 
 This Workbench update makes documentation easier to use offline and follows Canadian English and French settings in more places.
