@@ -56,11 +56,16 @@
   "activationEvents": [
     "workspaceContains:.planning/.near-ai/**",
     "onCommand:nearAi.openCyber",
+    "onCommand:nearAi.getSovAiVersion",
     "onCommand:sterling.workAreas.create"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "nearAi.getSovAiVersion",
+        "title": "SovAI version lookup"
+      },
       {
         "command": "nearAi.newChat",
         "title": "New Chat",
@@ -1078,6 +1083,10 @@
     },
     "menus": {
       "commandPalette": [
+        {
+          "command": "nearAi.getSovAiVersion",
+          "when": "false"
+        },
         {
           "command": "sterling.workAreas.create",
           "when": "false"

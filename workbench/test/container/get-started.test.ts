@@ -25,16 +25,26 @@ test('the rail shortcuts and the Get Started work-area cards are present and ope
   const url = `http://127.0.0.1:${port}`;
   await waitHealthy('get-started', url);
   const name = containerName('get-started');
-  const bundled = (await mustRun('docker', ['exec', name, 'node', '-e', "console.log(require('fs').existsSync('/plugins/extension/package.json') ? 1 : 0)"])).stdout.trim() === '1';
+  const manifest = JSON.parse((await mustRun('docker', ['exec', name, 'node', '-e', `
+    const fs = require('node:fs');
+    const file = '/plugins/extension/package.json';
+    console.log(JSON.stringify(fs.existsSync(file) ? { version: JSON.parse(fs.readFileSync(file, 'utf8')).version } : null));
+  `])).stdout) as { version?: unknown } | null;
+  const bundled = manifest !== null;
+  const version = bundled ? manifest.version : '';
+  assert.ok(typeof version === 'string' && (!bundled || version.length > 0), 'The bundled extension must declare a version.');
   const title = 'Winter exercise';
-  const result = await runPlaywright('get-started.spec.ts', { WORKBENCH_URL: url, STERLING_BUNDLED_EXTENSION: bundled ? '1' : '0', STERLING_WORK_AREA_TITLE: title });
+  const result = await runPlaywright('get-started.spec.ts', {
+    WORKBENCH_URL: url, STERLING_BUNDLED_EXTENSION: bundled ? '1' : '0',
+    STERLING_BUNDLED_VERSION: version, STERLING_WORK_AREA_TITLE: title
+  });
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
   if (!bundled) {
-    assert.match(result.stdout, /\b2 passed\b/);
+    assert.match(result.stdout, /\b3 passed\b/);
     assert.match(result.stdout, /\b2 skipped\b/, 'the development image has no extension to show webview pages or create a work area with');
     return;
   }
-  assert.match(result.stdout, /\b4 passed\b/);
+  assert.match(result.stdout, /\b5 passed\b/);
   // On disk: one new work-area-<hex> folder in the workspace and nothing else, holding only the marker and its .gitignore, with the kind
   // and the title the person typed.
   const listing = await mustRun('docker', ['exec', name, 'node', '-e', `

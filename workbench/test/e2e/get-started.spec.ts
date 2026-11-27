@@ -22,6 +22,52 @@ async function openGetStarted(page: Page): Promise<void> {
 const currentTab = (page: Page) => page.locator('#theia-main-content-panel .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabLabel');
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Sterling shortcuts' });
 
+test('About SovAI opens from Manage and the palette with the running extension version', async ({ page }) => {
+  await openGetStarted(page);
+  const bundled = process.env.STERLING_BUNDLED_EXTENSION === '1';
+  const expectedVersion = process.env.STERLING_BUNDLED_VERSION;
+  if (bundled) expect(expectedVersion).toBeTruthy();
+  const versionText = bundled ? `Version ${expectedVersion}` : 'Version unavailable';
+
+  const palette = page.locator('.quick-input-widget input');
+  const commandResults = page.locator('.quick-input-list .monaco-list-row');
+  const openPalette = async (): Promise<void> => {
+    await page.keyboard.press('F1');
+    await expect(palette).toBeVisible();
+  };
+  if (bundled) {
+    // Listing a manifest contribution establishes hosted registration without executing it.
+    await openPalette();
+    await palette.fill('>SovAI: Show Status');
+    await expect(commandResults.filter({ hasText: 'Show Status' })).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+  }
+
+  const start = rail(page).getByRole('button', { name: 'Get Started', exact: true });
+  const manage = page.locator('.theia-sidebar-menu-item').filter({ has: page.locator('.codicon-settings-gear') });
+  const dialog = page.getByRole('dialog', { name: 'About SovAI', exact: true });
+  const close = dialog.getByRole('button', { name: 'Close', exact: true });
+
+  await start.focus();
+  await manage.click();
+  await page.getByRole('menuitem', { name: 'About SovAI', exact: true }).click();
+  await expect(dialog.getByText(versionText, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(start).toBeFocused();
+
+  await openPalette();
+  await palette.fill('>About SovAI');
+  await commandResults.filter({ hasText: 'About SovAI' }).click();
+  await expect(dialog.getByText(versionText, { exact: true })).toBeVisible();
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(start).toBeFocused();
+});
+
 test('the rail carries every shortcut, the planned ones disabled, and the native ones open their page', async ({ page }) => {
   await openGetStarted(page);
   const buttons = rail(page).getByRole('button');
