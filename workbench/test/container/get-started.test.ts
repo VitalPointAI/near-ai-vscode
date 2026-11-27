@@ -33,18 +33,33 @@ test('the rail shortcuts and the Get Started work-area cards are present and ope
   const bundled = manifest !== null;
   const version = bundled ? manifest.version : '';
   assert.ok(typeof version === 'string' && (!bundled || version.length > 0), 'The bundled extension must declare a version.');
+  // A hand-edited shared value must neither control Get Started nor suppress live User updates.
+  const sharedSettings = ['/home/sterling/workspace/.theia/settings.json', '/home/sterling/workspace/.vscode/settings.json'];
+  const sharedFixture = '{"sterling.displayLanguage":"fr-CA"}\n';
+  await mustRun('docker', ['exec', name, 'node', '-e', `
+    const fs = require('node:fs'), path = require('node:path');
+    const [file, content] = process.argv.slice(1);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content, { flag: 'wx' });
+  `, sharedSettings[0], sharedFixture]);
+  const sharedSnapshot = async (): Promise<string> => (await mustRun('docker', ['exec', name, 'node', '-e', `
+    const fs = require('node:fs');
+    console.log(JSON.stringify(process.argv.slice(1).map(file => fs.existsSync(file) ? fs.readFileSync(file).toString('base64') : null)));
+  `, ...sharedSettings])).stdout.trim();
+  const beforeLanguageJourney = await sharedSnapshot();
   const title = 'Winter exercise';
   const result = await runPlaywright('get-started.spec.ts', {
     WORKBENCH_URL: url, STERLING_BUNDLED_EXTENSION: bundled ? '1' : '0',
     STERLING_BUNDLED_VERSION: version, STERLING_WORK_AREA_TITLE: title
   });
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
+  assert.equal(await sharedSnapshot(), beforeLanguageJourney, 'User language changes leave the shared preference files byte-for-byte intact.');
   if (!bundled) {
-    assert.match(result.stdout, /\b3 passed\b/);
+    assert.match(result.stdout, /\b4 passed\b/);
     assert.match(result.stdout, /\b2 skipped\b/, 'the development image has no extension to show webview pages or create a work area with');
     return;
   }
-  assert.match(result.stdout, /\b5 passed\b/);
+  assert.match(result.stdout, /\b6 passed\b/);
   // On disk: one new work-area-<hex> folder in the workspace and nothing else, holding only the marker and its .gitignore, with the kind
   // and the title the person typed.
   const listing = await mustRun('docker', ['exec', name, 'node', '-e', `

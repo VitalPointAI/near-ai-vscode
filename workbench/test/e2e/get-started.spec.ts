@@ -14,6 +14,10 @@ const cards = [['Capability Development', 'capability-development'], ['Exercises
 async function openGetStarted(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+  await declineWorkspaceTrust(page);
+}
+
+async function declineWorkspaceTrust(page: Page): Promise<void> {
   // Theia asks whether to trust the workspace and makes the page inert until answered; answer it as a person would (restricted mode).
   const decline = page.getByRole('button', { name: 'No, I don\'t trust the authors' });
   await decline.waitFor({ timeout: 30_000 }).then(() => decline.click(), () => undefined);
@@ -114,6 +118,83 @@ test('Get Started shows the setup actions, and each work-area card opens its own
     await welcome.locator('.sterling-destination', { hasText: card }).click();
     await expect(currentTab(page)).toHaveText(card);
     await expect(page.locator(`#sterling-area-${kind} h1`)).toHaveText(card);
+  }
+});
+
+test('Get Started switches Canadian language live through User Settings and keeps it on reopen', async ({ page, browser, baseURL }) => {
+  test.setTimeout(180_000);
+  await openGetStarted(page);
+  const welcome = page.locator('.sterling-welcome');
+  const shellUrl = page.url();
+  const original = await welcome.elementHandle();
+  await welcome.getByRole('button', { name: 'Pause hero animation' }).click();
+
+  const openLanguageSetting = async (window: Page): Promise<Locator> => {
+    await window.keyboard.press('F1');
+    const palette = window.locator('.quick-input-widget input');
+    await expect(palette).toBeVisible();
+    await palette.fill('>Open User Settings');
+    await window.locator('.quick-input-list .monaco-list-row').filter({ hasText: 'Open User Settings' }).click();
+    const search = window.getByPlaceholder('Search settings');
+    await expect(search).toBeVisible();
+    await search.fill('sterling.displayLanguage');
+    const selection = window.locator('[data-pref-id="sterling.displayLanguage"] .theia-select-component');
+    await expect(selection, 'the Canadian language enum is offered in User Settings').toBeVisible({ timeout: 10_000 });
+    return selection;
+  };
+  const pickLanguage = async (selection: Locator, direction: 'ArrowDown' | 'ArrowUp', name: string): Promise<void> => {
+    await selection.press('Enter');
+    await selection.press(direction);
+    await selection.press('Enter');
+    await expect(selection).toContainText(name);
+    await expect(selection).toBeFocused();
+  };
+  const selection = await openLanguageSetting(page);
+  await expect(selection).toContainText('English (Canada)');
+  await pickLanguage(selection, 'ArrowDown', 'Français (Canada)');
+  await expect(welcome).toHaveAttribute('lang', 'fr-CA');
+  await expect(selection).toBeFocused();
+  expect(page.url()).toBe(shellUrl);
+  expect(await welcome.evaluate((node, before) => node === before, original)).toBe(true);
+  await expect(page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas' })).toBeVisible();
+  await page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas' }).click();
+  await expect(currentTab(page).filter({ hasText: /^Premiers pas$/ })).toBeVisible();
+  await expect(welcome.getByRole('heading', { name: 'Espaces de travail de la défense' })).toBeVisible();
+  await expect(welcome.getByRole('button', { name: 'Configurer Sterling' })).toBeVisible();
+  await expect(welcome.getByRole('button', { name: 'Reprendre l’animation' })).toBeVisible();
+
+  const otherContext = await browser.newContext({ baseURL, viewport: { width: 670, height: 760 }, reducedMotion: 'reduce' });
+  try {
+    const reopened = await otherContext.newPage();
+    await reopened.goto('/');
+    await expect(reopened.locator('.sterling-welcome')).toHaveAttribute('lang', 'fr-CA', { timeout: 90_000 });
+    await declineWorkspaceTrust(reopened);
+    const reopenedWelcome = reopened.locator('.sterling-welcome');
+    const expectActionsFit = async (): Promise<void> => {
+      const actions = reopenedWelcome.locator('.sterling-actions');
+      await expect(actions).toBeVisible();
+      expect(await actions.evaluate((node) => {
+        const bounds = node.getBoundingClientRect();
+        return Array.from(node.querySelectorAll('button')).every((button) => {
+          const control = button.getBoundingClientRect();
+          return control.left >= bounds.left - 1 && control.right <= bounds.right + 1 &&
+            button.scrollWidth <= button.clientWidth + 1;
+        });
+      })).toBe(true);
+    };
+    await expect(reopenedWelcome.getByRole('button', { name: 'Configurer Sterling' })).toBeVisible();
+    await expectActionsFit();
+    const reopenedSelection = await openLanguageSetting(reopened);
+    await expect(reopenedSelection).toContainText('Français (Canada)');
+    await pickLanguage(reopenedSelection, 'ArrowUp', 'English (Canada)');
+    await expect(reopenedWelcome).toHaveAttribute('lang', 'en-CA');
+    await expect(reopenedSelection).toBeFocused();
+    await rail(reopened).getByRole('button', { name: 'Get Started', exact: true }).click();
+    await expect(currentTab(reopened).filter({ hasText: /^Get Started$/ })).toBeVisible();
+    await expect(reopenedWelcome.getByRole('button', { name: 'Set up Sterling' })).toBeVisible();
+    await expectActionsFit();
+  } finally {
+    await otherContext.close();
   }
 });
 
