@@ -3,6 +3,7 @@
 // welcome file that lets a new device catch up on the roster with only the grants addressed to it.
 import assert from 'node:assert/strict';
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
+import crypto = require('node:crypto');
 import test from 'node:test';
 import { sealBlob } from '../domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '../domain/replica/entry';
@@ -11,7 +12,7 @@ import { kemPublicFromSeeds } from '../domain/replica/cellWrapV2';
 import type { KemPublicKeys } from '../domain/replica/cellWrapV2';
 import type { CellGrant } from '../domain/replica/cellKeys';
 import {
-  HUB_JOIN_INFO, INVITE_REFUSALS, WELCOME_MAX_BYTES, buildHubJoin, buildInvite, buildJoinRequest, buildWelcome, checkAdmittedRequest, checkHubJoinMac, checkJoinRequest, hubJoinCheckKey, hubJoinMac,
+  HUB_JOIN_INFO, INVITE_REFUSALS, JOIN_NONCE_BYTES, WELCOME_MAX_BYTES, buildHubJoin, buildInvite, buildJoinRequest, buildWelcome, checkAdmittedRequest, checkHubJoinMac, checkJoinRequest, hubJoinCheckKey, hubJoinMac,
   inviteAnchor, inviteSafetyCode, joinMac, joinRequestHash, joinSecretHash, newJoinSecret, readHubJoin, readInvite, readWelcome
 } from '../domain/replica/invite';
 import type { HubJoinMacFields, HubJoinPayload, InviteHub, InvitePayload, JoinRequestPayload, WelcomeFile } from '../domain/replica/invite';
@@ -19,6 +20,7 @@ import { foldRoster } from '../domain/replica/roster';
 import { canonicalBytes } from '../domain/team/canonical';
 import { MAX_PAYLOAD_BYTES, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
+import { findSecrets } from '../domain/team/secrets';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_NOW, createRosterWorld, rosterDevice } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
 import { streamId } from './helpers/replicaWorld';
@@ -155,6 +157,76 @@ test('MJ-01: the joining device draws a fresh nonce after it reads the invite, s
   const mallory = state.world.device('MALLORY', 'mbr-mallory');
   const otherInviter = { ...state.invite, inviter: { member: 'mbr-mallory', writer: mallory.writer, publicKey: mallory.publicKey, x25519: mallory.x25519 } };
   assert.notDeepEqual(inviteSafetyCode(otherInviter, first), inviteSafetyCode(state.invite, first));
+});
+
+test('MJ-01: a generated nonce rejected by the signing guard is discarded before the join request is signed', (t) => {
+  const state = invited();
+  const flaggedText = `rt_${'A'.repeat(19)}`;
+  const flagged = Buffer.from(flaggedText, 'base64url');
+  const clean = Buffer.alloc(JOIN_NONCE_BYTES, 7);
+  assert.equal(flagged.length, JOIN_NONCE_BYTES);
+  assert.equal(flagged.toString('base64url'), flaggedText);
+  assert.deepEqual(findSecrets({ nonce: flaggedText }), ['$.nonce'], 'the unchanged guard classifies the synthetic generated candidate');
+  assert.deepEqual(findSecrets({ nonce: clean.toString('base64url') }), []);
+
+  const realRandomBytes = crypto.randomBytes;
+  let nonceDraws = 0;
+  t.mock.method(crypto, 'randomBytes', ((size: number): Buffer => {
+    if (size !== JOIN_NONCE_BYTES) return realRandomBytes(size);
+    nonceDraws += 1;
+    return Buffer.from(nonceDraws === 1 ? flagged : clean);
+  }) as typeof crypto.randomBytes);
+
+  const request = buildJoinRequest(state.joiner.signer, state.invite, { name: 'Jo Analyst', x25519: state.joiner.x25519, now: NOW });
+  assert.equal(nonceDraws, 2);
+  assert.equal(request.payload.nonce, clean.toString('base64url'));
+  assert.notEqual(request.payload.nonce, flaggedText);
+  assert.equal(reasonOf(checkJoinRequest(asFile(request), { invite: state.invite, secret: state.secret })), 'ok');
+});
+
+test('MJ-01: eight rejected generated nonces fail closed before signing and disclose no candidate', (t) => {
+  const state = invited();
+  const candidates = Array.from({ length: 8 }, (_, index) => {
+    const text = `rt_${index.toString().padStart(2, '0')}${'A'.repeat(17)}`;
+    const bytes = Buffer.from(text, 'base64url');
+    assert.equal(bytes.length, JOIN_NONCE_BYTES);
+    assert.equal(bytes.toString('base64url'), text);
+    assert.deepEqual(findSecrets({ nonce: text }), ['$.nonce']);
+    return { text, bytes };
+  });
+  const realRandomBytes = crypto.randomBytes;
+  let nonceDraws = 0;
+  t.mock.method(crypto, 'randomBytes', ((size: number): Buffer => {
+    if (size !== JOIN_NONCE_BYTES) return realRandomBytes(size);
+    const candidate = candidates[nonceDraws];
+    nonceDraws += 1;
+    if (candidate === undefined) throw new Error('the nonce generator exceeded its eight-draw bound');
+    return Buffer.from(candidate.bytes);
+  }) as typeof crypto.randomBytes);
+
+  let signCalls = 0;
+  const signer = {
+    ...state.joiner.signer,
+    sign: (bytes: Buffer): string => {
+      signCalls += 1;
+      return state.joiner.signer.sign(bytes);
+    }
+  };
+  assert.throws(
+    () => buildJoinRequest(signer, state.invite, { name: 'Jo Analyst', x25519: state.joiner.x25519, now: NOW }),
+    (error: unknown): boolean => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /join request was not made/i);
+      assert.doesNotMatch(error.message, /secret|token|candidate|\$\.nonce/i);
+      for (const candidate of candidates) {
+        assert.ok(!error.message.includes(candidate.text));
+        assert.ok(!error.message.includes(candidate.bytes.toString('hex')));
+      }
+      return true;
+    },
+  );
+  assert.equal(nonceDraws, 8);
+  assert.equal(signCalls, 0);
 });
 
 test('MJ-01: a join request without a nonce (the format before it) is refused malformed, in plain words', () => {
