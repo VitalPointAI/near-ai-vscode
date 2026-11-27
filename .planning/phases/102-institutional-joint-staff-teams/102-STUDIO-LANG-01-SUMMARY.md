@@ -19,7 +19,7 @@ Language changes preserve the project name, selected section, review and confirm
 
 ### French choice details
 
-Source review found that the initial French labels omitted the supported levels and doctrine notes available in English. The test reproduced three missing profile descriptions. Commit `54db8213e` now derives each French level list from the supported template choices and renders the profile-specific source notes with their publication identifiers. The choice IDs and confirmation behavior remain the same.
+Source review found that the initial French labels omitted the supported levels and doctrine notes available in English. The test reproduced three missing profile descriptions. Commit `54db8213e` now derives each French level list from the supported template choices and renders the profile-specific source notes with their publication identifiers. The independent re-review passed on the exact correction and confirmed all six profile and level notes, stable choice IDs and the same confirmation boundary.
 
 All 68 focused staff setup and copy checks passed. The corrected VSIX passed the 3,176-entry, 630 runtime JavaScript file and 71 required asset checks. Its SHA-256 is `b41d63294a406ab66d87624da9c51632a6ddd4e84f387c7646d9a1dfef69834d`. The native build inputs matched the earlier package, with the browser specification as the only Workbench file changed.
 
