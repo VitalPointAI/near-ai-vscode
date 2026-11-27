@@ -30,9 +30,10 @@ class AboutSovAiDialog extends AbstractDialog<void> {
     const view = this.node.ownerDocument.defaultView;
     if (!view) return;
 
-    // Theia's document-level keybindings can consume Escape before the dialog receives it.
+    // Theia's document-level keybindings can consume dialog keys before the footer receives them.
     const dismiss = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+      const dismissKey = event.key === 'Escape' || (event.key === 'Enter' && event.target === this.acceptButton);
+      if (!dismissKey || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
           !this.isAttached || !event.composedPath().includes(this.node)) return;
       event.preventDefault();
       event.stopPropagation();
