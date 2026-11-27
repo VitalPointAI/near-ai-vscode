@@ -307,9 +307,7 @@ test('on the release image, the Team Studio and Chat shortcuts show their pages 
 test('Team Studio staff setup previews the selected project in the User language', async ({ page, browser, baseURL }) => {
   test.skip(process.env.STERLING_BUNDLED_EXTENSION !== '1', 'needs the bundled extension');
   test.setTimeout(180_000);
-  await page.goto('/');
-  await expect(page.locator('.quick-input-widget')).toHaveCount(1, { timeout: 90_000 });
-  await declineWorkspaceTrust(page);
+  await openGetStarted(page);
   const selection = await openLanguageSetting(page);
   await expect(selection).toContainText('English (Canada)');
   await pickLanguage(selection, 'ArrowDown', 'Français (Canada)');
@@ -317,8 +315,12 @@ test('Team Studio staff setup previews the selected project in the User language
   const reopenedContext = await browser.newContext({ baseURL });
   try {
     const workbench = await reopenedContext.newPage();
+    let pluginsStarted = false;
+    workbench.on('console', (message) => {
+      if (/\] Start of \d+ plugins?:/.test(message.text())) pluginsStarted = true;
+    });
     await workbench.goto('/');
-    await expect(workbench.locator('.quick-input-widget')).toHaveCount(1, { timeout: 90_000 });
+    await expect.poll(() => pluginsStarted, { timeout: 90_000 }).toBe(true);
     await declineWorkspaceTrust(workbench);
     await workbench.keyboard.press('F1');
     const palette = workbench.locator('.quick-input-widget input');
