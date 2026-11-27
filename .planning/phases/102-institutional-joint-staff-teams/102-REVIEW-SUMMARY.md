@@ -15,6 +15,7 @@ Ordinary Staff Setup offers its existing templates. Only a test-owned provider c
 
 - The exact CI reviewer refused the previous head at `b268fa93c`. The two new gate regressions reproduced the missing original-path refusal and later-policy attribution. The repaired gate passed 69 focused checks.
 - Ordinary registration reproduced the new picker entries and accepted a fabricated fixture selection before the repair. It passed afterward, together with the isolated fixture path. Combined verification passed 153 focused checks with zero skips, including the tool inventory, architecture and copy checks.
+- The activation linkage assertion now checks the named Chat option and the absence of a fixture provider. The affected suite passed 115 focused checks with zero skips.
 - Clean source `c9c552eb0` produced a VSIX with 3,175 entries and 629 runtime JavaScript files. Release content verification passed. Inspection followed 557 activation dependencies and found none that reach the nine compiled fixture modules, which are absent from the package. The positive fixture checks ran from the test tree.
 - The file `/tmp/sovai-staff-vsix.JJq0wf/src/near-ai-vscode-0.4.41.vsix` is a local candidate with SHA-256 `25b182870e906650445aa02e42227740dcb89c7b4daa551a859990ae1faf2add`. Publication and the protected owner review have their own gates.
 

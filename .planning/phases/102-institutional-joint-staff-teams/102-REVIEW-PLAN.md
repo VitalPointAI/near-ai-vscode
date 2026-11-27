@@ -21,6 +21,7 @@ files_modified:
   - src/test/staffSetup.test.ts
   - src/test/institutionalBriefTracer.test.ts
   - src/test/gateCallArguments.test.ts
+  - src/test/staffTeamLinkage.test.ts
   - src/test/helpers/institutional
   - SECURITY.md
   - CHANGELOG.md
@@ -70,7 +71,7 @@ The original staff head is `b268fa93c`. Its CI passed and the official reviewer 
 
 <task type="tracer" tdd="true">
   <name>Keep ordinary Staff Setup and runtime decisions scoped</name>
-  <files>src/agent/gateAdapter.ts, src/agent/toolCatalog.ts, src/agent/staff/institutionalCommand.ts, src/domain/staff/institutionalBrief.ts, src/domain/staff/institutionalEvidence.ts, src/domain/staff/institutionalAccessibilityReview.ts, src/domain/staff/institutionalReconciliation.ts, src/domain/staff/institutionalServiceMonitoring.ts, src/services/staffSetupCommand.ts, src/services/staffSetup.ts, src/services/agentSession.ts, src/staff/institutionalDraftStore.ts, src/extension.ts, src/test/staffSetup.test.ts, src/test/institutionalBriefTracer.test.ts, src/test/gateCallArguments.test.ts, src/test/helpers/institutional, SECURITY.md, CHANGELOG.md</files>
+  <files>src/agent/gateAdapter.ts, src/agent/toolCatalog.ts, src/agent/staff/institutionalCommand.ts, src/domain/staff/institutionalBrief.ts, src/domain/staff/institutionalEvidence.ts, src/domain/staff/institutionalAccessibilityReview.ts, src/domain/staff/institutionalReconciliation.ts, src/domain/staff/institutionalServiceMonitoring.ts, src/services/staffSetupCommand.ts, src/services/staffSetup.ts, src/services/agentSession.ts, src/staff/institutionalDraftStore.ts, src/extension.ts, src/test/staffSetup.test.ts, src/test/institutionalBriefTracer.test.ts, src/test/gateCallArguments.test.ts, src/test/staffTeamLinkage.test.ts, src/test/helpers/institutional, SECURITY.md, CHANGELOG.md</files>
   <read_first>Read the exact independent findings and existing compiled package rules, command registration, capability manifest and audit record builders.</read_first>
   <action>
     Capture a regression for ordinary registration with no fixture options and ensure even an unexpected fixture selection cannot write staging state. Use a named registration options object. Only the isolated harness injects the fixture routes. Remove production imports of inactive providers and move their executable fixture adapters under the already excluded test tree. Preserve ordinary setup and generic child behavior. Complete and verify package isolation before resubmitting. Reconcile 102-09, 102-10 and 102-11 with that boundary before their submissions. Record normal Workbench operation of the institutional roles as open under the existing authority and confinement conditions.
