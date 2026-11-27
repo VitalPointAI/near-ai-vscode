@@ -1,0 +1,8 @@
+appDefinition:
+  maxInstances: 1
+  notifyAfterMinutes: 1
+  maxSessionMinutes: 0
+  usePlaceholder: true
+siteEnv:
+  openVsxUrl: "https://open-vsx.${site.domain}"
+  modelServers: []

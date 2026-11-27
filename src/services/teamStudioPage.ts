@@ -921,8 +921,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   /** This project's identity (its folder's real path, hashed), worked out once per folder. */
   let identity: { root: string; id: string } | undefined;
-  const projectId = async (): Promise<string | undefined> => {
-    const root = deps.root();
+  const projectId = async (root = deps.root()): Promise<string | undefined> => {
     if (!root) return undefined;
     if (identity?.root !== root) identity = { root, id: await projectIdentity(root) };
     return identity.id;
@@ -1265,7 +1264,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    */
   const writeProjectTeam = async (root: string, markdown: string, unapprovedFrom: string | undefined, projectType?: { type: ProjectType; goal: string }, icon?: Buffer): Promise<string | undefined> => {
     const file = TeamLibrary.projectTeamFile(root);
-    const project = await projectId();
+    const project = await projectId(root);
     const projectKey = project ? `project:${project}` : undefined;
     const before = await readFile(file, 'utf8').catch(() => undefined);
     // The same team set up again keeps the person's rating and its role-test health (PR 86 review); another team does not inherit them, and the question
