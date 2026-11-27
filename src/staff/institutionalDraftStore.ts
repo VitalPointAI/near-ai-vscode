@@ -6,6 +6,7 @@ import {
   institutionalFindingsDirectory, institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
   prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalFindings, prepareInstitutionalLibraryRemits, prepareInstitutionalObservation, prepareInstitutionalPlanningRegister, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
 } from '../domain/staff/institutionalBrief';
+import { institutionalAccessibilityDirectory, prepareInstitutionalAccessibility } from '../domain/staff/institutionalAccessibilityReview';
 import { institutionalBudgetDirectory, institutionalInventoryDirectory, prepareInstitutionalBudget, prepareInstitutionalInventory } from '../domain/staff/institutionalReconciliation';
 import { institutionalServiceMonitoringDirectory, prepareInstitutionalServiceMonitoring } from '../domain/staff/institutionalServiceMonitoring';
 import { replaceKeepingEdits } from './staffFiles';
@@ -15,6 +16,7 @@ const hexDigest = /^[0-9a-f]{64}$/;
 const readLeafFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 function directoryOf(scope: InstitutionalDraftScope): string {
+  if (scope.accessibility) return institutionalAccessibilityDirectory;
   if (scope.serviceMonitoring) return institutionalServiceMonitoringDirectory;
   if (scope.budget) return institutionalBudgetDirectory;
   if (scope.inventory) return institutionalInventoryDirectory;
@@ -88,8 +90,9 @@ function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected
   const { body, productId } = payload as Record<string, unknown>;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return changed();
   const sources = scope.currentSources();
-  const expected = scope.serviceMonitoring
-    ? prepareInstitutionalServiceMonitoring({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.serviceMonitoring())
+  const expected = scope.accessibility
+    ? prepareInstitutionalAccessibility({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.accessibility())
+    : scope.serviceMonitoring ? prepareInstitutionalServiceMonitoring({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.serviceMonitoring())
     : scope.budget ? prepareInstitutionalBudget({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.budget())
     : scope.inventory ? prepareInstitutionalInventory({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.inventory())
     : scope.libraryRemits ? prepareInstitutionalLibraryRemits({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.libraryRemits())
@@ -132,7 +135,7 @@ async function requireCurrentPredecessor(scope: InstitutionalDraftScope): Promis
 function exactPredecessorLeaf(scope: InstitutionalDraftScope, review: InstitutionalDraftReview): boolean {
   if (review.kind === 'observation') return scope.observation?.correctionAtEffect(review.correction) === true;
   if (review.kind === 'findings') return scope.findings?.predecessorAtEffect(review.observation.version) === true;
-  return review.kind === 'service-monitoring' || review.kind === 'budget-evidence' || review.kind === 'inventory-counts' || review.kind === 'library-service-remits' || review.kind === 'planning-evidence' || review.kind === 'business-services' || review.kind === 'records-catalogue' || review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
+  return review.kind === 'accessibility-review' || review.kind === 'service-monitoring' || review.kind === 'budget-evidence' || review.kind === 'inventory-counts' || review.kind === 'library-service-remits' || review.kind === 'planning-evidence' || review.kind === 'business-services' || review.kind === 'records-catalogue' || review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
 }
 
 export async function verifyInstitutionalDraftTarget(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalDraft): Promise<void> {
@@ -181,7 +184,7 @@ export async function readInstitutionalDraftReview(scope: InstitutionalDraftScop
     if (!exactPredecessorLeaf(scope, review)) return changed();
     return review;
   }).catch((error: unknown) => {
-    if (scope.planningEvidence || scope.libraryRemits || scope.inventory || scope.budget || scope.serviceMonitoring) throw new Error(institutionalCatalogueUnavailable);
+    if (scope.planningEvidence || scope.libraryRemits || scope.inventory || scope.budget || scope.serviceMonitoring || scope.accessibility) throw new Error(institutionalCatalogueUnavailable);
     throw error;
   });
 }

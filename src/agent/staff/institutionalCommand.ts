@@ -9,6 +9,7 @@ import {
   validateInstitutionalBriefSource, verifyInstitutionalActionAcceptance, type InstitutionalActionAuthority, type InstitutionalBriefSource,
   type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type InstitutionalObservationReview, type PreparedInstitutionalDraft,
 } from '../../domain/staff/institutionalBrief';
+import { admittedInstitutionalAccessibility, prepareInstitutionalAccessibility } from '../../domain/staff/institutionalAccessibilityReview';
 import { admittedInstitutionalBudget, admittedInstitutionalInventory, prepareInstitutionalBudget, prepareInstitutionalInventory } from '../../domain/staff/institutionalReconciliation';
 import {
   admittedInstitutionalServiceMonitoring, prepareInstitutionalServiceMonitoring, readInstitutionalServiceMonitoring,
@@ -32,7 +33,8 @@ export const INSTITUTIONAL_J9_REMIT_TEAM = 'institutional-j9-library-remits-v1';
 export const INSTITUTIONAL_J4_INVENTORY_TEAM = 'institutional-j4-inventory-counts-v1';
 export const INSTITUTIONAL_J8_BUDGET_TEAM = 'institutional-j8-budget-evidence-v1';
 export const INSTITUTIONAL_J1_MONITORING_TEAM = 'institutional-j1-service-monitoring-v1';
-export type InstitutionalRoleId = typeof INSTITUTIONAL_J1_MONITORING_TEAM | typeof INSTITUTIONAL_J8_BUDGET_TEAM | typeof INSTITUTIONAL_J4_INVENTORY_TEAM | typeof INSTITUTIONAL_J9_REMIT_TEAM | typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
+export const INSTITUTIONAL_ACCESSIBILITY_TEAM = 'institutional-ss-accessibility-v1';
+export type InstitutionalRoleId = typeof INSTITUTIONAL_ACCESSIBILITY_TEAM | typeof INSTITUTIONAL_J1_MONITORING_TEAM | typeof INSTITUTIONAL_J8_BUDGET_TEAM | typeof INSTITUTIONAL_J4_INVENTORY_TEAM | typeof INSTITUTIONAL_J9_REMIT_TEAM | typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
 
 const description = 'Prepare a local institutional decision brief for human review.';
 const instructions = 'Prepare a CG-07 decision brief using only evidence admitted for this project. Separate sourced facts, assumptions and alternatives. Preserve attributed disagreement. Leave the decision with the Command Group lead.';
@@ -76,6 +78,8 @@ const budgetName = 'Institutional G8 Budget Evidence';
 const budgetInstructions = 'Draft a fictional J8-02 office budget evidence reconciliation from independently attested status and control evidence. Leave discrepancies open for the finance reporting officer and release for the comptroller.';
 const monitoringName = 'Institutional G1 Service Monitoring';
 const monitoringInstructions = 'Draft a fictional J1-05 office help aggregate from admitted summary evidence. Leave validation to the human HR services supervisor and source correction to the feed custodian.';
+const accessibilityName = 'Institutional Special Staff Accessibility Review';
+const accessibilityInstructions = 'Draft a fictional SS-18 help-sheet accessibility review from the admitted fixture observations. Keep observations, issues and evidence gaps distinct for the human accessibility adviser and product owner.';
 const institutionalRoles = {
   [INSTITUTIONAL_COMMAND_GROUP_TEAM]: {
     label: INSTITUTIONAL_COMMAND_GROUP_NAME, member: INSTITUTIONAL_COMMAND_GROUP_MEMBER, lead: INSTITUTIONAL_COMMAND_GROUP_LEAD,
@@ -163,6 +167,15 @@ const institutionalRoles = {
       'Use only the admitted reporting basis. Leave unknown values unresolved for human review.', ''].join('\n'),
     keySegment: 'j1ServiceMonitoring', read: 'ReadInstitutionalServiceAggregate', save: 'SaveInstitutionalServiceMonitoringDraft',
   },
+  [INSTITUTIONAL_ACCESSIBILITY_TEAM]: {
+    label: accessibilityName, member: 'accessibility-review-drafter', lead: 'Fictional accessibility adviser',
+    definition: renderTeam(accessibilityName, 'Prepare local accessibility observations for a fictional help sheet.', [{
+      name: 'accessibility-review-drafter', role: 'Help-sheet accessibility review drafter', instructions: accessibilityInstructions,
+    }], { private: true }),
+    skill: ['# Fictional help-sheet accessibility review (SS-18)', '', accessibilityInstructions,
+      'Use the approved fixture checklist and leave advice and remediation decisions pending with their human owners.', ''].join('\n'),
+    keySegment: 'specialAccessibilityReview', read: 'ReadInstitutionalAccessibilityEvidence', save: 'SaveInstitutionalAccessibilityReviewDraft',
+  },
 } as const;
 
 export function isInstitutionalRole(team: string): team is InstitutionalRoleId {
@@ -230,6 +243,10 @@ export interface InstitutionalCommandFixture {
   readonly readStaged: () => unknown;
   readonly currentSources: () => readonly InstitutionalBriefSource[];
   readonly withStableParents: <T>(operation: () => Promise<T>) => Promise<T>;
+}
+
+interface InstitutionalAccessibilityFixture extends InstitutionalCommandFixture {
+  readonly currentAccessibilityReview: () => unknown;
 }
 
 interface InstitutionalServiceMonitoringFixture extends InstitutionalCommandFixture {
@@ -333,15 +350,20 @@ export async function selectSyntheticInstitutionalJ1Monitoring(fixture: Institut
   return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J1_MONITORING_TEAM, { currentServiceMonitoring: fixture.currentServiceMonitoring });
 }
 
+export async function selectSyntheticInstitutionalAccessibility(fixture: InstitutionalAccessibilityFixture): Promise<TeamDefinition> {
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_ACCESSIBILITY_TEAM, { currentAccessibilityReview: fixture.currentAccessibilityReview });
+}
+
 async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFixture, teamId: InstitutionalRoleId, {
-  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence, currentLibraryRemits, currentLibraryRemitTime, currentInventory, currentBudget, currentServiceMonitoring,
+  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence, currentLibraryRemits, currentLibraryRemitTime, currentInventory, currentBudget, currentServiceMonitoring, currentAccessibilityReview,
 }: { authority?: InstitutionalActionRegisterFixture['actionAuthority']; currentObservation?: () => unknown;
   findingsAuthority?: InstitutionalFindingsFixture['findingsAuthority']; currentCatalogue?: () => unknown; currentBusinessServices?: () => unknown; currentPlanningEvidence?: () => unknown;
-  currentLibraryRemits?: () => unknown; currentLibraryRemitTime?: () => unknown; currentInventory?: () => unknown; currentBudget?: () => unknown; currentServiceMonitoring?: () => unknown } = {}): Promise<TeamDefinition> {
+  currentLibraryRemits?: () => unknown; currentLibraryRemitTime?: () => unknown; currentInventory?: () => unknown; currentBudget?: () => unknown; currentServiceMonitoring?: () => unknown; currentAccessibilityReview?: () => unknown } = {}): Promise<TeamDefinition> {
   const exact = await captureInstitutionalBinding(fixture.root, teamId);
   if (!readInstitutionalRoleBinding(fixture.readStaged(), exact) || typeof fixture.withStableParents !== 'function' ||
       typeof fixture.currentSources !== 'function' || typeof fixture.currentActionSettings !== 'function' || !fixture.runId || !fixture.model ||
       !/^[a-f0-9]{64}$/.test(fixture.policyHash) || (teamId === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM && !authority) ||
+      (teamId === INSTITUTIONAL_ACCESSIBILITY_TEAM && typeof currentAccessibilityReview !== 'function') ||
       (teamId === INSTITUTIONAL_J1_MONITORING_TEAM && typeof currentServiceMonitoring !== 'function') ||
       (teamId === INSTITUTIONAL_J8_BUDGET_TEAM && typeof currentBudget !== 'function') ||
       (teamId === INSTITUTIONAL_J4_INVENTORY_TEAM && typeof currentInventory !== 'function') ||
@@ -399,6 +421,11 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
     try { return admittedInstitutionalServiceMonitoring(currentServiceMonitoring(), binding, currentSources()); }
     catch { return { state: 'unavailable', records: [] } as const; }
   });
+  const accessibility = currentAccessibilityReview && (() => {
+    try { return admittedInstitutionalAccessibility(currentAccessibilityReview(), binding, currentSources()); }
+    catch { throw new ToolError(institutionalCatalogueUnavailable); }
+  });
+  accessibility?.();
   serviceMonitoring?.();
   budget?.();
   inventory?.();
@@ -498,7 +525,7 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
   }
   fixtureSelections.set(team, { fixture: provider, scope: Object.freeze({
     root: fixture.root, binding, withStableParents: fixture.withStableParents, currentSources, stagedIsCurrent,
-    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}), ...(libraryRemits ? { libraryRemits } : {}), ...(inventory ? { inventory } : {}), ...(budget ? { budget } : {}), ...(serviceMonitoring ? { serviceMonitoring } : {}),
+    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}), ...(libraryRemits ? { libraryRemits } : {}), ...(inventory ? { inventory } : {}), ...(budget ? { budget } : {}), ...(serviceMonitoring ? { serviceMonitoring } : {}), ...(accessibility ? { accessibility } : {}),
     bindingIsCurrent: async () => {
       const sampled = await captureInstitutionalBinding(provider.root, teamId);
       return sampled.directoryDigest === exact.directoryDigest && stagedIsCurrent();
@@ -639,10 +666,11 @@ export async function institutionalChildTools(
   const approvedInventory = scope.inventory?.();
   const approvedBudget = scope.budget?.();
   const approvedServiceMonitoring = scope.serviceMonitoring?.();
+  const approvedAccessibility = scope.accessibility?.();
   const approvedMetadata = approvedCatalogue ?? approvedBusinessServices ?? approvedPlanningEvidence ?? approvedLibraryRemits ??
-    approvedInventory ?? approvedBudget ?? approvedServiceMonitoring;
+    approvedInventory ?? approvedBudget ?? approvedServiceMonitoring ?? approvedAccessibility;
   const currentMetadata = scope.catalogue ?? scope.businessServices ?? scope.planningEvidence ?? scope.libraryRemits ??
-    scope.inventory ?? scope.budget ?? scope.serviceMonitoring;
+    scope.inventory ?? scope.budget ?? scope.serviceMonitoring ?? scope.accessibility;
   const metadataDigest = approvedMetadata && institutionalBriefDigest(canonicalBytes(approvedMetadata));
   const accepted = scope.actionRegister?.current();
   const approvedObservation = scope.observation?.current();
@@ -685,6 +713,7 @@ export async function institutionalChildTools(
       if (approvedInventory) catalogueDraft = prepareInstitutionalInventory(raw, scope.binding, sources, approvedInventory);
       if (approvedBudget) catalogueDraft = prepareInstitutionalBudget(raw, scope.binding, sources, approvedBudget);
       if (approvedServiceMonitoring) catalogueDraft = prepareInstitutionalServiceMonitoring(raw, scope.binding, sources, approvedServiceMonitoring);
+      if (approvedAccessibility) catalogueDraft = prepareInstitutionalAccessibility(raw, scope.binding, sources, approvedAccessibility);
     } catch { throw new ToolError(institutionalCatalogueUnavailable); }
     const draft = catalogueDraft ?? (approvedFindings ? prepareInstitutionalFindings(raw, scope.binding, sources, approvedFindings)
       : approvedObservation ? prepareInstitutionalObservation(raw, scope.binding, sources, approvedObservation)
@@ -692,6 +721,12 @@ export async function institutionalChildTools(
       : prepareInstitutionalBrief(raw, scope.binding, sources));
     draft.review.sources.forEach(Object.freeze);
     Object.freeze(draft.review.sources);
+    if (draft.review.kind === 'accessibility-review') {
+      Object.freeze(draft.review.sheet.evidence);
+      Object.freeze(draft.review.sheet);
+      Object.freeze(draft.review.adviser);
+      Object.freeze(draft.review.productOwner);
+    }
     if (draft.review.kind === 'service-monitoring') {
       Object.freeze(draft.review.supervisor);
       Object.freeze(draft.review.feedCustodian);
@@ -725,7 +760,8 @@ export async function institutionalChildTools(
     return Object.freeze(draft);
   };
   const read: AgentTool<string> = {
-    name: readEvidence, description: approvedServiceMonitoring ? 'Read the approved fictional office help aggregate by opaque ID.'
+    name: readEvidence, description: approvedAccessibility ? 'Read one authorized fictional help-sheet observation by opaque ID.'
+      : approvedServiceMonitoring ? 'Read the approved fictional office help aggregate by opaque ID.'
       : approvedBudget ? 'Read authorized fictional office budget evidence by opaque ID.'
       : approvedInventory ? 'Read one authorized fictional office count and register entry by opaque ID.'
       : approvedLibraryRemits ? 'Read one authorized fictional library service remit by opaque ID.'
@@ -745,7 +781,7 @@ export async function institutionalChildTools(
       if (Object.keys(raw).length !== 1 || typeof raw.sourceId !== 'string' || !quoteSources.some((source) => source.id === raw.sourceId)) throw new ToolError('This evidence is unavailable.');
       return raw.sourceId;
     },
-    title: () => approvedServiceMonitoring ? 'Read approved office help aggregate' : approvedBudget ? 'Read approved office budget evidence' : approvedInventory ? 'Read approved office inventory evidence' : approvedLibraryRemits ? 'Read approved library service remit' : approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
+    title: () => approvedAccessibility ? 'Read approved help-sheet observation' : approvedServiceMonitoring ? 'Read approved office help aggregate' : approvedBudget ? 'Read approved office budget evidence' : approvedInventory ? 'Read approved office inventory evidence' : approvedLibraryRemits ? 'Read approved library service remit' : approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
       : approvedCatalogue ? 'Read approved record metadata' : 'Read admitted brief evidence',
     async forbidden(_id, context) { return approvedMetadata || await fresh(context) ? undefined : stale; },
     async run(id, context) {
@@ -778,7 +814,8 @@ export async function institutionalChildTools(
     },
   };
   const save: AgentTool<PreparedInstitutionalDraft> = {
-    name: saveDraft, description: approvedServiceMonitoring ? 'Save the approved fictional office help aggregate for human validation.'
+    name: saveDraft, description: approvedAccessibility ? 'Save the fictional help-sheet accessibility review for its human adviser and product owner.'
+      : approvedServiceMonitoring ? 'Save the approved fictional office help aggregate for human validation.'
       : approvedBudget ? 'Save fictional office budget evidence for the human finance reporting officer.'
       : approvedInventory ? 'Save a fictional office inventory comparison for the human property custodian.'
       : approvedLibraryRemits ? 'Save a fictional library service remit comparison for the human liaison lead.'
@@ -792,7 +829,7 @@ export async function institutionalChildTools(
     manifest: declareManifest({ tool: saveDraft, effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_ONLY }),
     fixtureGate: (draft) => ({ policyHash, currentActionSettings, effect: { verb: 'workspaceWrite', path: draft.path } }),
     parse: project,
-    title: () => approvedServiceMonitoring ? 'Save local office help aggregate draft' : approvedBudget ? 'Save local office budget evidence draft' : approvedInventory ? 'Save local office inventory reconciliation draft' : approvedLibraryRemits ? 'Save local library remit comparison draft' : approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
+    title: () => approvedAccessibility ? 'Save local help-sheet accessibility draft' : approvedServiceMonitoring ? 'Save local office help aggregate draft' : approvedBudget ? 'Save local office budget evidence draft' : approvedInventory ? 'Save local office inventory reconciliation draft' : approvedLibraryRemits ? 'Save local library remit comparison draft' : approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
       : approvedCatalogue ? 'Save local records catalogue draft' : approvedFindings ? 'Save local candidate findings draft' : approvedObservation ? 'Save local observation draft' : accepted ? 'Save local action register draft' : 'Save local decision brief draft',
     async forbidden(draft, context) {
       const unavailable = approvedMetadata ? institutionalCatalogueUnavailable : stale;
