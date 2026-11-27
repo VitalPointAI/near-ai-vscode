@@ -18,6 +18,9 @@
       "frontend": "lib/browser/sterling-welcome-module"
     },
     {
+      "frontend": "lib/browser/sterling-locale-module"
+    },
+    {
       "frontend": "lib/browser/sterling-documentation-module"
     },
     {

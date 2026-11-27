@@ -28,6 +28,87 @@
   const READ_ONLY = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall', 'Remember'];
   const READ_EDIT = READ_ONLY.concat(['Write', 'Edit']);
 
+  const STAFF_COPY = {
+    'en-CA': {
+      entry: 'Set up staff',
+      title: 'Staff setup preview',
+      waiting: 'Waiting for a project…',
+      noProfile: 'No staff profile is saved for this project.',
+      modelLocation: 'Model location unavailable until project setup records a policy.',
+      scope: 'Staff setup scope',
+      section: 'One section',
+      complete: 'Complete staff',
+      coverage: 'Review the coverage for this project. Whole-staff setup is unavailable.',
+      handoff: 'Continue in the editor’s setup questions.',
+      applied: 'The section is set up.',
+      held: 'Setup did not finish. Review the project to try again.',
+      reviewAgain: 'Review again',
+      continue: 'Continue to section setup',
+      leave: 'Leave setup',
+      ready: 'Staff setup preview ready.',
+      decision: 'Section lead. Appointment unverified.',
+      errors: {
+        projectChanged: 'The project changed. Review the new plan before setting up staff.',
+        noProject: 'Open a project to set up its staff.',
+        noSelection: 'Choose a project to see its staff setup.',
+        previewFailed: 'Staff setup did not finish. Review the project and try again.'
+      },
+      statuses: {
+        noTemplate: 'Setup unavailable. No agent team template is available.',
+        linked: 'Linked agent team. Review before retaining or replacing it.',
+        unverified: 'The linked agent team could not be verified.',
+        available: 'Section template available. Whole-staff changes require review.',
+        incompatible: 'Setup unavailable for this staff profile and level.'
+      },
+      profiles: { 'us-joint': 'US Joint', 'us-army': 'US Army', 'nato-ca': 'NATO/Canadian' },
+      levels: { strategic: 'Strategic', operational: 'Operational', tactical: 'Tactical' },
+      sections: {
+        command: 'Command group and chief of staff', j1: 'Personnel', j2: 'Intelligence', j3: 'Operations',
+        j4: 'Logistics', j5: 'Plans', j6: 'Communications and CIS', j7: 'Training and lessons',
+        j8: 'Resources and finance', j9: 'Civil-military cooperation', 'special-staff': 'Special staff'
+      }
+    },
+    'fr-CA': {
+      entry: 'Configurer l’état-major',
+      title: 'Aperçu de la configuration de l’état-major',
+      waiting: 'En attente d’un projet…',
+      noProfile: 'Ce projet n’a aucun profil d’état-major enregistré.',
+      modelLocation: 'Le lieu d’exécution des modèles sera disponible une fois la politique du projet enregistrée.',
+      scope: 'Portée de la configuration de l’état-major',
+      section: 'Une section',
+      complete: 'État-major complet',
+      coverage: 'Examinez les sections couvertes pour ce projet. La configuration de tout l’état-major est indisponible.',
+      handoff: 'Poursuivez en répondant aux questions dans l’éditeur.',
+      applied: 'La section est configurée.',
+      held: 'La configuration n’a pas abouti. Examinez le projet avant de réessayer.',
+      reviewAgain: 'Examiner de nouveau',
+      continue: 'Poursuivre la configuration de la section',
+      leave: 'Quitter la configuration',
+      ready: 'L’aperçu de la configuration de l’état-major est prêt.',
+      decision: 'Chef de section. Titulaire du poste à confirmer.',
+      errors: {
+        projectChanged: 'Le projet a changé. Examinez le nouveau plan avant de configurer l’état-major.',
+        noProject: 'Ouvrez un projet pour configurer son état-major.',
+        noSelection: 'Choisissez un projet pour voir la configuration de son état-major.',
+        previewFailed: 'La configuration de l’état-major n’a pas abouti. Examinez le projet et réessayez.'
+      },
+      statuses: {
+        noTemplate: 'Configuration indisponible. Aucun modèle d’équipe n’est disponible.',
+        linked: 'Équipe liée. Examinez-la avant de la conserver ou de la remplacer.',
+        unverified: 'Impossible de vérifier l’équipe liée.',
+        available: 'Modèle de section disponible. Les changements touchant tout l’état-major exigent un examen.',
+        incompatible: 'Configuration indisponible pour ce profil et ce niveau d’état-major.'
+      },
+      profiles: { 'us-joint': 'Forces interarmées des États-Unis', 'us-army': 'Armée de terre des États-Unis', 'nato-ca': 'OTAN/Canada' },
+      levels: { strategic: 'Stratégique', operational: 'Opérationnel', tactical: 'Tactique' },
+      sections: {
+        command: 'Groupe de commandement et chef d’état-major', j1: 'Personnel', j2: 'Renseignement', j3: 'Opérations',
+        j4: 'Logistique', j5: 'Plans', j6: 'Communications et SIC', j7: 'Instruction et leçons retenues',
+        j8: 'Ressources et finances', j9: 'Coopération civilo-militaire', 'special-staff': 'État-major spécial'
+      }
+    }
+  };
+
   let ctx = null;
   let lib = { teams: [], archived: [] };
   // Every starting point the new-team picker offers (the host builds it: the person's saved teams, then the built-in ones), and which of them it shows.
@@ -38,6 +119,7 @@
   let savedDraft = null;
   let work = null; // the team being built or edited
   let staffPreview;
+  let staffLocale = 'en-CA';
   let staffPreviewRequest = 0;
   let seq = 0;
   let reviewTimer = null;
@@ -155,7 +237,7 @@
   const slugify = (value) => String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
   const when = (iso) => { if (!iso) return ''; const date = new Date(iso); return isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); };
   const clone = (value) => JSON.parse(JSON.stringify(value));
-  const announce = (text) => { const node = $('announce'); node.textContent = ''; node.textContent = text; };
+  const announce = (text, locale = 'en-CA') => { const node = $('announce'); node.setAttribute('lang', locale); node.textContent = ''; node.textContent = text; };
 
   function showBanner(text, level, actions) {
     const node = $('banner');
@@ -557,7 +639,9 @@
     // 0.4.19 review: it said "This takes a few minutes", and six members on three models can run for hours. The host asks first and states the ceiling
     // worked out from the runs, so the button only says the run is coming, not how long it takes.
     actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost', id: 'optimise-all' }));
-    actions.append(button('Set up staff', openStaffPreview, { id: 'staff-preview-open' }));
+    const staffEntry = button(STAFF_COPY[staffLocale].entry, openStaffPreview, { id: 'staff-preview-open' });
+    staffEntry.setAttribute('lang', staffLocale);
+    actions.append(staffEntry);
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
@@ -2317,31 +2401,33 @@
   }
 
   function renderStaffPreview(root) {
+    const copy = STAFF_COPY[staffLocale];
     const panel = el('section', 'panel staff-preview');
-    const title = el('h2', '', 'Staff setup preview');
+    panel.setAttribute('lang', staffLocale);
+    const title = el('h2', '', copy.title);
     title.id = 'staff-preview-title';
     title.setAttribute('tabindex', '-1');
     panel.setAttribute('aria-labelledby', title.id);
     panel.append(title);
     const { data, scope, busy, finished, section } = staffPreview;
     if (data?.error) {
-      panel.append(el('p', '', data.error));
+      panel.append(el('p', '', copy.errors[data.error]));
     } else if (!data) {
-      panel.append(el('p', 'hint', 'Waiting for a project…'));
+      panel.append(el('p', 'hint', copy.waiting));
     } else {
       panel.append(el('h3', '', data.project));
-      if (data.profile) panel.append(el('p', '', data.profile + ' · ' + data.level));
-      else panel.append(el('p', '', 'No staff profile is saved for this project.'));
-      panel.append(el('p', 'hint', data.modelLocation));
+      if (data.profile) panel.append(el('p', '', copy.profiles[data.profile] + ' · ' + copy.levels[data.level]));
+      else panel.append(el('p', '', copy.noProfile));
+      panel.append(el('p', 'hint', copy.modelLocation));
       const scopes = el('div', 'actions staff-preview-scopes');
       scopes.setAttribute('role', 'group');
-      scopes.setAttribute('aria-label', 'Staff setup scope');
-      for (const [value, label] of [['section', 'One section'], ['complete', 'Complete staff']]) {
+      scopes.setAttribute('aria-label', copy.scope);
+      for (const [value, label] of [['section', copy.section], ['complete', copy.complete]]) {
         const control = button(label, () => {
           staffPreview.scope = value;
           pendingFocus = 'staff-preview-title';
           render();
-        });
+        }, { id: 'staff-scope-' + value });
         control.setAttribute('aria-pressed', String(scope === value));
         control.disabled = Boolean(busy);
         scopes.append(control);
@@ -2351,8 +2437,10 @@
       for (const row of data.rows) {
         if (scope === 'section' && !row.template) continue;
         const card = el('li', '', '');
+        const name = copy.sections[row.id];
+        const label = row.code ? row.code + ' ' + name : name;
         if (scope === 'section') {
-          const pick = button(row.label, () => {
+          const pick = button(label, () => {
             staffPreview.section = row.id;
             pendingFocus = 'staff-section-' + row.id;
             render();
@@ -2361,31 +2449,31 @@
           pick.disabled = Boolean(busy);
           card.append(pick);
         } else {
-          card.append(el('h4', '', row.label));
+          card.append(el('h4', '', label));
         }
-        card.append(el('p', '', row.status));
+        card.append(el('p', '', copy.statuses[row.status]));
         if (row.team) card.append(el('p', '', row.team));
-        if (row.decisionRole) card.append(el('p', 'hint', row.decisionRole));
+        if (row.decisionRole) card.append(el('p', 'hint', copy.decision));
         rows.append(card);
       }
-      if (scope === 'complete') panel.append(el('p', 'hint', 'Review the coverage for this project. Whole-staff setup is unavailable.'));
+      if (scope === 'complete') panel.append(el('p', 'hint', copy.coverage));
       panel.append(rows);
-      if (busy) panel.append(el('p', 'hint', 'Continue in the editor’s setup questions.'));
+      if (busy) panel.append(el('p', 'hint', copy.handoff));
       else if (finished) {
-        panel.append(el('p', '', finished === 'applied' ? 'The section is set up.' : 'Setup did not finish. Review the project to try again.'));
-        if (finished !== 'applied') panel.append(button('Review again', openStaffPreview));
+        panel.append(el('p', '', finished === 'applied' ? copy.applied : copy.held));
+        if (finished !== 'applied') panel.append(button(copy.reviewAgain, openStaffPreview, { id: 'staff-preview-review' }));
       } else if (scope === 'section') {
-        const next = button('Continue to section setup', () => {
+        const next = button(copy.continue, () => {
           staffPreview.busy = true;
           vscode.postMessage({ type: 'staff-preview-continue', request: staffPreview.request, session: data.session, section });
-          announce('Continue in the editor’s setup questions.');
+          announce(copy.handoff, staffLocale);
           render();
         }, { primary: true, id: 'staff-preview-continue' });
         next.disabled = !section;
         panel.append(next);
       }
     }
-    panel.append(button('Leave setup', leaveStaffPreview, { id: 'staff-preview-leave' }));
+    panel.append(button(copy.leave, leaveStaffPreview, { id: 'staff-preview-leave' }));
     root.append(panel);
   }
 
@@ -2395,7 +2483,7 @@
     leaveStaffPreview();
   });
 
-  function render() {
+  function render(restoreFocus = true) {
     const active = document.activeElement && document.activeElement.id;
     slots.length = 0;
     renderHeader();
@@ -2412,7 +2500,7 @@
     const target = pendingFocus || active;
     pendingFocus = null;
     const node = target && $(target);
-    if (node && node.focus) node.focus();
+    if (restoreFocus && node && node.focus) node.focus();
     measureSoon();
   }
 
@@ -2433,11 +2521,25 @@
     // Only under the extension-host tests, which load the layout probe: report this page's layout.
     if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (message.type) {
+      case 'staff-preview-locale': {
+        const locale = message.locale;
+        if ((locale !== 'fr-CA' && locale !== 'en-CA') || locale === staffLocale) break;
+        staffLocale = locale;
+        if (staffPreview) render(typeof document.hasFocus !== 'function' || document.hasFocus());
+        else {
+          const entry = $('staff-preview-open');
+          if (entry) {
+            entry.textContent = STAFF_COPY[locale].entry;
+            entry.setAttribute('lang', locale);
+          }
+        }
+        break;
+      }
       case 'staff-preview-state':
         if (staffPreview?.request !== message.request) break;
         staffPreview.data = message;
         staffPreview.busy = false;
-        announce(message.error || 'Staff setup preview ready.');
+        announce(message.error ? STAFF_COPY[staffLocale].errors[message.error] : STAFF_COPY[staffLocale].ready, staffLocale);
         render();
         break;
       case 'staff-preview-result':
@@ -2445,7 +2547,7 @@
         staffPreview.busy = false;
         staffPreview.finished = message.applied ? 'applied' : 'held';
         pendingFocus = message.applied ? 'staff-preview-title' : 'staff-section-' + staffPreview.section;
-        announce(message.applied ? 'The section is set up.' : 'Setup did not finish. Review the project to try again.');
+        announce(message.applied ? STAFF_COPY[staffLocale].applied : STAFF_COPY[staffLocale].held, staffLocale);
         render();
         break;
       case 'state':

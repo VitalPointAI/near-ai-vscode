@@ -300,6 +300,39 @@ test('Studio staff setup confirms the selected physical project and holds change
   });
 });
 
+test('Studio staff setup localizes one picker at a time and keeps the same confirmation and project', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'studio-staff-language-')));
+  const file = path.join(root, '.planning', '.near-ai', 'project.json');
+  const bytes = JSON.stringify({ custom: 'preserve' });
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, bytes);
+  const { stub, setUpStaffTeam, uninstall } = staffSetupVscode();
+  let locale: 'en-CA' | 'fr-CA' = 'fr-CA';
+  try {
+    const window = (stub.vscode as typeof import('vscode')).window;
+    const pick = window.showQuickPick as (items: unknown, options: { title?: string }) => Promise<unknown>;
+    Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async (items: unknown, options: { title?: string }) => {
+      if (options.title?.endsWith('(2/6)')) locale = 'en-CA';
+      if (options.title?.endsWith('(6/6)')) locale = 'fr-CA';
+      return pick(items, options);
+    } });
+    stub.quickPickAnswers.push('Forces interarmées des États-Unis', 'Operational', 'Campaign', 'Local runtime only', undefined);
+    const outcome = await setUpStaffTeam({
+      library: new TeamLibrary(path.join(root, 'library')), section: 'j4', language: () => locale,
+      studio: { root, name: 'Project Écho', projectJson: bytes, isCurrent: () => true, isSameDirectory: () => true, isPrimary: () => true }
+    });
+    assert.equal(outcome, undefined);
+    assert.match(stub.quickPickRequests[0].title ?? '', /Configurer une équipe d’état-major/);
+    assert.match(stub.quickPickRequests[1].title ?? '', /Set up a staff team/);
+    const review = stub.quickPickRequests.at(-1)!;
+    assert.match(review.title ?? '', /vérifier la composition/);
+    assert.match(review.items[0].detail ?? '', /Projet : Project Écho/);
+    assert.match(review.items[0].label, /Configurer l’équipe/);
+    assert.equal(await readFile(file, 'utf8'), bytes);
+    assert.deepEqual(await readdir(path.join(root, '.planning')), ['.near-ai']);
+  } finally { uninstall(); }
+});
+
 test('ordinary Staff Setup only offers shipped templates and refuses an unexpected fixture choice', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'staff-setup-ordinary-')));
   const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
@@ -604,7 +637,7 @@ test('Team Studio keeps the legacy host message and opens its chooser from the b
   assert.deepEqual(parseStudioMessage({ type: 'staff-setup' }), { type: 'staff-setup' });
   assert.equal(parseStudioMessage({ type: 'staff-setup', extra: 1 }), undefined);
   const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'teams', 'teams.js'), 'utf8');
-  assert.match(page, /button\('Set up staff', openStaffPreview/);
+  assert.match(page, /button\(STAFF_COPY\[staffLocale\]\.entry, openStaffPreview/);
   assert.match(page, /type: 'staff-preview-open'/);
   assert.match(page, /type: 'staff-preview-continue'/);
   const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'teams', 'teams.css'), 'utf8');

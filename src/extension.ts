@@ -50,6 +50,7 @@ import { openCyberPanel } from './services/cyberPanel';
 import { cyberPanelService } from './services/cyberService';
 import { registerModelComparison } from './services/modelComparisonPanel';
 import { openTeamStudio } from './services/teamStudioPanel';
+import { createTeamStudioLocale } from './services/teamStudioStaffSetup';
 import { historyItems, LOCKED_DETAIL, threadStoreFor } from './services/threadStore';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
@@ -233,7 +234,10 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerStaffSetup(context, { chat: sidebar });
   registerStaffSimulation(context);
   registerStaffImport(context);
-  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
+  const studioLanguage = createTeamStudioLocale(() => vscode.commands.executeCommand('sterling.locale.readUser'));
+  context.subscriptions.push(vscode.commands.registerCommand('nearAi.refreshStudioLanguage', () => studioLanguage.refresh()));
+  void studioLanguage.refresh();
+  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate, studioLanguage));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
   // Project sync (D-17): the commands, the safe moments it runs at, and the status the chat panel's control shows. It runs only once the person has turned it on.
