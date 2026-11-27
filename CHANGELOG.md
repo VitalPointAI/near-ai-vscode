@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The Workbench setup check reports available space on the filesystem it can see at Docker's
+  configured data directory, alongside the CPU and memory readings.
+
 ## 0.4.39
 
 Sterling Sovereign AI (SovAI) is now the product's name everywhere, and the Sterling workbench
