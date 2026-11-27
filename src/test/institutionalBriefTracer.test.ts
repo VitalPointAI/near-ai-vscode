@@ -17,6 +17,7 @@ import { bundleHash } from '../domain/gate/bundle';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
 import { institutionalSourceHash, type InstitutionalBriefSource } from './helpers/institutional/institutionalBrief';
+import { prepareInstitutionalRenditions } from './helpers/institutional/institutionalRenditions';
 import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload } from '../domain/team/signedPayload';
 import { setCasProbe } from '../staff/staffFiles';
@@ -1545,6 +1546,30 @@ test('registered G9 preserves independent library mandates and holds the exact c
   }
   assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'library-remits')?.unmapped.nearAi.capability,
     { verb: 'workspaceWrite', paths: [`${remitDirectory}/${name}`] });
+
+  assert.equal(review.kind, 'library-service-remits');
+  const english = { title: 'Library services', text: 'Both services register readers. The overlap remains unresolved.' };
+  const french = { title: 'Services de bibliothèque', text: 'Les deux services inscrivent les lecteurs. Le chevauchement reste à clarifier.' };
+  const pair = prepareInstitutionalRenditions(review, { 'en-CA': english, 'fr-CA': french });
+  assert.equal(pair.manifest.sourceVersion, review.version);
+  assert.deepEqual(pair.manifest.sources, review.sources);
+  assert.deepEqual(pair.manifest.renditions.map(({ language }) => language), ['en-CA', 'fr-CA']);
+  assert.equal(pair.digest, createHash('sha256').update(canonicalBytes(pair.manifest)).digest('hex'));
+  assert.equal(pair.digest, prepareInstitutionalRenditions(review, { 'fr-CA': french, 'en-CA': english }).digest);
+  const enriched = { ...review, sources: review.sources.map((reference) => ({ ...reference, text: sources[2].text })) };
+  assert.deepEqual(prepareInstitutionalRenditions(enriched, { 'en-CA': english, 'fr-CA': french }).manifest, pair.manifest);
+  assert.notEqual(pair.digest, prepareInstitutionalRenditions(review, {
+    'en-CA': english, 'fr-CA': { ...french, text: french.text + ' Une précision.' },
+  }).digest);
+  assert.notEqual(pair.digest, prepareInstitutionalRenditions({ ...review, version: 'a'.repeat(64) }, {
+    'en-CA': english, 'fr-CA': french,
+  }).digest);
+  assert.throws(() => prepareInstitutionalRenditions(review, { 'en-CA': english }));
+  assert.throws(() => prepareInstitutionalRenditions(review, { 'en-CA': english, 'fr-CA': french, 'fr-FR': french }));
+  assert.throws(() => prepareInstitutionalRenditions(review, {
+    'en-CA': { ...english, text: 'é'.repeat(128 * 1024) }, 'fr-CA': french,
+  }));
+  assert.ok(!JSON.stringify(pair).includes(sources[2].text));
 
   const expiredRead = await runFixture(fixture, team, {
     steps: [toolCall('expired-library-read', readRemit, { recordId: firstId })],
