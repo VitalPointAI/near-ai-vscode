@@ -172,6 +172,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       await setEmergencyStop(false);
       void vscode.window.showInformationMessage('SovAI resumed.');
     }),
+    vscode.commands.registerCommand('nearAi.getSovAiVersion', (...args: unknown[]): string | undefined => {
+      if (args.length !== 0) return undefined;
+      const version: unknown = context.extension.packageJSON.version;
+      return typeof version === 'string' && version.length > 0 && version.length <= 128 ? version : undefined;
+    }),
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
     vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth, sidebar)),
