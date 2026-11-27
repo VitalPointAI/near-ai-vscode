@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -25,6 +25,10 @@ import { newTestConversation, testBundleState, testGateRuntime } from './helpers
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const planningTeam = 'institutional-j5-evidence-assumptions-v1';
+const planningDirectory = '.planning/staff/institutional/j5/evidence-assumptions';
+const readPlanningEvidence = 'ReadInstitutionalPlanningEvidence';
+const savePlanningRegister = 'SaveInstitutionalPlanningRegisterDraft';
 const businessServicesTeam = 'institutional-j6-business-services-v1';
 const businessServicesDirectory = '.planning/staff/institutional/j6/business-services';
 const readBusinessService = 'ReadInstitutionalBusinessService';
@@ -189,7 +193,7 @@ async function runFixture(
         results.push(message.content);
         toolResults.set(message.tool_call_id, message.content);
       }
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -197,14 +201,14 @@ async function runFixture(
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
-        if (team.slug === catalogueTeam || team.slug === businessServicesTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
+        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -1258,4 +1262,133 @@ test('registered G6 drafts the authorized office service and leaves missing owne
     assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
     assert.deepEqual(await readdir(directory), [file]);
   } finally { setCasProbe(undefined); }
+});
+
+
+test('registered G5 preserves estimate and assumption status and holds an exact withdrawn revision', async () => {
+  const subject = await newFixture();
+  const root = subject.fixture.root;
+  const label = 'Institutional G5 Evidence and Assumptions';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: planningTeam, keySegment: 'j5EvidenceAssumptions',
+    checkPrompts(requests) {
+      assert.match(requests[0].items.find((item) => item.label === label)?.detail ?? '', /fictional plan owner/i);
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(check) Set up the team')?.detail ?? '', /evidence and assumptions register draft skill/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional plan owner')?.detail ?? '', /decides whether to carry unresolved assumptions/i);
+    },
+  });
+  const directory = path.join(root, planningDirectory);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const source = (id: string, revision: string, text: string): InstitutionalBriefSource => ({
+    id, revision, date: '2026-11-02', label: 'org/Public', project, text, spans: [{ start: 0, end: text.length }],
+  });
+  const sources = [
+    source('office-plan-owner-note', 'r1', 'The fictional plan owner approves this evidence-register scope.'),
+    source('office-asset-tally', 'r1', 'The fictional records branch attests its source tally.'),
+    source('office-estimate-r4', 'r4', 'The fictional records branch supplied a staff time estimate.'),
+  ];
+  const sourceRef = ({ id: sourceId, revision }: InstitutionalBriefSource, role: string) => ({ sourceId, revision, role });
+  const owner = sourceRef(sources[0], 'fictional-plan-owner');
+  const factSource = sourceRef(sources[1], 'fictional-records-evidence-owner');
+  const estimateSource = sourceRef(sources[2], 'fictional-records-evidence-owner');
+  const factId = 'item-06f00001';
+  const estimateId = 'item-06f00002';
+  const assumptionId = 'item-06f00003';
+  const unknownId = 'item-06f00004';
+  const hiddenId = 'item-06f00005';
+  const estimateBasis = 'The fictional index sample informed the staffing estimate.';
+  const hiddenText = 'Unshared office planning entry';
+  const rows = [
+    { id: factId, kind: 'fact', statement: 'The reviewed office inventory contains eligible documents.', evidence: factSource,
+      quantity: { value: 42, unit: 'documents' } },
+    { id: estimateId, kind: 'estimate', statement: 'Estimated staff time for document review.', evidence: estimateSource,
+      quantity: { value: 14, unit: 'staff-hours', basis: estimateBasis, date: '2026-11-02' } },
+    { id: assumptionId, kind: 'assumption', statement: 'The office archive labels are assumed to be legible.', evidence: factSource,
+      accountableRole: 'fictional-records-reviewer', reviewDate: '2026-12-10' },
+    { id: unknownId, kind: 'fact', statement: 'The additional document count has yet to be confirmed.', evidence: factSource },
+    { id: hiddenId, kind: 'fact', statement: hiddenText, evidence: factSource },
+  ];
+  const receipt = {
+    project, directory: staged.directoryDigest, purpose: 'fictional-office-migration-j5-03', requester: 'fictional-planning-reviewer',
+    policyRevision: 'planning-r1', productId: 'office-migration-evidence', sourceCutoff: '2026-11-02', planOwner: owner,
+    recordIds: [factId, estimateId, assumptionId, unknownId],
+  };
+  let currentReceipt = receipt;
+  let activeSources = sources;
+  const withdrawEstimate = () => { activeSources = sources.map((entry) => entry.id === estimateSource.sourceId ? { ...entry, revision: 'r5' } : entry); };
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => activeSources,
+    currentPlanningEvidence: () => ({ receipt: currentReceipt, rows }) };
+  const team = await selectSyntheticInstitutionalJ5Evidence(fixture);
+  const args = { productId: receipt.productId, recordIds: receipt.recordIds };
+  const valid = await runFixture(fixture, team, { steps: [
+    toolCall('planning-estimate', readPlanningEvidence, { recordId: estimateId }),
+    toolCall('hidden-planning-record', readPlanningEvidence, { recordId: hiddenId }),
+    toolCall('missing-planning-record', readPlanningEvidence, { recordId: 'item-06f00006' }),
+    toolCall('refuse-model-decision', savePlanningRegister, { ...args, approval: true, rationale: 'Accept the assumption.' }),
+    toolCall('planning-register', savePlanningRegister, args),
+  ] });
+  assert.deepEqual(valid.offers[0], [readPlanningEvidence, savePlanningRegister].sort());
+  const unavailable = valid.toolResults.get('hidden-planning-record');
+  assert.ok(unavailable);
+  assert.match(unavailable, /unavailable/i);
+  assert.equal(valid.toolResults.get('missing-planning-record'), unavailable);
+  assert.equal(valid.toolResults.get('refuse-model-decision'), unavailable);
+  const [name] = await readdir(directory);
+  assert.ok(name);
+  const bytes = await readFile(path.join(directory, name));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(name, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'J5-03');
+  assert.equal(draft.sourceCutoff, receipt.sourceCutoff);
+  assert.equal(draft.planOwner.role, owner.role);
+  assert.equal(draft.planDecision, 'pending');
+  const [fact, estimate, assumption, unknown] = draft.body.records;
+  assert.equal(fact.kind, 'fact');
+  assert.equal(fact.validation, 'attested');
+  assert.equal(fact.quantity.value, 42);
+  assert.equal(estimate.kind, 'estimate');
+  assert.equal(estimate.validation, 'estimated');
+  assert.deepEqual(estimate.quantity, rows[1].quantity);
+  assert.equal(estimate.evidence[0].revision, 'r4');
+  assert.deepEqual(estimate, JSON.parse(valid.toolResults.get('planning-estimate')!));
+  assert.equal(assumption.kind, 'assumption');
+  assert.equal(assumption.validation, 'open');
+  assert.equal(assumption.accountableRole, 'fictional-records-reviewer');
+  assert.equal(assumption.reviewDate, '2026-12-10');
+  assert.equal(unknown.validation, 'unresolved');
+  assert.equal(unknown.quantity, null);
+  assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'planning-register')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${planningDirectory}/${name}`] });
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+  for (const hidden of [hiddenId, hiddenText, sources[2].text]) {
+    assert.ok(!JSON.stringify([valid.catalogueOffers[0], valid.results, draft, review]).includes(hidden));
+  }
+
+  const staleRead = await runFixture(fixture, team, {
+    steps: [toolCall('withdrawn-planning-read', readPlanningEvidence, { recordId: estimateId })],
+    onChildTurn(turn) { if (turn === 0) withdrawEstimate(); },
+  });
+  assert.equal(staleRead.toolResults.get('withdrawn-planning-read'), unavailable);
+  assert.ok(!staleRead.results.some((entry) => entry.includes(estimateBasis) || entry.includes(estimateSource.sourceId)));
+
+  activeSources = sources;
+  currentReceipt = { ...receipt, policyRevision: 'planning-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; withdrawEstimate(); } });
+  try {
+    const held = await runFixture(fixture, team, { steps: [toolCall('withdrawn-planning-write', savePlanningRegister, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'withdrawn-planning-write' && entry.action_id === 1));
+    assert.equal(held.toolResults.get('withdrawn-planning-write'), unavailable);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(directory), [name]);
+  } finally { setCasProbe(undefined); }
+  currentReceipt = receipt;
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
 });

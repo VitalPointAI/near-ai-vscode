@@ -6,6 +6,7 @@ import { STAFF_SLUG } from './parse';
 export const institutionalBriefDirectory = '.planning/staff/institutional/command/briefs';
 export const institutionalActionRegisterDirectory = '.planning/staff/institutional/j3/action-registers';
 export const institutionalObservationDirectory = '.planning/staff/institutional/j7/observations';
+export const institutionalPlanningDirectory = '.planning/staff/institutional/j5/evidence-assumptions';
 export const institutionalBusinessServicesDirectory = '.planning/staff/institutional/j6/business-services';
 export const institutionalCatalogueDirectory = '.planning/staff/institutional/j2/catalogue';
 export const institutionalCatalogueUnavailable = 'This catalogue metadata is unavailable.';
@@ -52,6 +53,7 @@ export interface InstitutionalDraftScope {
   };
   readonly catalogue?: () => InstitutionalCatalogueEvidence;
   readonly businessServices?: () => InstitutionalBusinessServicesEvidence;
+  readonly planningEvidence?: () => InstitutionalPlanningEvidence;
   readonly findings?: {
     readonly current: () => InstitutionalFindingsEvidence;
     readonly predecessorCurrent: () => Promise<boolean>;
@@ -126,7 +128,17 @@ interface InstitutionalBusinessServicesReview extends Omit<InstitutionalBriefRev
   readonly portfolioDecision: 'pending';
 }
 
-export type InstitutionalDraftReview = InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
+interface InstitutionalPlanningReview extends Omit<InstitutionalBriefReview, 'duty' | 'kind'> {
+  readonly duty: 'J5-03';
+  readonly kind: 'planning-evidence';
+  readonly policyRevision: string;
+  readonly scopeDigest: string;
+  readonly sourceCutoff: string;
+  readonly planOwner: InstitutionalCatalogueSource;
+  readonly planDecision: 'pending';
+}
+
+export type InstitutionalDraftReview = InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;
@@ -842,7 +854,7 @@ export interface InstitutionalBusinessServicesEvidence {
   readonly records: readonly InstitutionalServiceRecord[];
 }
 
-function serviceDate(value: unknown): string {
+function metadataDate(value: unknown): string {
   const date = text(value, 10);
   requireCatalogue(/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date);
   return date;
@@ -875,7 +887,7 @@ export function admittedInstitutionalBusinessServices(
     const owner = fields.includes('owner') && row.owner !== undefined
       ? metadataSource(sources, row.owner, 'fictional-induction-coordinator') : undefined;
     requireCatalogue(!owner || (owner.sourceId !== document.sourceId && owner.sourceId !== portfolioOwner.sourceId));
-    const reviewDate = fields.includes('review-date') && row.reviewDate !== undefined ? serviceDate(row.reviewDate) : undefined;
+    const reviewDate = fields.includes('review-date') && row.reviewDate !== undefined ? metadataDate(row.reviewDate) : undefined;
     const supportHours = fields.includes('support-hours') && row.supportHours !== undefined ? text(row.supportHours, 32) : undefined;
     requireCatalogue(supportHours === undefined || /^(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d weekdays$/.test(supportHours));
     const userGroups = fields.includes('user-groups') && row.userGroups !== undefined ? list(row.userGroups, slug) : undefined;
@@ -914,4 +926,132 @@ export function prepareInstitutionalBusinessServices(
   requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalBusinessServicesDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
+}
+
+
+type InstitutionalPlanningRow = {
+  readonly id: string;
+  readonly statement: string;
+  readonly evidence: readonly InstitutionalCatalogueSource[];
+} & ({
+  readonly kind: 'fact';
+  readonly validation: 'attested' | 'unresolved';
+  readonly quantity: { readonly value: number; readonly unit: 'documents' } | null;
+} | {
+  readonly kind: 'estimate';
+  readonly validation: 'estimated' | 'unresolved';
+  readonly quantity: {
+    readonly value: number;
+    readonly unit: 'staff-hours' | 'workdays';
+    readonly basis: string | null;
+    readonly date: string | null;
+  } | null;
+} | {
+  readonly kind: 'assumption' | 'dependency';
+  readonly validation: 'open' | 'contradicted' | 'superseded';
+  readonly accountableRole: string | null;
+  readonly reviewDate: string | null;
+});
+
+export interface InstitutionalPlanningEvidence {
+  readonly requester: 'fictional-planning-reviewer';
+  readonly purpose: 'fictional-office-migration-j5-03';
+  readonly productId: string;
+  readonly policyRevision: string;
+  readonly sourceCutoff: string;
+  readonly planOwner: InstitutionalCatalogueSource;
+  readonly records: readonly InstitutionalPlanningRow[];
+}
+
+export function admittedInstitutionalPlanningEvidence(
+  raw: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[],
+): InstitutionalPlanningEvidence {
+  const { receipt, rows } = record(raw, ['receipt', 'rows']);
+  const authorization = record(receipt, ['project', 'directory', 'requester', 'purpose', 'policyRevision', 'productId', 'sourceCutoff', 'planOwner', 'recordIds']);
+  const { requester, purpose } = authorization;
+  requireCatalogue(authorization.project === binding.project && authorization.directory === binding.directory &&
+    requester === 'fictional-planning-reviewer' && purpose === 'fictional-office-migration-j5-03');
+  const sourceCutoff = metadataDate(authorization.sourceCutoff);
+  const planOwner = metadataSource(sources, authorization.planOwner, 'fictional-plan-owner');
+  const eligibleIds = list(authorization.recordIds, catalogueId);
+  const eligible = new Set(eligibleIds);
+  requireCatalogue(eligible.size === eligibleIds.length);
+  const attested = (entry: unknown) => {
+    const input = record(entry, ['sourceId', 'revision', 'role']);
+    const { role } = input;
+    requireCatalogue(role === 'fictional-records-evidence-owner' || role === 'fictional-platform-evidence-owner');
+    const source = metadataSource(sources, input, role);
+    requireCatalogue(source.sourceId !== planOwner.sourceId && sources.some(({ id, date }) => id === source.sourceId && date <= sourceCutoff));
+    return source;
+  };
+  const records: InstitutionalPlanningRow[] = [];
+  for (const entry of list(rows, (value) => value)) {
+    requireCatalogue(entry && typeof entry === 'object' && !Array.isArray(entry));
+    const row = entry as Record<string, unknown>;
+    if (typeof row.id !== 'string' || !eligible.has(row.id)) continue;
+    const { id, kind } = row;
+    const evidence = attested(row.evidence);
+    const common = { id, statement: text(row.statement, 240) };
+    if (kind === 'fact') {
+      const { quantity } = record({ quantity: null, ...row }, ['id', 'kind', 'statement', 'evidence', 'quantity']);
+      if (quantity === null) {
+        records.push({ ...common, kind, evidence: [evidence], validation: 'unresolved', quantity: null });
+        continue;
+      }
+      const { value, unit } = record(quantity, ['value', 'unit']);
+      requireCatalogue(typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && unit === 'documents');
+      records.push({ ...common, kind, evidence: [evidence], validation: 'attested', quantity: { value, unit } });
+      continue;
+    }
+    if (kind === 'estimate') {
+      const { quantity } = record({ quantity: null, ...row }, ['id', 'kind', 'statement', 'evidence', 'quantity']);
+      if (quantity === null) {
+        records.push({ ...common, kind, evidence: [evidence], validation: 'unresolved', quantity: null });
+        continue;
+      }
+      requireCatalogue(typeof quantity === 'object' && !Array.isArray(quantity));
+      const { value, unit, basis, date } = record({ basis: null, date: null, ...quantity }, ['value', 'unit', 'basis', 'date']);
+      requireCatalogue(typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER &&
+        (unit === 'staff-hours' || unit === 'workdays'));
+      const admittedDate = date === null ? null : metadataDate(date);
+      requireCatalogue(admittedDate === null || admittedDate <= sourceCutoff);
+      records.push({ ...common, kind, evidence: [evidence], validation: 'estimated',
+        quantity: { value, unit, basis: basis === null ? null : text(basis, 240), date: admittedDate } });
+      continue;
+    }
+    requireCatalogue(kind === 'assumption' || kind === 'dependency');
+    const pending = record({ accountableRole: null, reviewDate: null, challenge: null, ...row },
+      ['id', 'kind', 'statement', 'evidence', 'accountableRole', 'reviewDate', 'challenge']);
+    const { accountableRole, reviewDate } = pending;
+    requireCatalogue(accountableRole === null || accountableRole === 'fictional-records-reviewer' || accountableRole === 'fictional-platform-reviewer');
+    let validation: 'open' | 'contradicted' | 'superseded' = 'open';
+    const citations = [evidence];
+    if (pending.challenge !== null) {
+      const challenge = record(pending.challenge, ['state', 'evidence']);
+      requireCatalogue(challenge.state === 'contradicted' || challenge.state === 'superseded');
+      const additional = attested(challenge.evidence);
+      requireCatalogue(additional.sourceId !== evidence.sourceId);
+      citations.push(additional);
+      validation = challenge.state;
+    }
+    records.push({ ...common, kind, evidence: citations, validation, accountableRole,
+      reviewDate: reviewDate === null ? null : metadataDate(reviewDate) });
+  }
+  requireCatalogue(new Set(records.map(({ id }) => id)).size === records.length);
+  return { requester, purpose, productId: slug(authorization.productId), policyRevision: revision(authorization.policyRevision),
+    sourceCutoff, planOwner, records: records.sort((a, b) => a.id.localeCompare(b.id)) };
+}
+
+export function prepareInstitutionalPlanningRegister(
+  input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalPlanningEvidence,
+): PreparedInstitutionalDraft {
+  const records = requestedCatalogueRows(input, accepted);
+  const evidenceIds = new Set([accepted.planOwner.sourceId, ...records.flatMap(({ evidence }) => evidence.map(({ sourceId }) => sourceId))]);
+  const identity = { ...binding, duty: 'J5-03' as const, echelon: 'L3' as const, kind: 'planning-evidence' as const,
+    productId: accepted.productId, policyRevision: accepted.policyRevision, sourceCutoff: accepted.sourceCutoff, scopeDigest: canonicalDigest(accepted),
+    planOwner: accepted.planOwner, planDecision: 'pending' as const, sources: sourceReferences(sources.filter(({ id }) => evidenceIds.has(id))) };
+  const bytes = canonicalBytes({ schema: 1, ...identity, body: { records } });
+  requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
+  const version = institutionalBriefDigest(bytes);
+  return { path: `${institutionalPlanningDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }

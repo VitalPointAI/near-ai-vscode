@@ -2,9 +2,9 @@ import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  institutionalActionRegisterDirectory, institutionalBusinessServicesDirectory, institutionalCatalogueDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
+  institutionalActionRegisterDirectory, institutionalBusinessServicesDirectory, institutionalCatalogueDirectory, institutionalCatalogueUnavailable, institutionalPlanningDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
   institutionalFindingsDirectory, institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
-  prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalFindings, prepareInstitutionalObservation, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
+  prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalFindings, prepareInstitutionalObservation, prepareInstitutionalPlanningRegister, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
 } from '../domain/staff/institutionalBrief';
 import { replaceKeepingEdits } from './staffFiles';
 
@@ -13,6 +13,7 @@ const hexDigest = /^[0-9a-f]{64}$/;
 const readLeafFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 function directoryOf(scope: InstitutionalDraftScope): string {
+  if (scope.planningEvidence) return institutionalPlanningDirectory;
   if (scope.businessServices) return institutionalBusinessServicesDirectory;
   if (scope.catalogue) return institutionalCatalogueDirectory;
   if (scope.findings) return institutionalFindingsDirectory;
@@ -81,8 +82,9 @@ function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected
   const { body, productId } = payload as Record<string, unknown>;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return changed();
   const sources = scope.currentSources();
-  const expected = scope.businessServices
-    ? prepareInstitutionalBusinessServices({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.businessServices())
+  const expected = scope.planningEvidence
+    ? prepareInstitutionalPlanningRegister({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.planningEvidence())
+    : scope.businessServices ? prepareInstitutionalBusinessServices({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.businessServices())
     : scope.catalogue ? prepareInstitutionalCatalogue({ productId, recordIds: storedCatalogueIds(body) }, scope.binding, sources, scope.catalogue())
     : scope.findings ? prepareInstitutionalFindings({ ...body, productId }, scope.binding, sources, scope.findings.current())
     : scope.observation ? prepareInstitutionalObservation(institutionalObservationInput(body, productId), scope.binding, sources, scope.observation.current())
@@ -120,7 +122,7 @@ async function requireCurrentPredecessor(scope: InstitutionalDraftScope): Promis
 function exactPredecessorLeaf(scope: InstitutionalDraftScope, review: InstitutionalDraftReview): boolean {
   if (review.kind === 'observation') return scope.observation?.correctionAtEffect(review.correction) === true;
   if (review.kind === 'findings') return scope.findings?.predecessorAtEffect(review.observation.version) === true;
-  return review.kind === 'business-services' || review.kind === 'records-catalogue' || review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
+  return review.kind === 'planning-evidence' || review.kind === 'business-services' || review.kind === 'records-catalogue' || review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
 }
 
 export async function verifyInstitutionalDraftTarget(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalDraft): Promise<void> {
@@ -168,5 +170,8 @@ export async function readInstitutionalDraftReview(scope: InstitutionalDraftScop
     const { review } = reconstruct(bytes, scope, expected);
     if (!exactPredecessorLeaf(scope, review)) return changed();
     return review;
+  }).catch((error: unknown) => {
+    if (scope.planningEvidence) throw new Error(institutionalCatalogueUnavailable);
+    throw error;
   });
 }
