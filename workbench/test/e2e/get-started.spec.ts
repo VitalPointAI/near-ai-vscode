@@ -342,53 +342,67 @@ test('Team Studio staff setup previews the selected project in the User language
     await expect(frenchHeading).toBeFocused();
     await expect(frame.getByRole('heading', { name: project, exact: true })).toBeVisible();
 
+    await expect(frame.getByRole('heading', { name: 'Logistique', exact: true })).toBeVisible();
+    await expect(frame.getByRole('heading', { name: /[JGS]-?4 Logistique/ })).toHaveCount(0);
+    await expect(frame.getByRole('button', { name: 'Ouvrir la configuration existante' })).toBeVisible();
     await workbench.setViewportSize({ width: 510, height: 900 });
-    await frame.getByRole('button', { name: 'État-major complet', exact: true }).click();
-    await expect(frame.getByRole('heading', { name: 'J1 Personnel', exact: true })).toBeVisible();
-    await expect(frame.getByRole('button', { name: 'Poursuivre la configuration de la section', exact: true })).toHaveCount(0);
+    const frenchProfile = frame.getByRole('button', { name: 'OTAN (termes canadiens)', exact: true });
+    await frenchProfile.press('Enter');
+    await expect(frenchProfile).toHaveAttribute('aria-pressed', 'true');
+    const levelGroup = frame.getByRole('group', { name: 'Niveau organisationnel' });
+    await expect(levelGroup.getByRole('button')).toHaveCount(5);
+    for (const level of await levelGroup.getByRole('button').all()) await expect(level).toBeEnabled();
+    const frenchBrigade = levelGroup.getByRole('button', { name: 'L3 Brigade', exact: true });
+    await frenchBrigade.press('Enter');
+    await expect(frenchBrigade).toBeFocused();
+    await expect(frenchBrigade).toHaveAttribute('aria-pressed', 'true');
+    await expect(frame.getByRole('heading', { name: 'G4 Logistique', exact: true })).toBeVisible();
+    await expect(frame.getByRole('button', { name: 'Ouvrir la configuration existante' })).toHaveCount(0);
     const coverage = frame.getByRole('region', { name: 'Aperçu de la configuration de l’état-major' });
     expect(await coverage.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
-    await frenchHeading.press('Escape');
-    await expect(frenchEntry).toBeFocused();
 
     await workbench.setViewportSize({ width: 1280, height: 900 });
-    await frenchEntry.click();
-    const frenchSection = frame.getByRole('button', { name: 'J4 Logistique', exact: true });
-    await frenchSection.click();
     const liveSelection = await openLanguageSetting(workbench);
     await expect(liveSelection).toContainText('Français (Canada)');
     await pickLanguage(liveSelection, 'ArrowUp', 'English (Canada)');
     await studioTab.click();
-    await expect(frame.getByRole('heading', { name: 'Staff setup preview', exact: true })).toBeVisible();
-    await expect(frame.getByRole('heading', { name: project, exact: true })).toBeVisible();
-    const englishSection = frame.getByRole('button', { name: 'J4 Logistics', exact: true });
-    await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
-
-    const switchBack = await openLanguageSetting(workbench);
-    await pickLanguage(switchBack, 'ArrowDown', 'Français (Canada)');
-    await studioTab.click();
-    await expect(frenchSection).toHaveAttribute('aria-pressed', 'true');
-    await frame.getByRole('button', { name: 'Poursuivre la configuration de la section', exact: true }).click();
+    const englishHeading = frame.getByRole('heading', { name: 'Staff setup preview', exact: true });
+    await expect(englishHeading).toBeVisible();
+    await expect(frame.getByRole('button', { name: 'L3 Brigade', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(frame.getByRole('heading', { name: 'G4 Logistics', exact: true })).toBeVisible();
+    await frame.getByRole('button', { name: 'US Joint', exact: true }).click();
+    const joint = frame.getByRole('button', { name: 'L1 Joint headquarters', exact: true });
+    const strategic = frame.getByRole('button', { name: 'L0 Strategic joint headquarters', exact: true });
+    await joint.click();
+    await expect(joint).toHaveAttribute('aria-pressed', 'true');
+    await expect(strategic).toHaveAttribute('aria-pressed', 'false');
+    await expect(frame.getByRole('heading', { name: 'J-4 Logistics', exact: true })).toBeVisible();
+    await strategic.click();
+    await expect(strategic).toHaveAttribute('aria-pressed', 'true');
+    await expect(joint).toHaveAttribute('aria-pressed', 'false');
+    await expect(frame.getByRole('heading', { name: 'J-4 Logistics', exact: true })).toBeVisible();
+    await joint.click();
+    await expect(joint).toHaveAttribute('aria-pressed', 'true');
+    await expect(strategic).toHaveAttribute('aria-pressed', 'false');
+    await expect(frame.getByText('No designation verified for this doctrine and level.', { exact: true }).first()).toBeVisible();
+    await expect(frame.getByRole('button', { name: /Continue to section setup/ })).toHaveCount(0);
+    await frame.getByRole('button', { name: 'Back to doctrine choices', exact: true }).click();
+    const doctrine = frame.getByRole('button', { name: 'US Joint', exact: true });
+    await expect(doctrine).toBeFocused();
+    await expect(doctrine).toHaveAttribute('aria-pressed', 'false');
+    await expect(frame.getByRole('button', { name: 'L1 Joint headquarters', exact: true })).toHaveCount(0);
+    await doctrine.press('Escape');
+    const englishEntry = frame.getByRole('button', { name: 'Set up staff', exact: true });
+    await expect(englishEntry).toBeFocused();
+    await englishEntry.click();
+    await expect(frame.getByRole('heading', { name: 'Logistics', exact: true })).toBeVisible();
+    await frame.getByRole('button', { name: 'Open existing staff setup', exact: true }).click();
+    await frame.getByRole('button', { name: 'J4 Logistics', exact: true }).click();
+    await frame.getByRole('button', { name: 'Continue to section setup', exact: true }).click();
     const questions = workbench.locator('.quick-input-widget').filter({ visible: true });
-    await expect(questions).toContainText('Niveaux : stratégique, opérationnel.');
-    await questions.getByText('Forces interarmées des États-Unis', { exact: true }).click();
-    await expect(questions).toContainText('JPP au niveau de la JTF (05 T2).');
-    for (const answer of ['Opérationnel', 'Campagne', 'Exécution locale seulement']) {
-      await questions.getByText(answer, { exact: true }).click();
-    }
-    await expect(questions).toContainText('vérifier la composition');
-    await expect(questions).toContainText(`Projet : ${project}.`);
+    await expect(questions.getByText('US Joint', { exact: true })).toBeVisible();
     await workbench.keyboard.press('Escape');
     await expect(questions).toBeHidden();
-    await expect(frenchSection).toBeFocused();
-
-    const reset = await openLanguageSetting(workbench);
-    await pickLanguage(reset, 'ArrowUp', 'English (Canada)');
-    // The next release-image test shares this User profile. Wait for the host
-    // to apply the reset before closing the context that changed it.
-    await studioTab.click();
-    await expect(frame.getByRole('heading', { name: 'Staff setup preview', exact: true })).toBeVisible();
-    await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
   } finally {
     await reopenedContext.close();
   }

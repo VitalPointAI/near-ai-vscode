@@ -60,6 +60,19 @@
       },
       profiles: { 'us-joint': 'US Joint', 'us-army': 'US Army', 'nato-ca': 'NATO/Canadian' },
       levels: { strategic: 'Strategic', operational: 'Operational', tactical: 'Tactical' },
+      profileTitle: 'Doctrine and national terms',
+      levelTitle: 'Organizational level',
+      inspectedCoverage: 'Section coverage',
+      inspect: 'Choose the doctrine and organizational level to see the applicable designations.',
+      setupPending: 'This view previews coverage. Setup for this doctrine and level is not available yet.',
+      legacySetup: 'Open existing staff setup',
+      backToDoctrine: 'Back to doctrine choices',
+      inspectedStatuses: {
+        legacyUnresolved: 'Existing link. Its role and organizational level are unverified here.',
+        mappingUnavailable: 'No designation verified for this doctrine and level.'
+      },
+      inspectedProfiles: { 'us-joint': 'US Joint', 'us-army': 'US Army', nato: 'NATO (Allied terms)', canada: 'NATO (Canadian terms)' },
+      inspectedLevels: { l4: 'L4 Unit', l3: 'L3 Brigade', l2: 'L2 Division', l1: 'L1 Joint headquarters', l0: 'L0 Strategic joint headquarters' },
       sections: {
         command: 'Command group and chief of staff', j1: 'Personnel', j2: 'Intelligence', j3: 'Operations',
         j4: 'Logistics', j5: 'Plans', j6: 'Communications and CIS', j7: 'Training and lessons',
@@ -97,6 +110,19 @@
       },
       profiles: { 'us-joint': 'Forces interarmées des États-Unis', 'us-army': 'Armée de terre des États-Unis', 'nato-ca': 'OTAN/Canada' },
       levels: { strategic: 'Stratégique', operational: 'Opérationnel', tactical: 'Tactique' },
+      profileTitle: 'Doctrine et termes nationaux',
+      levelTitle: 'Niveau organisationnel',
+      inspectedCoverage: 'Sections de l’état-major',
+      inspect: 'Choisissez un profil et un niveau organisationnel pour voir les désignations applicables.',
+      setupPending: 'Cet aperçu présente les sections. La configuration pour le profil et le niveau choisis reste à venir.',
+      legacySetup: 'Ouvrir la configuration existante',
+      backToDoctrine: 'Revenir au choix de la doctrine',
+      inspectedStatuses: {
+        legacyUnresolved: 'Lien existant. Le rôle et le niveau organisationnel restent à vérifier dans cet aperçu.',
+        mappingUnavailable: 'Aucune désignation vérifiée pour ce profil et ce niveau.'
+      },
+      inspectedProfiles: { 'us-joint': 'Forces interarmées des États-Unis', 'us-army': 'Armée de terre des États-Unis', nato: 'OTAN (termes alliés)', canada: 'OTAN (termes canadiens)' },
+      inspectedLevels: { l4: 'L4 Unité', l3: 'L3 Brigade', l2: 'L2 Division', l1: 'L1 Quartier général interarmées', l0: 'L0 Quartier général interarmées stratégique' },
       sections: {
         command: 'Groupe de commandement et chef d’état-major', j1: 'Personnel', j2: 'Renseignement', j3: 'Opérations',
         j4: 'Logistique', j5: 'Plans', j6: 'Communications et SIC', j7: 'Instruction et leçons retenues',
@@ -2427,6 +2453,41 @@
     return rows;
   }
 
+  function staffChoiceGroup(title, field, choices, labels, selected, data) {
+    const group = el('div', 'staff-scope-choices');
+    group.setAttribute('role', 'group');
+    const heading = el('h4', '', title);
+    heading.id = 'staff-' + field + '-heading';
+    group.setAttribute('aria-labelledby', heading.id);
+    group.append(heading);
+    const list = el('div', 'staff-scope-options');
+    for (const choice of choices) {
+      const id = 'staff-' + field + '-' + choice;
+      const pick = button(labels[choice], () => {
+        if (staffPreview.pending || staffPreview.data?.session !== data.session || choice === selected) return;
+        staffPreview.pending = id;
+        vscode.postMessage({ type: 'staff-preview-select', request: staffPreview.request, session: data.session, field, choice });
+      }, { id });
+      pick.setAttribute('aria-pressed', String(choice === selected));
+      list.append(pick);
+    }
+    group.append(list);
+    return group;
+  }
+
+  function renderInspectedStaffRows(entries, copy) {
+    const rows = el('ul', 'choice-grid staff-preview-rows');
+    for (const row of entries) {
+      const card = el('li');
+      const name = copy.sections[row.id];
+      card.append(el('h4', '', row.code ? row.code + ' ' + name : name));
+      if (row.status) card.append(el('p', '', copy.inspectedStatuses[row.status]));
+      if (row.team) card.append(el('p', '', row.team));
+      rows.append(card);
+    }
+    return rows;
+  }
+
   function renderStaffPreview(root) {
     const copy = STAFF_COPY[staffLocale];
     const panel = el('section', 'panel staff-preview');
@@ -2443,43 +2504,67 @@
       panel.append(el('p', 'hint', copy.waiting));
     } else {
       panel.append(el('h3', '', data.project));
-      if (data.profile) panel.append(el('p', '', copy.profiles[data.profile] + ' · ' + copy.levels[data.level]));
-      else panel.append(el('p', '', copy.noProfile));
-      panel.append(el('p', 'hint', copy.modelLocation));
-      const available = data.rows.filter(staffSectionAvailable);
-      const other = data.rows.filter(row => !staffSectionAvailable(row));
-      const nextSection = available.find(row => selected.has(row.id))?.id;
-      if (available.length) {
-        const instructions = el('p', '', copy.choose);
-        instructions.id = 'staff-preview-choices';
-        panel.append(instructions);
-        const rows = renderStaffRows(available, copy, busy || !data.session, selected);
-        rows.setAttribute('aria-labelledby', instructions.id);
-        panel.append(rows);
-      } else {
-        panel.append(el('p', 'hint', copy.noChoices));
-      }
-      if (busy) panel.append(el('p', 'hint', copy.handoff));
-      else {
-        if (finished) panel.append(el('p', '', finished === 'applied' ? copy.applied : copy.held));
-        if (!data.session) {
-          panel.append(button(copy.reviewAgain, openStaffPreview, { id: 'staff-preview-review' }));
-        } else if (available.length) {
-          const next = button(copy.continue, () => {
-            if (!nextSection || staffPreview.busy) return;
-            staffPreview.busy = true;
-            staffPreview.sectionInReview = nextSection;
-            vscode.postMessage({ type: 'staff-preview-continue', request: staffPreview.request, session: data.session, section: nextSection });
-            announce(copy.handoff, staffLocale);
-            render();
-          }, { primary: true, id: 'staff-preview-continue' });
-          next.disabled = !nextSection;
-          panel.append(next);
+      if (!data.legacy) {
+        panel.append(staffChoiceGroup(copy.profileTitle, 'profile', data.profiles, copy.inspectedProfiles, data.profile, data));
+        if (data.levels.length) {
+          panel.append(staffChoiceGroup(copy.levelTitle, 'level', data.levels, copy.inspectedLevels, data.organizationLevel, data));
         }
-      }
-      if (other.length) {
-        panel.append(el('h3', '', copy.coverage));
-        panel.append(renderStaffRows(other, copy, true, selected));
+        if (data.profile) {
+          panel.append(button(copy.backToDoctrine, () => {
+            if (staffPreview.pending) return;
+            staffPreview.pending = 'staff-profile-' + data.profiles[0];
+            vscode.postMessage({ type: 'staff-preview-back', request: staffPreview.request, session: data.session });
+          }, { id: 'staff-inspection-back' }));
+        }
+        if (data.legacySetup) {
+          panel.append(button(copy.legacySetup, () => {
+            if (staffPreview.pending) return;
+            staffPreview.pending = 'staff-preview-title';
+            vscode.postMessage({ type: 'staff-preview-legacy', request: staffPreview.request, session: data.session });
+          }, { id: 'staff-legacy-setup' }));
+        }
+        panel.append(el('h3', '', copy.inspectedCoverage));
+        panel.append(el('p', 'hint', data.organizationLevel ? copy.setupPending : copy.inspect));
+        panel.append(renderInspectedStaffRows(data.rows, copy));
+      } else {
+        if (data.profile) panel.append(el('p', '', copy.profiles[data.profile] + ' · ' + copy.levels[data.level]));
+        else panel.append(el('p', '', copy.noProfile));
+        panel.append(el('p', 'hint', copy.modelLocation));
+        const available = data.rows.filter(staffSectionAvailable);
+        const other = data.rows.filter(row => !staffSectionAvailable(row));
+        const nextSection = available.find(row => selected.has(row.id))?.id;
+        if (available.length) {
+          const instructions = el('p', '', copy.choose);
+          instructions.id = 'staff-preview-choices';
+          panel.append(instructions);
+          const rows = renderStaffRows(available, copy, busy || !data.session, selected);
+          rows.setAttribute('aria-labelledby', instructions.id);
+          panel.append(rows);
+        } else {
+          panel.append(el('p', 'hint', copy.noChoices));
+        }
+        if (busy) panel.append(el('p', 'hint', copy.handoff));
+        else {
+          if (finished) panel.append(el('p', '', finished === 'applied' ? copy.applied : copy.held));
+          if (!data.session) {
+            panel.append(button(copy.reviewAgain, openStaffPreview, { id: 'staff-preview-review' }));
+          } else if (available.length) {
+            const next = button(copy.continue, () => {
+              if (!nextSection || staffPreview.busy) return;
+              staffPreview.busy = true;
+              staffPreview.sectionInReview = nextSection;
+              vscode.postMessage({ type: 'staff-preview-continue', request: staffPreview.request, session: data.session, section: nextSection });
+              announce(copy.handoff, staffLocale);
+              render();
+            }, { primary: true, id: 'staff-preview-continue' });
+            next.disabled = !nextSection;
+            panel.append(next);
+          }
+        }
+        if (other.length) {
+          panel.append(el('h3', '', copy.coverage));
+          panel.append(renderStaffRows(other, copy, true, selected));
+        }
       }
     }
     panel.append(button(copy.leave, leaveStaffPreview, { id: 'staff-preview-leave' }));
@@ -2546,9 +2631,13 @@
       }
       case 'staff-preview-state':
         if (staffPreview?.request !== message.request) break;
+        if (!message.error && message.previousSession !== staffPreview.data?.session) break;
+        pendingFocus = message.error ? 'staff-preview-title' : staffPreview.pending ?? pendingFocus;
         staffPreview.data = message;
+        staffPreview.pending = undefined;
         staffPreview.selected.clear();
         staffPreview.busy = false;
+        staffPreview.finished = undefined;
         announce(message.error ? STAFF_COPY[staffLocale].errors[message.error] : STAFF_COPY[staffLocale].ready, staffLocale);
         render();
         break;
