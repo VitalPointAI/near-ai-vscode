@@ -8,8 +8,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { gateToolCall, readCallPaths } from '../agent/gateAdapter';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
-import { declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED, readTool } from '../agent/tools';
+import { bindFixtureGate, declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED, readTool } from '../agent/tools';
 import type { AgentTool } from '../agent/tools';
+import { bundleHash } from '../domain/gate/bundle';
 import { testGateRuntime } from './helpers/gatedRuns';
 
 const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-callargs-')));
@@ -67,6 +68,53 @@ test('a renaming tool\'s read inside the project is the project path', async () 
     grants: new RunGrants(), buildAuto: async () => undefined
   });
   assert.deepEqual(gated.effects, [{ verb: 'read', paths: ['notes.md'] }]);
+});
+
+test('fixture write checks both the original path and the host-derived destination', async () => {
+  const pathPolicy = { mode: 'fully-autonomous' as const, emergencyStop: false };
+  const agent = { agentId: 'fixture-child', agentLabel: 'Fixture child' };
+  const runtime = testGateRuntime({ actor: { kind: 'sub-agent', deviceFingerprint: 'device-test', sessionId: 'test-session', ...agent } });
+  const state = runtime.bundleState();
+  assert.equal(state.state, 'valid');
+  let projections = 0;
+  const tool: AgentTool<{ file: string }> = {
+    ...renaming,
+    name: 'FixtureWrite',
+    capability: 'workspaceWrite',
+    manifest: declareManifest({ tool: 'FixtureWrite', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
+    manifestInput: (raw) => { projections += 1; return { draftPath: raw.target }; },
+  };
+  const outside = path.join(base, 'elsewhere.md');
+  for (const [target, destination] of [[outside, 'proposal.md'], ['proposal.md', outside]] as const) {
+    projections = 0;
+    const gate = await gateToolCall(runtime, {
+      tool, raw: { target }, root: ROOT, callId: 'fixture-path', policy: pathPolicy, rules: DEFAULT_RULES,
+      grants: new RunGrants(), buildAuto: async () => undefined,
+      fixtureGate: bindFixtureGate(runtime, () => pathPolicy, {
+        policyHash: state.hash, currentActionSettings: () => pathPolicy,
+        effect: { verb: 'workspaceWrite', path: destination },
+      }, agent),
+    });
+    assert.equal(gate.decision.rule, 'call.outside-workspace');
+    assert.equal(projections, 1);
+  }
+});
+
+test('a decision names the bundle it evaluated even if the runtime changes while settings run', async () => {
+  const runtime = testGateRuntime();
+  const initial = runtime.bundleState();
+  assert.equal(initial.state, 'valid');
+  const replacement = { ...initial.bundle, issuedAt: new Date(Date.parse(initial.bundle.issuedAt) - 1).toISOString() };
+  const later = { ...initial, bundle: replacement, hash: bundleHash(replacement) };
+  let current = initial;
+  const gate = await gateToolCall({ ...runtime, bundleState: () => current }, {
+    tool: renaming, raw: { file: 'notes.md' }, root: ROOT, callId: 'runtime-bundle', rules: DEFAULT_RULES, grants: new RunGrants(),
+    policy: { mode: 'fully-autonomous', emergencyStop: false },
+    buildAuto: async () => { await Promise.resolve(); current = later; return undefined; },
+  });
+  assert.equal(gate.decision.outcome, 'allow');
+  assert.equal(current.hash, later.hash);
+  assert.equal(runtime.records.at(-1)?.unmapped.nearAi.bundleHash, initial.hash);
 });
 
 // PR #74 review round 4: a call that reads more than one file in a trusted folder names every one in its record, as many as fit, and says how many more.
