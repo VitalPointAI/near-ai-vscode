@@ -17,10 +17,11 @@ import { bundleHash } from '../domain/gate/bundle';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
 import { institutionalSourceHash, type InstitutionalBriefSource } from './helpers/institutional/institutionalBrief';
+import { prepareInstitutionalRenditions } from './helpers/institutional/institutionalRenditions';
 import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload } from '../domain/team/signedPayload';
 import { setCasProbe } from '../staff/staffFiles';
-import { readInstitutionalDraftReview, storeInstitutionalDraft, verifyInstitutionalDraftTarget } from './helpers/institutional/institutionalDraftStore';
+import { readInstitutionalRenditionHistory, recordInstitutionalRenditions, readInstitutionalDraftReview, storeInstitutionalDraft, verifyInstitutionalDraftTarget } from './helpers/institutional/institutionalDraftStore';
 import { readConfirmedInstitutionalJointTier } from './helpers/institutional/institutionalSetup';
 import type { MementoLike } from '../services/stateHome';
 import type { AgentTurnRequest } from '../services/agentSession';
@@ -1498,7 +1499,8 @@ test('registered G9 preserves independent library mandates and holds the exact c
   };
   let currentReceipt = receipt;
   let now = validInstant;
-  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => sources,
+  let activeSources = sources;
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => activeSources,
     currentLibraryRemits: () => ({ receipt: currentReceipt, organizations }), currentLibraryRemitTime: () => now };
   const team = await selectSyntheticInstitutionalJ9Remits(fixture);
   const args = { productId: receipt.productId, recordIds: [firstId, secondId] };
@@ -1546,6 +1548,205 @@ test('registered G9 preserves independent library mandates and holds the exact c
   assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'library-remits')?.unmapped.nearAi.capability,
     { verb: 'workspaceWrite', paths: [`${remitDirectory}/${name}`] });
 
+  assert.equal(review.kind, 'library-service-remits');
+  const english = { title: 'Library services <draft>', text: 'Both services register readers. The overlap remains unresolved.' };
+  const french = { title: 'Services de bibliothèque', text: 'Les deux services inscrivent les lecteurs. Le chevauchement reste à clarifier & documenter.' };
+  const pair = prepareInstitutionalRenditions(review, { 'en-CA': english, 'fr-CA': french });
+  assert.equal(pair.manifest.sourceVersion, review.version);
+  assert.deepEqual(pair.manifest.sources, review.sources);
+  assert.deepEqual(pair.manifest.renditions.map(({ language }) => language), ['en-CA', 'fr-CA']);
+  assert.equal(pair.digest, createHash('sha256').update(canonicalBytes(pair.manifest)).digest('hex'));
+  assert.equal(pair.digest, prepareInstitutionalRenditions(review, { 'fr-CA': french, 'en-CA': english }).digest);
+  const enriched = { ...review, sources: review.sources.map((reference) => ({ ...reference, text: sources[2].text })) };
+  assert.deepEqual(prepareInstitutionalRenditions(enriched, { 'en-CA': english, 'fr-CA': french }).manifest, pair.manifest);
+  assert.notEqual(pair.digest, prepareInstitutionalRenditions(review, {
+    'en-CA': english, 'fr-CA': { ...french, text: french.text + ' Une précision.' },
+  }).digest);
+  assert.notEqual(pair.digest, prepareInstitutionalRenditions({ ...review, version: 'a'.repeat(64) }, {
+    'en-CA': english, 'fr-CA': french,
+  }).digest);
+  assert.throws(() => prepareInstitutionalRenditions(review, { 'en-CA': english }));
+  assert.throws(() => prepareInstitutionalRenditions(review, { 'en-CA': english, 'fr-CA': french, 'fr-FR': french }));
+  assert.throws(() => prepareInstitutionalRenditions(review, {
+    'en-CA': { ...english, text: 'é'.repeat(128 * 1024) }, 'fr-CA': french,
+  }));
+  assert.ok(!JSON.stringify(pair).includes(sources[2].text));
+
+  const request = { version, selection: 'bilingual' as const, requester: 'fictional-library-reader', purpose };
+  const reviewReceipt = {
+    pairDigest: pair.digest, policyRevision: receipt.policyRevision, decision: 'approved',
+    reviewer: 'fictional-library-language-reviewer', role: 'fictional-language-pair-reviewer',
+    issuer: 'fictional-library-review-office', operation: 'review-rendition-pair',
+  };
+  const accessReceipt = {
+    project, directory: scope.binding.directory, product: receipt.productId, sourceVersion: version,
+    policyRevision: receipt.policyRevision, requester: request.requester, purpose,
+    operation: 'record-current-renditions', decision: 'allow',
+  };
+  let renditions: unknown = { 'en-CA': english, 'fr-CA': french };
+  let pairReview: unknown;
+  let access: unknown = accessReceipt;
+  let inspectAccess: () => unknown = () => access;
+  let inspectReview: () => unknown = () => pairReview;
+  const host = { currentRenditions: () => renditions, currentReview: () => inspectReview(), currentAccess: () => inspectAccess() };
+  const recorded: string[] = [];
+  const record = (override: Parameters<typeof recordInstitutionalRenditions>[2] = request, resolve = resolveInWorkspace) =>
+    recordInstitutionalRenditions(scope, resolve, override, host, (html: string) => { recorded.push(html); return undefined; });
+  const denied = async (override?: Parameters<typeof recordInstitutionalRenditions>[2], resolve?: typeof resolveInWorkspace) => {
+    const count = recorded.length;
+    await assert.rejects(record(override, resolve), { message: 'This catalogue metadata is unavailable.' });
+    assert.equal(recorded.length, count);
+  };
+
+  await denied();
+  pairReview = reviewReceipt;
+  renditions = { 'en-CA': english };
+  await denied();
+  renditions = { 'en-CA': english, 'fr-CA': french };
+  await denied({ ...request, version: 'a'.repeat(64) });
+  await denied({ ...request, requester: 'fictional-other-reader' });
+  await denied({ ...request, purpose: 'fictional-other-purpose' });
+  await denied({ ...request, selection: 'fr-FR' });
+  for (const [field, wrong] of Object.entries({
+    reviewer: 'fictional-liaison-lead', role: 'fictional-source-custodian', issuer: 'fictional-unknown-issuer',
+    operation: 'record-current-renditions', policyRevision: 'remit-r2', pairDigest: 'a'.repeat(64),
+  })) {
+    pairReview = { ...reviewReceipt, [field]: wrong };
+    await denied();
+  }
+  pairReview = reviewReceipt;
+  for (const [field, wrong] of Object.entries({
+    project: 'fictional-other-project', directory: 'fictional-other-directory', sourceVersion: 'b'.repeat(64),
+    requester: 'fictional-other-reader', purpose: 'fictional-other-purpose', operation: 'review-rendition-pair',
+  })) {
+    access = { ...accessReceipt, [field]: wrong };
+    await denied();
+  }
+  access = accessReceipt;
+
+  await record({ ...request, selection: 'fr-CA' });
+  assert.match(recorded[0], /<html lang="fr-CA">/);
+  assert.match(recorded[0], /clarifier &amp; documenter/);
+  assert.ok(!recorded[0].includes('Both services register readers.'));
+  await record();
+  assert.match(recorded[1], /<section lang="en-CA">/);
+  assert.match(recorded[1], /<section lang="fr-CA">/);
+  assert.match(recorded[1], /Library services &lt;draft&gt;/);
+  for (const html of recorded) {
+    for (const { id, revision, hash } of review.sources) {
+      assert.ok(html.includes(`${id}, ${revision}, <code>${hash}</code>`));
+    }
+    for (const source of sources) assert.ok(!html.includes(source.text));
+    assert.ok(!html.includes(hiddenDetail));
+  }
+
+  renditions = { 'en-CA': english, 'fr-CA': { ...french, text: french.text + ' Une précision.' } };
+  await denied();
+  pairReview = { ...reviewReceipt, pairDigest: prepareInstitutionalRenditions(review, renditions).digest };
+  await record();
+  renditions = { 'en-CA': english, 'fr-CA': french };
+  pairReview = reviewReceipt;
+
+  await denied(request, async (workspace, relative) => {
+    const resolved = await resolveInWorkspace(workspace, relative);
+    access = undefined;
+    return resolved;
+  });
+  access = accessReceipt;
+
+  let accessReads = 0;
+  inspectAccess = () => ++accessReads === 2 ? undefined : access;
+  await denied();
+  assert.equal(accessReads, 2);
+
+  inspectAccess = () => access;
+  let reviewReads = 0;
+  inspectReview = () => ++reviewReads === 2 ? undefined : pairReview;
+  await denied();
+  assert.equal(reviewReads, 2);
+  inspectReview = () => pairReview;
+
+  accessReads = 0;
+  inspectAccess = () => {
+    if (++accessReads === 2) now = expiredInstant;
+    return access;
+  };
+  await denied();
+  assert.equal(accessReads, 2);
+  now = validInstant;
+
+  accessReads = 0;
+  let recordedWhenQueued: number | undefined;
+  const countBeforeQueued = recorded.length;
+  inspectAccess = () => {
+    if (++accessReads === 2) queueMicrotask(() => { recordedWhenQueued = recorded.length; access = undefined; });
+    return access;
+  };
+  await record();
+  assert.equal(recordedWhenQueued, countBeforeQueued + 1);
+  inspectAccess = () => access;
+  await denied();
+  access = accessReceipt;
+
+  activeSources = sources.map((source, index) => index === 1 ? { ...source, text: source.text + ' Corrected.' } : source);
+  await denied();
+  const revised = await runFixture(fixture, team, { steps: [toolCall('corrected-library-remits', saveRemit, args)] });
+  const correctedVersion = JSON.parse(revised.toolResults.get('corrected-library-remits')!).review.version as string;
+  assert.notEqual(correctedVersion, version);
+  const corrected = await readInstitutionalDraftReview(scope, resolveInWorkspace, correctedVersion);
+  assert.equal(corrected.kind, 'library-service-remits');
+  access = { ...accessReceipt, sourceVersion: correctedVersion };
+  await denied({ ...request, version: correctedVersion });
+  pairReview = { ...reviewReceipt, pairDigest: prepareInstitutionalRenditions(corrected, renditions).digest };
+  await record({ ...request, version: correctedVersion });
+
+  const historyRequest = { version, pairDigest: pair.digest, requester: request.requester, purpose };
+  const former = { manifest: pair.manifest, review: reviewReceipt, ignoredFixtureBody: draft.body, ignoredRenditions: pair.content };
+  let historyAccess: unknown;
+  const historyHost = {
+    formerPair: (digest: string) => digest === pair.digest ? former : undefined,
+    currentHistoryAccess: () => historyAccess,
+  };
+  const history = (override = historyRequest) => readInstitutionalRenditionHistory(scope, override, historyHost);
+  const denyHistory = async (override = historyRequest) =>
+    assert.rejects(history(override), { message: 'This catalogue metadata is unavailable.' });
+  await denyHistory();
+  historyAccess = access;
+  await denyHistory();
+
+  assert.ok(scope.libraryRemits);
+  const historyGrant = {
+    project, directory: scope.binding.directory, product: receipt.productId, formerVersion: version, pairDigest: pair.digest,
+    sourceIds: pair.manifest.sources.map(({ id }) => id), requester: request.requester, purpose, policyRevision: receipt.policyRevision,
+    currentScopeDigest: createHash('sha256').update(canonicalBytes(scope.libraryRemits())).digest('hex'),
+    operation: 'read-historical-review-metadata', decision: 'allow',
+  };
+  historyAccess = historyGrant;
+  await denied();
+  const metadata = await history();
+  assert.deepEqual(metadata, {
+    sourceVersion: version, renditions: pair.manifest.renditions, review: reviewReceipt,
+  });
+  await denyHistory({ ...historyRequest, pairDigest: 'f'.repeat(64) });
+  await denyHistory({ ...historyRequest, version: correctedVersion });
+  historyAccess = { ...historyGrant, sourceIds: historyGrant.sourceIds.slice(1) };
+  await denyHistory();
+  historyAccess = historyGrant;
+
+  const beforeWithdrawal = currentReceipt;
+  currentReceipt = { ...currentReceipt, policyRevision: 'remit-r2' };
+  await denyHistory();
+  currentReceipt = { ...beforeWithdrawal, grants: beforeWithdrawal.grants.slice(1) };
+  await denyHistory();
+  currentReceipt = beforeWithdrawal;
+  now = expiredInstant;
+  await denyHistory();
+  now = validInstant;
+  historyAccess = undefined;
+  await denyHistory();
+  await denyHistory({ ...historyRequest, pairDigest: 'f'.repeat(64) });
+  activeSources = sources;
+
   const expiredRead = await runFixture(fixture, team, {
     steps: [toolCall('expired-library-read', readRemit, { recordId: firstId })],
     onChildTurn(turn) { if (turn === 0) now = expiredInstant; },
@@ -1562,7 +1763,7 @@ test('registered G9 preserves independent library mandates and holds the exact c
     assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'expired-library-write' && entry.action_id === 1));
     assert.equal(held.toolResults.get('expired-library-write'), unavailable);
     assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
-    assert.deepEqual(await readdir(directory), [name]);
+    assert.deepEqual((await readdir(directory)).sort(), [name, `${correctedVersion}.json`].sort());
   } finally { setCasProbe(undefined); }
   currentReceipt = receipt;
   await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });

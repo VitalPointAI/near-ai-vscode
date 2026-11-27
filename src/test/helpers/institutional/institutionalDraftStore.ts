@@ -10,6 +10,12 @@ import { institutionalAccessibilityDirectory, prepareInstitutionalAccessibility 
 import { institutionalLegalReferencesDirectory, institutionalPolicySourcesDirectory, prepareInstitutionalLegalReferences, prepareInstitutionalPolicySources } from './institutionalAdviserEvidence';
 import { institutionalBudgetDirectory, institutionalInventoryDirectory, prepareInstitutionalBudget, prepareInstitutionalInventory } from './institutionalReconciliation';
 import { institutionalServiceMonitoringDirectory, prepareInstitutionalServiceMonitoring } from './institutionalServiceMonitoring';
+import {
+  institutionalRenditionHistoryMetadata, prepareInstitutionalRenditions, renderInstitutionalRenditions,
+  verifyInstitutionalRenditionAccess, verifyInstitutionalRenditionReview, type InstitutionalRenditionHistoryHost,
+  type InstitutionalRenditionHistoryRequest, type InstitutionalRenditionHost, type InstitutionalRenditionRequest,
+} from './institutionalRenditions';
+import { requireCatalogue } from './institutionalEvidence';
 import { replaceKeepingEdits } from '../../../staff/staffFiles';
 
 type ResolveDraftPath = (root: string, requested: string) => Promise<string>;
@@ -177,20 +183,70 @@ export async function storeInstitutionalDraft(
   });
 }
 
+// Callers must already hold the fixture interlock.
+async function readCurrentDraft(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, version: string) {
+  const parents = await captureParents(scope);
+  const expected = `${directoryOf(scope)}/${version}.json`;
+  const bytes = await readExact(await draftPath(scope, resolve, expected));
+  if (!bytes || await captureParents(scope) !== parents || !await scope.bindingIsCurrent()) return changed();
+  const prepared = reconstruct(bytes, scope, expected);
+  const { review } = prepared;
+  if (!exactPredecessorLeaf(scope, review) ||
+      (review.kind === 'policy-sources' && scope.policyReviewIsCurrent?.(version) !== true)) return changed();
+  return { bytes, prepared };
+}
+
 export async function readInstitutionalDraftReview(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, version: string): Promise<InstitutionalDraftReview> {
   if (!hexDigest.test(version)) return changed();
   await requireCurrentPredecessor(scope);
-  return scope.withStableParents(async () => {
-    const parents = await captureParents(scope);
-    const expected = `${directoryOf(scope)}/${version}.json`;
-    const bytes = await readExact(await draftPath(scope, resolve, expected));
-    if (!bytes || await captureParents(scope) !== parents || !await scope.bindingIsCurrent()) return changed();
-    const { review } = reconstruct(bytes, scope, expected);
-    if (!exactPredecessorLeaf(scope, review) ||
-        (review.kind === 'policy-sources' && scope.policyReviewIsCurrent?.(version) !== true)) return changed();
-    return review;
-  }).catch((error: unknown) => {
+  return scope.withStableParents(async () => (await readCurrentDraft(scope, resolve, version)).prepared.review).catch((error: unknown) => {
     if (scope.planningEvidence || scope.libraryRemits || scope.inventory || scope.budget || scope.serviceMonitoring || scope.accessibility || scope.legalReferences || scope.policySources) throw new Error(institutionalCatalogueUnavailable);
     throw error;
   });
+}
+
+export async function recordInstitutionalRenditions(
+  scope: InstitutionalDraftScope, resolve: ResolveDraftPath, request: InstitutionalRenditionRequest,
+  host: InstitutionalRenditionHost, record: (html: string) => undefined,
+): Promise<void> {
+  requireCatalogue(scope.libraryRemits && hexDigest.test(request.version) &&
+    request.purpose === 'fictional-library-remit-comparison-j9-cl02');
+  let recording = false;
+  return scope.withStableParents(async () => {
+    const initialAccess = host.currentAccess();
+    const { bytes, prepared } = await readCurrentDraft(scope, resolve, request.version);
+    const { review } = prepared;
+    requireCatalogue(review.kind === 'library-service-remits' && review.productId === 'library-service-remits');
+    const pair = prepareInstitutionalRenditions(review, host.currentRenditions());
+    verifyInstitutionalRenditionReview(pair, host.currentReview());
+    verifyInstitutionalRenditionAccess(pair, request, initialAccess);
+    const html = renderInstitutionalRenditions(pair, request.selection);
+
+    // The same lease covers the current-facts check and synchronous local effect.
+    requireCatalogue(prepareInstitutionalRenditions(review, host.currentRenditions()).digest === pair.digest);
+    verifyInstitutionalRenditionReview(pair, host.currentReview());
+    verifyInstitutionalRenditionAccess(pair, request, host.currentAccess());
+    reconstruct(bytes, scope, prepared.path);
+    requireCatalogue(scope.stagedIsCurrent());
+    recording = true;
+    record(html);
+  }).catch((error: unknown) => {
+    if (recording) throw error;
+    throw new Error(institutionalCatalogueUnavailable);
+  });
+}
+
+export async function readInstitutionalRenditionHistory(
+  scope: InstitutionalDraftScope, request: InstitutionalRenditionHistoryRequest, host: InstitutionalRenditionHistoryHost,
+) {
+  const currentRemits = scope.libraryRemits;
+  requireCatalogue(currentRemits && hexDigest.test(request.version) && hexDigest.test(request.pairDigest));
+  return scope.withStableParents(async () => {
+    requireCatalogue(await scope.bindingIsCurrent());
+    const former = host.formerPair(request.pairDigest);
+    const access = host.currentHistoryAccess();
+    const metadata = institutionalRenditionHistoryMetadata(request, former, access, scope.binding, currentRemits());
+    requireCatalogue(scope.stagedIsCurrent());
+    return metadata;
+  }).catch(() => { throw new Error(institutionalCatalogueUnavailable); });
 }
