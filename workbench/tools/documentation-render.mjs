@@ -95,13 +95,16 @@ export function createDocumentationRenderer({ root }) {
     return `${ASSET_DIR}/${name}`;
   }
 
-  function imageHtml(src, alt, title, source) {
+  function imageHtml(src, alt, title, source, fullSize = false) {
     const bundled = bundleImage(src, source);
     const words = alt.trim();
     if (!bundled) {
       return `<span class="sterling-doc-image-missing">Image not available offline${words ? `: ${escapeHtml(words)}` : ''}</span>`;
     }
-    return `<img src="${escapeHtml(bundled)}" alt="${escapeHtml(words)}"${title ? ` title="${escapeHtml(title)}"` : ''} loading="lazy">`;
+    const image = `<img src="${escapeHtml(bundled)}" alt="${escapeHtml(words)}"${title ? ` title="${escapeHtml(title)}"` : ''} loading="lazy">`;
+    return fullSize
+      ? `<figure class="sterling-doc-figure"><a href="${escapeHtml(bundled)}">${image}<br>Open full-size image</a></figure>\n`
+      : image;
   }
 
   function diagramHtml(code, label, source) {
@@ -126,6 +129,32 @@ export function createDocumentationRenderer({ root }) {
 
   const md = new MarkdownIt({ html: false, linkify: true, typographer: false });
 
+  md.core.ruler.before('inline', 'documentation_heading_ids', ({ tokens }) => {
+    for (const [index, heading] of tokens.entries()) {
+      if (heading.type !== 'heading_open') continue;
+      const inline = tokens[index + 1];
+      const marker = inline.content.match(/\s+\{#([\w-]+)\}$/);
+      if (!marker) continue;
+      heading.attrSet('id', marker[1]);
+      inline.content = inline.content.slice(0, marker.index);
+    }
+  });
+
+  md.renderer.rules.heading_open = (tokens, index, options, env, renderer) => {
+    const heading = tokens[index];
+    const text = tokens[index + 1].children.map(token => {
+      if (token.type === 'text' || token.type === 'code_inline') return token.content;
+      if (token.type === 'softbreak' || token.type === 'hardbreak' || token.content === '<br>\n') return ' ';
+      return '';
+    }).join('');
+    const base = heading.attrGet('id') || text.toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-') || 'section';
+    let id = base;
+    for (let suffix = 1; env.headingIds.has(id); suffix += 1) id = `${base}-${suffix}`;
+    env.headingIds.add(id);
+    heading.attrSet('id', id);
+    return renderer.renderToken(tokens, index, options);
+  };
+
   md.renderer.rules.image = (tokens, index, options, env) => {
     const token = tokens[index];
     return imageHtml(token.attrGet('src'), md.renderer.renderInlineAsText(token.children ?? [], options, env), token.attrGet('title'), env.source);
@@ -143,7 +172,10 @@ export function createDocumentationRenderer({ root }) {
     return diagramHtml(token.content, `Diagram: ${(title ?? heading ?? env.title ?? 'figure').trim()}`, env.source);
   };
 
-  md.renderer.rules.sterling_html = (tokens, index) => tokens[index].content;
+  md.renderer.rules.sterling_html = (tokens, index, _options, env) => {
+    const token = tokens[index];
+    return token.meta ? convertBlock(token.content, token.meta.name, env) : token.content;
+  };
 
   /** Our HTML for one raw HTML or JSX block (never the block itself). */
   function convertBlock(raw, name, env) {
@@ -151,6 +183,9 @@ export function createDocumentationRenderer({ root }) {
     if (raw.startsWith('<!--') || DROPPED_TAGS.has(tag)) return '';
     if (EMBED_TAGS.has(tag)) return '<p class="sterling-doc-fallback">This embedded content is not shown in the workbench.</p>\n';
     const images = [...raw.matchAll(/<img\b[^>]*>/gi)].map((match) => tagAttributes(match[0]));
+    if (images.length && tag === 'systemarchitecturemap') {
+      return images.map(image => imageHtml(image.src, image.alt ?? '', image.title, env.source, true)).join('');
+    }
     if (images.length) {
       const caption = raw.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/i)?.[1];
       const figure = images.map((image) => imageHtml(image.src, image.alt ?? '', image.title, env.source)).join('');
@@ -222,7 +257,10 @@ export function createDocumentationRenderer({ root }) {
     const token = state.push('sterling_html', '', 0);
     token.block = true;
     token.map = [startLine, last + 1];
-    token.content = name === '' ? '' : convertBlock(raw, name, state.env);
+    if (name) {
+      token.content = raw;
+      token.meta = { name };
+    }
     state.line = last + 1;
     return true;
   }, { alt: ['paragraph', 'reference', 'blockquote'] });
@@ -253,7 +291,7 @@ export function createDocumentationRenderer({ root }) {
     /** The HTML and search text of one guide. `source` is its repository path; front matter is removed here. */
     render(source, input, title) {
       const markdown = input.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-      const html = md.render(markdown, { source, title, mdx: source.endsWith('.mdx') });
+      const html = md.render(markdown, { source, title, mdx: source.endsWith('.mdx'), headingIds: new Set() });
       return { html, text: textOf(html) };
     },
   };

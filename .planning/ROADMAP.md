@@ -2261,7 +2261,7 @@ delegation and delivery acceptance retain their own prerequisites.
 3. Changes to source authority or review version hold the relevant handoff.
    Human decision and release remain distinct and verifiable.
 
-See [Phase 102 context](phases/102-institutional-joint-staff-teams/102-CONTEXT.md)
+See [Phase 102 planning record](https://github.com/VitalPointAI/near-ai-vscode/blob/main/.planning/phases/102-institutional-joint-staff-teams/102-CONTEXT.md)
 for the duty inventory and build order.
 
 Plans:

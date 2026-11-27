@@ -67,6 +67,34 @@ test('a missing or outside image stops the build with the page named', () => {
   assert.throws(() => renderer.render('docs-site/content/guide.md', '![Text](notes.txt)'), /not a png, jpg, gif, webp or svg/);
 });
 
+test('explicit documentation heading IDs survive without exposing the source marker', () => {
+  const renderer = createDocumentationRenderer({ root });
+  const { html, text } = renderer.render('docs-site/content/guide.md', [
+    '## Protected **B** readiness {#protected-b}',
+    '',
+    'See [Protected B](#protected-b).',
+  ].join('\n'));
+  assert.match(html, /<h2 id="protected-b">Protected <strong>B<\/strong> readiness<\/h2>/);
+  assert.match(html, /href="#protected-b"/);
+  assert.doesNotMatch(text, /\{#protected-b\}/);
+});
+
+test('generated heading IDs use rendered inline text and stay unique', () => {
+  const renderer = createDocumentationRenderer({ root });
+  const { html } = renderer.render('docs-site/content/guide.md', [
+    '## Choose **one** `option` & use it',
+    '',
+    '## Choose one option & use it',
+    '',
+    '## An explicit anchor {#chosen}',
+    '',
+    '## Chosen',
+  ].join('\n'));
+  assert.deepEqual([...html.matchAll(/<h2 id="([^"]+)"/g)].map(([, id]) => id), [
+    'choose-one-option-use-it', 'choose-one-option-use-it-1', 'chosen', 'chosen-1',
+  ]);
+});
+
 test('a mermaid diagram is drawn to an inline SVG that follows the theme and loads nothing', () => {
   const renderer = createDocumentationRenderer({ root });
   const { html, text } = renderer.render('docs-site/content/guide.md', [
@@ -153,6 +181,10 @@ test('the bundled architecture guide renders its illustration and searchable flo
     ['Physical deployment', path.join(repositoryRoot, 'docs-site/static/img/sovai-physical-layout.webp')],
     ['System blueprint', path.join(repositoryRoot, 'docs-site/static/img/sovai-data-flows.webp')],
   ]);
+  for (const [, asset] of blueprints) {
+    assert.ok(overview.html.includes(`href="sterling-documentation/${asset}"`), 'each blueprint links to its full-size bundled file');
+  }
+  assert.equal(overview.html.match(/Open full-size image/g)?.length, 2);
   const flow = [...overview.html.matchAll(/<table>[\s\S]*?<\/table>/g)]
     .map(([table]) => table)
     .find((table) => table.includes('Mission hub validates sealed changes'));
