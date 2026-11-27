@@ -1,7 +1,9 @@
 import { ContainerModule, inject, injectable } from '@theia/core/shared/inversify';
 import { CommonMenus } from '@theia/core/lib/browser/common-menus.js';
 import { AbstractDialog } from '@theia/core/lib/browser/dialogs.js';
+import type { Message } from '@theia/core/lib/browser/widgets/widget.js';
 import { CommandContribution, CommandRegistry } from '@theia/core/lib/common/command.js';
+import { Disposable } from '@theia/core/lib/common/disposable.js';
 import { MenuContribution, MenuModelRegistry } from '@theia/core/lib/common/menu/index.js';
 import { nls } from '@theia/core/lib/common/nls.js';
 
@@ -21,6 +23,23 @@ class AboutSovAiDialog extends AbstractDialog<void> {
       : nls.localize('sterling/about/version', 'Version {0}', version);
     this.contentNode.append(versionText);
     this.appendAcceptButton(nls.localize('sterling/about/close', 'Close'));
+  }
+
+  protected override onAfterAttach(message: Message): void {
+    super.onAfterAttach(message);
+    const view = this.node.ownerDocument.defaultView;
+    if (!view) return;
+
+    // Theia's document-level keybindings can consume Escape before the dialog receives it.
+    const dismiss = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+          !this.isAttached || !event.composedPath().includes(this.node)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.close();
+    };
+    view.addEventListener('keydown', dismiss, true);
+    this.toDisposeOnDetach.push(Disposable.create(() => view.removeEventListener('keydown', dismiss, true)));
   }
 
   get value(): void {
