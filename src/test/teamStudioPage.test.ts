@@ -3917,7 +3917,9 @@ test('page: the toolbar: New team opens the builder\'s first screen; Optimise al
   const toolbar = page.doc.body.all().find((node) => node.className === 'toolbar')!;
   assert.deepEqual(toolbar.all().filter((node) => node.tagName === 'button').map((node) => node.textContent), ['New team', 'Optimise all teams', 'Set up a staff team', 'Import…', 'Refresh']);
   for (const [label, type] of [['Import…', 'import'], ['Refresh', 'refresh']] as const) { page.byLabel(label)!.click(); assert.equal(page.posts.at(-1)!.type, type); }
-  page.byLabel('Set up a military staff team (J2 intelligence or J5 plans) for this project\'s doctrine profile')!.click();
+  const staffSetup = page.byLabel('Set up a staff team');
+  assert.ok(staffSetup, 'the staff setup action uses its visible text as its accessible name');
+  staffSetup.click();
   assert.equal(page.posts.at(-1)!.type, 'staff-setup');
   page.byLabel('Test every team and set each member model from what the tests found, after asking about the cost')!.click();
   assert.equal(page.posts.at(-1)!.type, 'optimise-all');

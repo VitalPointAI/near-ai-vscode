@@ -555,8 +555,11 @@
     // 0.4.19 review: it said "This takes a few minutes", and six members on three models can run for hours. The host asks first and states the ceiling
     // worked out from the runs, so the button only says the run is coming, not how long it takes.
     actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost', id: 'optimise-all' }));
-    // A military staff section (J2 intelligence or J5 plans) for this project's doctrine profile: the questions are asked in VS Code, then it is listed here.
-    actions.append(button('Set up a staff team', () => { announce('Choose the section, doctrine profile and level in the questions at the top of the window.'); vscode.postMessage({ type: 'staff-setup' }); }, { label: 'Set up a military staff team (J2 intelligence or J5 plans) for this project\'s doctrine profile', id: 'staff-setup' }));
+    // The host asks which section to set up, then refreshes the library.
+    actions.append(button('Set up a staff team', () => {
+      announce('Choose one staff section in the editor’s setup questions.');
+      vscode.postMessage({ type: 'staff-setup' });
+    }, { id: 'staff-setup' }));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
