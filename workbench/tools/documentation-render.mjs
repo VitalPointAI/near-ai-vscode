@@ -140,6 +140,21 @@ export function createDocumentationRenderer({ root }) {
     }
   });
 
+  md.renderer.rules.heading_open = (tokens, index, options, env, renderer) => {
+    const heading = tokens[index];
+    const text = tokens[index + 1].children.map(token => {
+      if (token.type === 'text' || token.type === 'code_inline') return token.content;
+      if (token.type === 'softbreak' || token.type === 'hardbreak' || token.content === '<br>\n') return ' ';
+      return '';
+    }).join('');
+    const base = heading.attrGet('id') || text.toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-') || 'section';
+    let id = base;
+    for (let suffix = 1; env.headingIds.has(id); suffix += 1) id = `${base}-${suffix}`;
+    env.headingIds.add(id);
+    heading.attrSet('id', id);
+    return renderer.renderToken(tokens, index, options);
+  };
+
   md.renderer.rules.image = (tokens, index, options, env) => {
     const token = tokens[index];
     return imageHtml(token.attrGet('src'), md.renderer.renderInlineAsText(token.children ?? [], options, env), token.attrGet('title'), env.source);
@@ -157,7 +172,10 @@ export function createDocumentationRenderer({ root }) {
     return diagramHtml(token.content, `Diagram: ${(title ?? heading ?? env.title ?? 'figure').trim()}`, env.source);
   };
 
-  md.renderer.rules.sterling_html = (tokens, index) => tokens[index].content;
+  md.renderer.rules.sterling_html = (tokens, index, _options, env) => {
+    const token = tokens[index];
+    return token.meta ? convertBlock(token.content, token.meta.name, env) : token.content;
+  };
 
   /** Our HTML for one raw HTML or JSX block (never the block itself). */
   function convertBlock(raw, name, env) {
@@ -239,7 +257,10 @@ export function createDocumentationRenderer({ root }) {
     const token = state.push('sterling_html', '', 0);
     token.block = true;
     token.map = [startLine, last + 1];
-    token.content = name === '' ? '' : convertBlock(raw, name, state.env);
+    if (name) {
+      token.content = raw;
+      token.meta = { name };
+    }
     state.line = last + 1;
     return true;
   }, { alt: ['paragraph', 'reference', 'blockquote'] });
@@ -270,7 +291,7 @@ export function createDocumentationRenderer({ root }) {
     /** The HTML and search text of one guide. `source` is its repository path; front matter is removed here. */
     render(source, input, title) {
       const markdown = input.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-      const html = md.render(markdown, { source, title, mdx: source.endsWith('.mdx') });
+      const html = md.render(markdown, { source, title, mdx: source.endsWith('.mdx'), headingIds: new Set() });
       return { html, text: textOf(html) };
     },
   };

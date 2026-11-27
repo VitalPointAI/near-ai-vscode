@@ -6,6 +6,7 @@ import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { CommandRegistry } from '@theia/core/lib/common/command.js';
+import { MessageService } from '@theia/core/lib/common/message-service.js';
 import './sterling-documentation.css';
 
 const widgetId = 'sterling-documentation';
@@ -39,6 +40,7 @@ function createSanitizer(): (html: string) => DocumentFragment {
 @injectable()
 class SterlingDocumentationWidget extends BaseWidget {
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
+  @inject(MessageService) protected readonly messages!: MessageService;
   private readonly sanitize = createSanitizer();
   private readonly search = document.createElement('input');
   private readonly navigation = document.createElement('nav');
@@ -125,13 +127,6 @@ class SterlingDocumentationWidget extends BaseWidget {
     this.active = page;
     const body = document.createElement('div');
     body.append(this.sanitize(page.html));
-    const headingIds = new Map<string, number>();
-    body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(heading => {
-      const base = heading.id || (heading.textContent ?? '').toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-');
-      const count = headingIds.get(base) ?? 0;
-      heading.id = count ? `${base}-${count}` : base;
-      headingIds.set(base, count + 1);
-    });
     body.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(link => this.configureLink(link, page));
     this.content.replaceChildren(body);
     this.content.scrollTop = 0;
@@ -158,7 +153,9 @@ class SterlingDocumentationWidget extends BaseWidget {
       link.removeAttribute('rel');
       link.addEventListener('click', event => {
         event.preventDefault();
-        void this.commands.executeCommand('sterling.compliance.open');
+        void this.commands.executeCommand('sterling.compliance.open').catch(() => {
+          void this.messages.error('Compliance could not be opened. Try again.');
+        });
       });
       return;
     }

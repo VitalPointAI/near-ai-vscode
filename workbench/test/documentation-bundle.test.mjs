@@ -15,18 +15,7 @@ const repositoryRoot = existsSync(join(sourceRoot, 'workbench/Dockerfile'))
 const { unescapeAll } = new MarkdownIt().utils;
 
 function articleHeadingIds(html) {
-  // Mirror the Workbench's browser IDs, including numbering repeated heading text.
-  const counts = new Map();
-  const ids = new Set();
-  for (const [, , attributes, heading] of html.matchAll(/<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/g)) {
-    const text = heading.replace(/<[^>]+>/g, '').replace(/&[a-z\d#]+;/gi, unescapeAll);
-    const base = attributes.match(/\sid="([^"]+)"/)?.[1]
-      || text.toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-');
-    const count = counts.get(base) ?? 0;
-    counts.set(base, count + 1);
-    ids.add(count ? `${base}-${count}` : base);
-  }
-  return ids;
+  return new Set([...html.matchAll(/<h[1-6]\b[^>]*\sid="([^"]+)"/g)].map(([, id]) => id));
 }
 
 test('the Workbench image bundles its linked guides and original architecture blueprints offline', context => {
@@ -69,7 +58,7 @@ test('the Workbench image bundles its linked guides and original architecture bl
   const headingIds = new Map(pages.map(page => [page, articleHeadingIds(page.html)]));
   for (const page of pages) {
     for (const [, href] of page.html.matchAll(/<a href="([^"]+)"/g)) {
-      const link = resolveDocumentationLink(href.replaceAll('&amp;', '&'), page, pages);
+      const link = resolveDocumentationLink(unescapeAll(href), page, pages);
       if (!/^[a-z][a-z\d+.-]*:|^\/\//i.test(href)) {
         assert.ok(link && link.kind !== 'external', `${page.route} has an offline destination for ${href}`);
       }

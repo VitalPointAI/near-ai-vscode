@@ -44,10 +44,11 @@ export function resolveDocumentationLink<Page extends DocumentLocation>(
       const sourcePath = decodeURIComponent(new URL(href, new URL(current.source, documentRoot)).pathname);
       const name = routeName(documentPath);
       if (name === '/accreditation/gaps') return { kind: 'compliance' };
-      const page = pages.find(entry => `/${entry.route}` === documentPath)
-        ?? pages.find(entry => `/${entry.source}` === sourcePath)
-        ?? pages.find(entry => routeName(`/${entry.route}`) === name);
-      return page ? { kind: 'page', page, hash: route.hash } : undefined;
+      const exactPage = pages.find(entry => `/${entry.route}` === documentPath)
+        ?? pages.find(entry => `/${entry.source}` === sourcePath);
+      if (exactPage) return { kind: 'page', page: exactPage, hash: route.hash };
+      const matches = pages.filter(entry => routeName(`/${entry.route}`) === name);
+      return matches.length === 1 ? { kind: 'page', page: matches[0], hash: route.hash } : undefined;
     }
 
     const published = repositoryPath(route);

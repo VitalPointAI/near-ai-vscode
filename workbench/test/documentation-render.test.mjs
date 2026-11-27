@@ -79,6 +79,22 @@ test('explicit documentation heading IDs survive without exposing the source mar
   assert.doesNotMatch(text, /\{#protected-b\}/);
 });
 
+test('generated heading IDs use rendered inline text and stay unique', () => {
+  const renderer = createDocumentationRenderer({ root });
+  const { html } = renderer.render('docs-site/content/guide.md', [
+    '## Choose **one** `option` & use it',
+    '',
+    '## Choose one option & use it',
+    '',
+    '## An explicit anchor {#chosen}',
+    '',
+    '## Chosen',
+  ].join('\n'));
+  assert.deepEqual([...html.matchAll(/<h2 id="([^"]+)"/g)].map(([, id]) => id), [
+    'choose-one-option-use-it', 'choose-one-option-use-it-1', 'chosen', 'chosen-1',
+  ]);
+});
+
 test('a mermaid diagram is drawn to an inline SVG that follows the theme and loads nothing', () => {
   const renderer = createDocumentationRenderer({ root });
   const { html, text } = renderer.render('docs-site/content/guide.md', [

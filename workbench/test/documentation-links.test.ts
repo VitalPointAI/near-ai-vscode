@@ -68,3 +68,10 @@ test('the published gap register opens the built-in Compliance view', () => {
   assert.deepEqual(resolveDocumentationLink('../accreditation/gaps.mdx', road, pages), { kind: 'compliance' });
   assert.equal(resolveDocumentationLink('/accreditation/unknown.mdx', road, pages), undefined);
 });
+
+test('an ambiguous normalized route requires an exact page or source match', () => {
+  const second = { route: 'architecture/components.mdx', source: 'other/components.mdx' };
+  assert.equal(resolveDocumentationLink('./components', overview, [...pages, second]), undefined);
+  assert.deepEqual(resolveDocumentationLink('./components/index.md', overview, [...pages, second]),
+    { kind: 'page', page: components, hash: '' });
+});

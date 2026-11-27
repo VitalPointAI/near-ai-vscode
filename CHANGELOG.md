@@ -3,6 +3,7 @@
 ## Unreleased
 
 - In About SovAI, Enter closes the dialog when its Close button has keyboard focus.
+- Workbench Documentation opens published guides and section links locally, shows both architecture blueprints at full size, and opens the gap register in Compliance.
 
 ## 0.4.41
 

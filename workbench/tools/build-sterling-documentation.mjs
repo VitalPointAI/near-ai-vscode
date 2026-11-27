@@ -11,8 +11,8 @@ if (!existsSync(new URL('docs-site/content/index.md', root))) {
   throw new Error(`build-sterling-documentation: no docs-site/content under ${root.pathname}; run it from workbench/ in a checkout or the image build.`);
 }
 
-// Bundle the hand-authored Workbench guides and their published reference pages. Synced routes match the documentation site.
-// Copy only the named source files, alongside their local images. The bundle test checks the Dockerfile inputs and context allowlist.
+// Bundle the documentation site's guides, its linked repository references, and the software licence. The site already publishes the tracked
+// design and security guides below. Sync routes follow the site's paths, and the Docker context names each source and image explicitly.
 const guides = [
   ['docs-site/content/index.md', 'Overview', 'Welcome', 'index.md'],
   ['docs-site/content/using/getting-started.md', 'Using Sterling', 'Getting started', 'using/getting-started.md'],
