@@ -3,9 +3,10 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpat
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, institutionalSourceHash, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
+  admittedInstitutionalObservation, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, institutionalObservationDirectory,
+  institutionalObservationInput, institutionalSourceHash, prepareInstitutionalActionRegister, prepareInstitutionalBrief, prepareInstitutionalObservation,
   validateInstitutionalBriefSource, verifyInstitutionalActionAcceptance, type InstitutionalActionAuthority, type InstitutionalBriefSource,
-  type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
+  type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type PreparedInstitutionalDraft,
 } from '../../domain/staff/institutionalBrief';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { parseTeam, renderTeam, teamAgents, type TeamDefinition } from '../teams';
@@ -18,7 +19,8 @@ export const INSTITUTIONAL_COMMAND_GROUP_PROFILE = 'Canadian brigade (L3)';
 export const INSTITUTIONAL_COMMAND_GROUP_LEAD = 'Command Group lead';
 export const INSTITUTIONAL_COMMAND_GROUP_MEMBER = 'command-brief-drafter';
 export const INSTITUTIONAL_J3_ACTION_REGISTER_TEAM = 'institutional-j3-action-register-v1';
-export type InstitutionalRoleId = typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
+export const INSTITUTIONAL_J7_LESSONS_TEAM = 'institutional-j7-lessons-v1';
+export type InstitutionalRoleId = typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
 
 const description = 'Prepare a local institutional decision brief for human review.';
 const instructions = 'Prepare a CG-07 decision brief using only evidence admitted for this project. Separate sourced facts, assumptions and alternatives. Preserve attributed disagreement. Leave the decision with the Command Group lead.';
@@ -43,6 +45,9 @@ export const institutionalCommandGroupSkill = [
 const actionRegisterName = 'Institutional G3 Action Register';
 const actionRegisterInstructions = 'Draft the fictional J3-07 office-hours action register from the admitted extracts and accepted chair decision. Preserve uncertain assignments and dates for the chair. Leave acknowledgment and any handoff with the responsible human.';
 const actionRegisterMember = 'action-register-drafter';
+const lessonsName = 'Institutional G7 Lessons';
+const lessonsMember = 'lessons-drafter';
+const lessonsInstructions = 'Draft a fictional J7-09 office-hours observation from admitted local evidence. Distinguish direct observation, reports, judgment and hypothesis. Retain uncertainty, citations, corrections and dissent for human review.';
 const institutionalRoles = {
   [INSTITUTIONAL_COMMAND_GROUP_TEAM]: {
     label: INSTITUTIONAL_COMMAND_GROUP_NAME, member: INSTITUTIONAL_COMMAND_GROUP_MEMBER, lead: INSTITUTIONAL_COMMAND_GROUP_LEAD,
@@ -57,6 +62,15 @@ const institutionalRoles = {
     skill: ['# Office-hours action register (J3-07)', '', actionRegisterInstructions, '',
       'Cite exact admitted extracts. Deduplicate identical decision and action IDs. Leave unsupported owners and dates unresolved.', ''].join('\n'),
     keySegment: 'j3ActionRegister', read: 'ReadInstitutionalActionEvidence', save: 'SaveInstitutionalActionRegisterDraft',
+  },
+  [INSTITUTIONAL_J7_LESSONS_TEAM]: {
+    label: lessonsName, member: lessonsMember, lead: 'Fictional lessons lead',
+    definition: renderTeam(lessonsName, 'Prepare and cite local observations from a fictional office-hours trial.', [{
+      name: lessonsMember, role: 'Lessons drafter', instructions: lessonsInstructions,
+    }], { private: true }),
+    skill: ['# Office-hours observations and lessons (J7-09 and J7-10)', '', lessonsInstructions,
+      'Keep observation and findings in draft. The observer or lessons lead confirms facts, merge and access decisions. Independent human reviewers own findings validation.', ''].join('\n'),
+    keySegment: 'j7Lessons', read: 'ReadInstitutionalLessonsEvidence', save: 'SaveInstitutionalObservationDraft',
   },
 } as const;
 
@@ -131,6 +145,10 @@ interface InstitutionalActionRegisterFixture extends InstitutionalCommandFixture
   readonly actionAuthority: InstitutionalActionAuthority & { readonly predecessorTeam: TeamDefinition };
 }
 
+interface InstitutionalObservationFixture extends InstitutionalCommandFixture {
+  readonly currentObservation: () => unknown;
+}
+
 const fixtureSelections = new WeakMap<TeamDefinition, { readonly fixture: InstitutionalCommandFixture; readonly scope: InstitutionalDraftScope }>();
 const stale = 'The institutional command fixture no longer matches the staged project, source or run.';
 
@@ -146,14 +164,21 @@ export async function selectSyntheticInstitutionalCommandGroup(fixture: Institut
 }
 
 export async function selectSyntheticInstitutionalJ3ActionRegister(fixture: InstitutionalActionRegisterFixture): Promise<TeamDefinition> {
-  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, fixture.actionAuthority);
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, { authority: fixture.actionAuthority });
 }
 
-async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFixture, teamId: InstitutionalRoleId, authority?: InstitutionalActionRegisterFixture['actionAuthority']): Promise<TeamDefinition> {
+export async function selectSyntheticInstitutionalJ7Observation(fixture: InstitutionalObservationFixture): Promise<TeamDefinition> {
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J7_LESSONS_TEAM, { currentObservation: fixture.currentObservation });
+}
+
+async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFixture, teamId: InstitutionalRoleId, {
+  authority, currentObservation,
+}: { authority?: InstitutionalActionRegisterFixture['actionAuthority']; currentObservation?: () => unknown } = {}): Promise<TeamDefinition> {
   const exact = await captureInstitutionalBinding(fixture.root, teamId);
   if (!readInstitutionalRoleBinding(fixture.readStaged(), exact) || typeof fixture.withStableParents !== 'function' ||
       typeof fixture.currentSources !== 'function' || typeof fixture.currentActionSettings !== 'function' || !fixture.runId || !fixture.model ||
-      !/^[a-f0-9]{64}$/.test(fixture.policyHash) || (teamId === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM && !authority)) throw new ToolError(stale);
+      !/^[a-f0-9]{64}$/.test(fixture.policyHash) || (teamId === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM && !authority) ||
+      (teamId === INSTITUTIONAL_J7_LESSONS_TEAM && typeof currentObservation !== 'function')) throw new ToolError(stale);
   const role = institutionalRole(teamId);
   const team = parseTeam(role.definition, `${teamId}.md`);
   for (const member of team.members) {
@@ -188,7 +213,7 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
     actionRegister = Object.freeze({
       current: () => verifyInstitutionalActionAcceptance(evidence, previous, binding, currentSources()),
       predecessorFacts,
-      predecessorAtEffect: (version) => version === previous.version && predecessorFacts() && exactCommandGroupLeaf(fixture.root, version),
+      predecessorAtEffect: (version) => version === previous.version && predecessorFacts() && Boolean(readExactDraftLeaf(fixture.root, institutionalBriefDirectory, version)),
       predecessorCurrent: async () => {
         try {
           if (!predecessorFacts()) return false;
@@ -199,9 +224,24 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
     });
     actionRegister.current();
   }
+  let observation: InstitutionalDraftScope['observation'];
+  if (currentObservation) {
+    const current = () => admittedInstitutionalObservation(currentObservation(), binding, currentSources());
+    observation = Object.freeze({
+      current,
+      correctionAtEffect: (correction: InstitutionalObservationEvidence['correction']) => {
+        try {
+          const active = current();
+          return institutionalBriefDigest(canonicalBytes(active.correction)) === institutionalBriefDigest(canonicalBytes(correction)) &&
+            (!correction || currentObservationPredecessor(fixture.root, binding, currentSources(), active, correction.version));
+        } catch { return false; }
+      },
+    });
+    current();
+  }
   fixtureSelections.set(team, { fixture: provider, scope: Object.freeze({
     root: fixture.root, binding, withStableParents: fixture.withStableParents, currentSources, stagedIsCurrent,
-    ...(actionRegister ? { actionRegister } : {}),
+    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}),
     bindingIsCurrent: async () => {
       const sampled = await captureInstitutionalBinding(provider.root, teamId);
       return sampled.directoryDigest === exact.directoryDigest && stagedIsCurrent();
@@ -226,17 +266,17 @@ function admitted(current: readonly InstitutionalBriefSource[], project: string)
 }
 
 /** Read the bounded predecessor leaf synchronously under the fixture interlock. */
-function exactCommandGroupLeaf(root: string, version: string): boolean {
-  if (!/^[a-f0-9]{64}$/.test(version)) return false;
-  const file = path.join(root, institutionalBriefDirectory, `${version}.json`);
+function readExactDraftLeaf(root: string, directory: string, version: string): Buffer | undefined {
+  if (!/^[a-f0-9]{64}$/.test(version)) return undefined;
+  const file = path.join(root, directory, `${version}.json`);
   try {
-    if (realpathSync(file) !== file) return false;
+    if (realpathSync(file) !== file) return undefined;
     const before = lstatSync(file, { bigint: true });
-    if (!before.isFile() || before.size > institutionalBriefMaxBytes) return false;
+    if (!before.isFile() || before.size > institutionalBriefMaxBytes) return undefined;
     const descriptor = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     try {
       const opened = fstatSync(descriptor, { bigint: true });
-      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) return false;
+      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) return undefined;
       const bytes = Buffer.alloc(Number(before.size) + 1);
       let count = 0;
       while (count < bytes.length) {
@@ -245,11 +285,28 @@ function exactCommandGroupLeaf(root: string, version: string): boolean {
         count += read;
       }
       const after = lstatSync(file, { bigint: true });
-      return after.isFile() && after.dev === before.dev && after.ino === before.ino && after.size === before.size &&
-        after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs && BigInt(count) === before.size &&
-        institutionalBriefDigest(bytes.subarray(0, count)) === version;
+      const payload = bytes.subarray(0, count);
+      if (after.isFile() && after.dev === before.dev && after.ino === before.ino && after.size === before.size &&
+          after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs && BigInt(count) === before.size &&
+          institutionalBriefDigest(payload) === version) return payload;
+      return undefined;
     } finally { closeSync(descriptor); }
-  } catch { return false; }
+  } catch { return undefined; }
+}
+
+function currentObservationPredecessor(
+  root: string, binding: InstitutionalDraftScope['binding'], sources: readonly InstitutionalBriefSource[],
+  approval: InstitutionalObservationEvidence, version: string,
+): boolean {
+  const bytes = readExactDraftLeaf(root, institutionalObservationDirectory, version);
+  if (!bytes) return false;
+  const stored: unknown = JSON.parse(bytes.toString('utf8'));
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return false;
+  const { body, productId, correction } = stored as Record<string, unknown>;
+  if (!body || typeof body !== 'object' || Array.isArray(body) || productId !== approval.productId) return false;
+  const prior = admittedInstitutionalObservation({ ...approval, correction }, binding, sources);
+  const expected = prepareInstitutionalObservation(institutionalObservationInput(body, productId), binding, sources, prior);
+  return expected.review.version === version && bytes.equals(Buffer.from(expected.text));
 }
 
 function sourceHashes(sources: readonly InstitutionalBriefSource[]): ReadonlyMap<string, string> {
@@ -280,6 +337,17 @@ const actionRegisterSchema = exactSchema({
   })),
 });
 
+const observationSchema = exactSchema({
+  productId: line, time: line, timeKind: { ...line, enum: ['observed', 'reported'] },
+  statements: entries(exactSchema({
+    kind: { ...line, enum: ['observed', 'reported', 'judgment', 'hypothesis'] }, personId: line, text: line,
+    confidence: { ...line, enum: ['low', 'medium', 'high'] }, evidence: citationSchema,
+  })),
+  relatedObservations: entries(line),
+  potentialDuplicates: entries(exactSchema({ observationId: line, reason: line, evidence: citationSchema })),
+  dissent: entries(exactSchema({ attribution: line, text: line, evidence: citationSchema })),
+});
+
 export async function institutionalChildTools(
   team: TeamDefinition | undefined, selection: { root: string; runId: string; label: string; model: string; local: boolean; onTeam: boolean; detached: boolean },
   store: {
@@ -295,6 +363,8 @@ export async function institutionalChildTools(
   const { scope, fixture: { policyHash, currentActionSettings } } = selected;
   if (!await scope.bindingIsCurrent() || (scope.actionRegister && !await scope.actionRegister.predecessorCurrent())) throw new ToolError(stale);
   const accepted = scope.actionRegister?.current();
+  const approvedObservation = scope.observation?.current();
+  const observationDigest = approvedObservation && institutionalBriefDigest(canonicalBytes(approvedObservation));
   const { read: readEvidence, save: saveDraft } = role;
   const sources = structuredClone(scope.currentSources());
   const capturedSources = sourceHashes(sources);
@@ -302,18 +372,24 @@ export async function institutionalChildTools(
     try {
       return sameSources(capturedSources, scope.currentSources()) && scope.stagedIsCurrent() && !context.signal.aborted &&
         (!scope.actionRegister || (scope.actionRegister.predecessorFacts() &&
-          scope.actionRegister.current().predecessor.envelopeDigest === accepted?.predecessor.envelopeDigest));
+          scope.actionRegister.current().predecessor.envelopeDigest === accepted?.predecessor.envelopeDigest)) &&
+        (!scope.observation || institutionalBriefDigest(canonicalBytes(scope.observation.current())) === observationDigest);
     } catch { return false; }
   };
   const fresh = async (context: ToolContext) => Boolean(context.agentId && context.agentLabel === selection.label &&
     context.root === scope.root && !context.signal.aborted && await scope.bindingIsCurrent() && currentFacts(context));
   const project = (raw: Record<string, unknown>) => {
-    const draft = accepted
-      ? prepareInstitutionalActionRegister(raw, scope.binding, sources, accepted)
+    const draft = approvedObservation ? prepareInstitutionalObservation(raw, scope.binding, sources, approvedObservation)
+      : accepted ? prepareInstitutionalActionRegister(raw, scope.binding, sources, accepted)
       : prepareInstitutionalBrief(raw, scope.binding, sources);
     draft.review.sources.forEach(Object.freeze);
     Object.freeze(draft.review.sources);
     if (draft.review.kind === 'action-register') Object.freeze(draft.review.predecessor);
+    if (draft.review.kind === 'observation' && draft.review.correction) {
+      draft.review.correction.evidence.forEach(Object.freeze);
+      Object.freeze(draft.review.correction.evidence);
+      Object.freeze(draft.review.correction);
+    }
     Object.freeze(draft.review);
     return Object.freeze(draft);
   };
@@ -333,23 +409,25 @@ export async function institutionalChildTools(
       if (!await fresh(context)) throw new ToolError(stale);
       const quote = () => {
         if (!context.verifyFixtureGate?.(id) ||
-            (accepted && (!currentFacts(context) || !scope.actionRegister?.predecessorAtEffect(accepted.predecessor.version)))) throw new ToolError(stale);
+            (accepted && (!currentFacts(context) || !scope.actionRegister?.predecessorAtEffect(accepted.predecessor.version))) ||
+            (approvedObservation && (!currentFacts(context) || !scope.observation?.correctionAtEffect(approvedObservation.correction)))) throw new ToolError(stale);
         const source = sources.find((candidate) => candidate.id === id)!;
         return JSON.stringify({ id, revision: source.revision, date: source.date, label: source.label,
           ...(source.dissentAttribution ? { dissentAttribution: source.dissentAttribution } : {}),
           spans: source.spans.map(({ start, end }) => ({ start, end, quote: source.text.slice(start, end) })),
         });
       };
-      return accepted ? scope.withStableParents(async () => quote()) : quote();
+      return accepted || approvedObservation ? scope.withStableParents(async () => quote()) : quote();
     },
   };
   const save: AgentTool<PreparedInstitutionalDraft> = {
-    name: saveDraft, description: accepted ? 'Save one cited fictional office-hours action register for human review.' : 'Save one cited CG-07 decision brief as a local draft for human review.',
-    parameters: accepted ? actionRegisterSchema : briefSchema, capability: 'workspaceWrite',
+    name: saveDraft, description: approvedObservation ? 'Save one cited fictional office-hours observation for human review.'
+      : accepted ? 'Save one cited fictional office-hours action register for human review.' : 'Save one cited CG-07 decision brief as a local draft for human review.',
+    parameters: approvedObservation ? observationSchema : accepted ? actionRegisterSchema : briefSchema, capability: 'workspaceWrite',
     manifest: declareManifest({ tool: saveDraft, effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_ONLY }),
     fixtureGate: (draft) => ({ policyHash, currentActionSettings, effect: { verb: 'workspaceWrite', path: draft.path } }),
     parse: project,
-    title: () => accepted ? 'Save local action register draft' : 'Save local decision brief draft',
+    title: () => approvedObservation ? 'Save local observation draft' : accepted ? 'Save local action register draft' : 'Save local decision brief draft',
     async forbidden(draft, context) {
       if (!await fresh(context)) return stale;
       return store.verify(scope, draft).then(() => undefined, () => stale);

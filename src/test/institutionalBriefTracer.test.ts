@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ3ActionRegister, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -26,6 +26,10 @@ import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 const draftDirectory = '.planning/staff/institutional/command/briefs';
+const observationTeam = 'institutional-j7-lessons-v1';
+const observationDirectory = '.planning/staff/institutional/j7/observations';
+const readObservation = 'ReadInstitutionalLessonsEvidence';
+const saveObservation = 'SaveInstitutionalObservationDraft';
 const registerDirectory = '.planning/staff/institutional/j3/action-registers';
 const registerTeam = 'institutional-j3-action-register-v1';
 const readRegister = 'ReadInstitutionalActionEvidence';
@@ -55,7 +59,7 @@ const toolCall = (id: string, name: string, input: unknown): ToolCall => ({
   id, type: 'function', function: { name, arguments: JSON.stringify(input) },
 });
 
-async function stageInstitutionalSetup(root: string, choice: { label: string; team: string } = {
+async function stageInstitutionalSetup(root: string, choice: { label: string; team: string; keySegment?: string } = {
   label: 'Institutional Command Group', team: INSTITUTIONAL_COMMAND_GROUP_TEAM,
 }) {
   const stub = createVscodeStub();
@@ -79,8 +83,10 @@ async function stageInstitutionalSetup(root: string, choice: { label: string; te
     assert.ok(setup);
     await setup();
     assert.equal(profile.size, 1, 'the registered setup stages only the selected institutional role');
-    const record = [...profile.values()][0] as Record<string, unknown>;
+    const [[key, raw]] = [...profile.entries()];
+    const record = raw as Record<string, unknown>;
     assert.equal(record.team, choice.team);
+    if (choice.keySegment) assert.equal(key, `nearAi.staff.institutional.${choice.keySegment}.v1.${createHash('sha256').update(root).digest('hex')}`);
     assert.equal(await library.findRunTeam(choice.team, root), undefined);
     return record;
   } finally {
@@ -131,6 +137,7 @@ async function newFixture(logText = publicExtracts[0].text as string) {
   return { fixture, team, drafts, readReview,
     stopThroughLiveSettings: () => { actionSettings = { ...actionSettings, emergencyStop: true }; },
     changePolicy: () => { current = { ...initial, bundle: alternate, hash: bundleHash(alternate) }; },
+    restorePolicy: () => { current = initial; },
     withdrawParents: () => { parentsProved = false; },
     replaceStaged: () => { staged = { ...staged as object, echelon: 'L2' }; },
     reviseSources: () => { sources = sources.map((source) => ({ ...source, revision: 'next' })); },
@@ -161,7 +168,7 @@ async function runFixture(
     async *streamCompletion(selectedModel: string, messages: AgentMessage[], tools: ToolDefinition[], signal: AbortSignal,
       deadlines: { idleTimeoutMs?: number; turnTimeoutMs?: number }): AsyncGenerator<CompletionEvent> {
       results.push(...messages.filter((message) => message.role === 'tool').map((message) => String(message.content)));
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -174,7 +181,8 @@ async function runFixture(
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === observationTeam ? 'lessons-drafter'
+          : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
     },
@@ -675,4 +683,169 @@ test('a changed Command Group predecessor after J3 tool offer withholds the same
   assert.ok(!result.results.some((entry) => entry.includes(subject.rows[0].evidence[0].quote)), 'the actual child must receive no quote');
   assert.ok(!result.results.some((entry) => entry.includes('"state":"draft"')));
   assert.deepEqual(await readdir(subject.directory), []);
+});
+
+async function newObservationFixture() {
+  const subject = await newFixture();
+  const staged = await stageInstitutionalSetup(subject.fixture.root, { label: 'Institutional G7 Lessons', team: observationTeam, keySegment: 'j7Lessons' });
+  const directory = path.join(subject.fixture.root, observationDirectory);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const sources: InstitutionalBriefSource[] = [
+    { id: 'office-observer-note', revision: '1', date: '2026-11-02', label: 'org/Public', project,
+      text: 'The observer saw the fictional office open at 08:00.', spans: [] },
+    { id: 'office-desk-report', revision: '2', date: '2026-11-02', label: 'org/Public', project,
+      text: 'The desk reviewer reported 08:10 and noted a possibly duplicate office-hours entry.', dissentAttribution: 'Desk reviewer', spans: [] },
+    { id: 'office-opening-clock', revision: '4', date: '2026-11-02', label: 'org/Public', project,
+      text: 'The independent office entry clock records an 08:00 opening.', spans: [] },
+  ].map((source) => ({ ...source, label: 'org/Public', spans: [{ start: 0, end: source.text.length }] }));
+  const citeAt = (index: number) => [{ sourceId: sources[index].id, revision: sources[index].revision, start: 0,
+    end: sources[index].text.length, quote: sources[index].text }];
+  const productId = 'trial-morning';
+  const time = '2026-11-02T08:00:00.000Z';
+  const approval = {
+    project, directory: String(staged.directoryDigest), access: 'org/Public' as const, productId, time, timeKind: 'observed' as const,
+    people: [
+      { id: 'office-observer', sourceIds: [sources[0].id], kind: 'observer' as const },
+      { id: 'desk-reviewer', sourceIds: [sources[1].id], kind: 'reporter' as const },
+    ],
+    relatedObservationIds: ['trial-desk-entry'],
+    corroborations: [{ kind: 'observed', personId: 'office-observer', text: 'The observer saw an 08:00 opening.',
+      evidence: [...citeAt(0), ...citeAt(2)] }],
+    correction: null as { version: string; reason: string; evidence: ReturnType<typeof citeAt> } | null,
+  };
+  let current = approval;
+  let admitted = sources;
+  const fixture = {
+    ...subject.fixture, readStaged: () => staged, currentSources: () => admitted, currentObservation: () => current,
+  };
+  const team = await selectSyntheticInstitutionalJ7Observation(fixture);
+  const body = {
+    productId, time, timeKind: 'observed',
+    statements: [
+      { kind: 'observed', personId: 'office-observer', text: 'The observer saw an 08:00 opening.', confidence: 'low', evidence: citeAt(0) },
+      { kind: 'reported', personId: 'desk-reviewer', text: 'The desk reviewer reported an 08:10 opening.', confidence: 'low', evidence: citeAt(1) },
+    ],
+    relatedObservations: ['trial-desk-entry'],
+    potentialDuplicates: [{ observationId: 'trial-desk-entry', reason: 'The report mentions a possibly duplicate entry for the trial.', evidence: citeAt(1) }],
+    dissent: [{ attribution: 'Desk reviewer', text: 'The reported time differs from the observation.', evidence: citeAt(1) }],
+  };
+  return {
+    ...subject, fixture, team, directory, body, sources,
+    correct: (version: string) => {
+      current = { ...approval, correction: { version, reason: 'Record the desk account as conflicting rather than resolved.', evidence: citeAt(1) } };
+    },
+    support: citeAt(2),
+    withdrawCorroboration: () => { current = { ...current, corroborations: [] }; },
+    withdrawReport: () => { admitted = [sources[0]]; },
+  };
+}
+
+test('the registered J7 fixture preserves attributed office-hours observations and an exact correction', async () => {
+  const subject = await newObservationFixture();
+  const { fixture, team, body, directory } = subject;
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const steps = [toolCall('office-observer-evidence', readObservation, { sourceId: subject.sources[0].id }),
+    toolCall('observation', saveObservation, body)];
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; subject.changePolicy(); } });
+  try {
+    const held = await runFixture(fixture, team, { steps });
+    assert.ok(entered && held.decisions.some((decision) => decision.api.request.uid === 'observation' && decision.action_id === 1));
+    assert.deepEqual(await readdir(directory), [], 'a late policy change holds the actual J7 file');
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+  } finally { setCasProbe(undefined); }
+  subject.restorePolicy();
+  const initial = await runFixture(fixture, team, { steps });
+  assert.deepEqual(initial.offers[0], [readObservation, saveObservation]);
+  assert.ok(initial.results.some((entry) => entry.includes(subject.sources[0].text)));
+  const [first] = await readdir(directory);
+  assert.ok(first);
+  const firstBytes = await readFile(path.join(directory, first));
+  const firstVersion = createHash('sha256').update(firstBytes).digest('hex');
+  assert.equal(first, `${firstVersion}.json`);
+  assert.ok(initial.results.some((entry) => entry.includes(firstVersion)));
+  const stored = JSON.parse(firstBytes.toString());
+  assert.equal(stored.duty, 'J7-09');
+  assert.equal(stored.kind, 'observation');
+  assert.equal(stored.access, 'org/Public');
+  assert.equal(stored.body.statements[0].corroboration, 'unconfirmed');
+  assert.equal(stored.body.statements[1].kind, 'reported');
+  assert.equal(stored.body.statements[1].confidence, 'low');
+  assert.deepEqual(stored.body.dissent, body.dissent);
+  assert.equal(stored.sources.length, 2);
+  assert.ok(stored.sources.every((source: InstitutionalBriefSource) => source.label === 'org/Public'));
+  assert.deepEqual(stored.body.potentialDuplicates, body.potentialDuplicates);
+  assert.deepEqual(initial.decisions.find((entry) => entry.api.request.uid === 'observation')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${observationDirectory}/${first}`] });
+  assert.equal((await readInstitutionalDraftReview(scope, resolveInWorkspace, firstVersion)).version, firstVersion);
+
+  subject.correct(firstVersion);
+  const corrected = await runFixture(fixture, team, { steps: [
+    toolCall('corrected-observation', saveObservation, { ...body, statements: [body.statements[0], { ...body.statements[1], text: 'The desk account reports 08:10 and conflicts with the observation.' }] }),
+  ] });
+  const pair = await readdir(directory);
+  assert.equal(pair.length, 2);
+  const second = pair.find((entry) => entry !== first)!;
+  const secondVersion = path.basename(second, '.json');
+  const observed = JSON.parse((await readFile(path.join(directory, second))).toString());
+  assert.equal(observed.productId, stored.productId);
+  assert.equal(observed.correction.version, firstVersion);
+  assert.match(observed.correction.reason, /conflicting/);
+  assert.deepEqual(observed.correction.evidence, body.dissent[0].evidence);
+  assert.deepEqual(await readFile(path.join(directory, first)), firstBytes);
+  assert.ok(corrected.results.some((entry) => entry.includes(secondVersion)));
+  assert.equal((await readInstitutionalDraftReview(scope, resolveInWorkspace, secondVersion)).version, secondVersion);
+
+  subject.withdrawReport();
+  for (const version of [firstVersion, secondVersion]) {
+    await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|admitted|changed/);
+  }
+  const withheld = await runFixture(fixture, team, { steps: [toolCall('withdrawn-extract', readObservation, { sourceId: subject.sources[1].id })] });
+  assert.ok(!withheld.results.some((entry) => entry.includes(subject.sources[1].text)));
+  assert.deepEqual(await readdir(directory), pair);
+});
+
+test('the real J7 child confirms corroboration only for the exact fixture-approved statement and evidence set', async () => {
+  const subject = await newObservationFixture();
+  const [observed, reported] = subject.body.statements;
+  const contested = { ...observed, confidence: 'high', evidence: [...observed.evidence, ...reported.evidence] };
+  const held = await runFixture(subject.fixture, subject.team, {
+    steps: [toolCall('contested-confidence', saveObservation, { ...subject.body, statements: [contested, reported] })],
+  });
+  assert.deepEqual(held.offers[0], [readObservation, saveObservation]);
+  assert.deepEqual(await readdir(subject.directory), [], 'two opposing accounts cannot authorize a high-confidence draft');
+  assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+  assert.ok(!held.posted.some((entry) => entry.type === 'approval-request'));
+
+  const extra = { ...contested, confidence: 'low', evidence: [...contested.evidence, ...subject.support] };
+  await runFixture(subject.fixture, subject.team, {
+    steps: [toolCall('extra-unapproved-support', saveObservation, { ...subject.body, statements: [extra, reported] })],
+  });
+  const [unconfirmed] = await readdir(subject.directory);
+  assert.ok(unconfirmed);
+  const mixed = JSON.parse((await readFile(path.join(subject.directory, unconfirmed))).toString());
+  assert.equal(mixed.body.statements[0].corroboration, 'unconfirmed', 'an extra conflicting cite cannot stand in for the approved set');
+
+  const supported = { ...observed, text: `  ${observed.text}  `, confidence: 'high', evidence: [...subject.support, ...observed.evidence] };
+  const positive = await runFixture(subject.fixture, subject.team, {
+    steps: [toolCall('exact-support', saveObservation, { ...subject.body, statements: [supported, reported] })],
+  });
+  const drafts = await readdir(subject.directory);
+  assert.equal(drafts.length, 2);
+  const confirmed = drafts.find((file) => file !== unconfirmed)!;
+  const exact = JSON.parse((await readFile(path.join(subject.directory, confirmed))).toString());
+  assert.equal(exact.body.statements[0].corroboration, 'confirmed');
+  assert.equal(exact.body.statements[0].confidence, 'high');
+  assert.equal(exact.body.statements[0].text, observed.text);
+  assert.deepEqual(exact.body.dissent, subject.body.dissent);
+  const version = path.basename(confirmed, '.json');
+  assert.ok(positive.results.some((entry) => entry.includes(version)));
+  const scope = selectedInstitutionalScope(subject.team);
+  assert.ok(scope);
+  assert.equal((await readInstitutionalDraftReview(scope, resolveInWorkspace, version)).version, version);
+  subject.withdrawCorroboration();
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|changed|admitted/);
+  assert.deepEqual(await readdir(subject.directory), drafts);
 });

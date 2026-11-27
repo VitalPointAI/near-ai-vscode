@@ -3,7 +3,8 @@ import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
   institutionalActionRegisterDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
-  prepareInstitutionalActionRegister, prepareInstitutionalBrief, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
+  institutionalObservationDirectory, institutionalObservationInput, prepareInstitutionalActionRegister, prepareInstitutionalBrief,
+  prepareInstitutionalObservation, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
 } from '../domain/staff/institutionalBrief';
 import { replaceKeepingEdits } from './staffFiles';
 
@@ -12,7 +13,7 @@ const hexDigest = /^[0-9a-f]{64}$/;
 const readLeafFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 function directoryOf(scope: InstitutionalDraftScope): string {
-  return scope.actionRegister ? institutionalActionRegisterDirectory : institutionalBriefDirectory;
+  return scope.observation ? institutionalObservationDirectory : scope.actionRegister ? institutionalActionRegisterDirectory : institutionalBriefDirectory;
 }
 
 function changed(): never {
@@ -77,9 +78,11 @@ function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected
   const { body, productId } = payload as Record<string, unknown>;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return changed();
   const sources = scope.currentSources();
-  const expected = scope.actionRegister
-    ? prepareInstitutionalActionRegister({ productId, rows: storedActionRows(body) }, scope.binding, sources, scope.actionRegister.current())
-    : prepareInstitutionalBrief({ ...body, productId }, scope.binding, sources);
+  const expected = scope.observation
+    ? prepareInstitutionalObservation(institutionalObservationInput(body, productId), scope.binding, sources, scope.observation.current())
+    : scope.actionRegister
+      ? prepareInstitutionalActionRegister({ productId, rows: storedActionRows(body) }, scope.binding, sources, scope.actionRegister.current())
+      : prepareInstitutionalBrief({ ...body, productId }, scope.binding, sources);
   if (expected.path !== pathExpected || !bytes.equals(Buffer.from(expected.text))) return changed();
   return expected;
 }
@@ -99,6 +102,7 @@ async function requireCurrentPredecessor(scope: InstitutionalDraftScope): Promis
 }
 
 function exactPredecessorLeaf(scope: InstitutionalDraftScope, review: InstitutionalDraftReview): boolean {
+  if (review.kind === 'observation') return scope.observation?.correctionAtEffect(review.correction) === true;
   return review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
 }
 
