@@ -1892,13 +1892,14 @@ Plans:
   4. Entity pages show a customer or project across sources; a merge of two entities is a proposal with undo, and model-written relations run only on priority items under the spend governor, each backed by a verified quote. (KB-03, KB-04, KB-05)
   5. With your organization's opt-in for a scale, a person sees only that an item exists, its steward and a request-access button, and only for items whose discovery description a person approved; with it off (the default), nothing shows. (KB-15)
   6. The right-side Context Graph action opens the same native landing in English and French. With a governed workspace data source, people can explore the authorized graph by strategic, operational or tactical detail, then narrow it by area of interest, activity, responsibility and time. Citations reopen the source version and span the reader can access.
+  7. Visible new graph evidence animates into place. Existing nodes stay anchored, affected entities and links briefly highlight, and people can keep panning, filtering and inspecting sources during updates. Pause and reduced-motion modes preserve the same visible information. (KB-05, KB-07, KB-08)
 **Research flags**: Mosaic and Splink licences and dependency trees; pgvector recall at low clearance.
 **Plans:** 1 local synthetic preparation plan. Production plans follow Phase 93.
 **UI hint**: yes
 
 Plans:
 - [x] 96-01-PLAN.md — Fictional graph and exact citation acceptance fixture
-- [ ] Governed store, search, entity views and answer acceptance
+- [ ] Governed store, search, [animated entity exploration](phases/96-search-context-graph-entity-pages-and-ask/96-UI-SPEC.md) and answer acceptance
 
 ### Phase 97: Analytics, reports, insights and views
 **Goal**: Dashboards, reports and suggested insights appear without setup, with every number computed under the viewer's clearance.
