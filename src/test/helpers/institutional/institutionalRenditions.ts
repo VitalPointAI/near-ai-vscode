@@ -1,5 +1,5 @@
 import { canonicalBytes } from '../../../domain/team/canonical';
-import type { InstitutionalDraftReview } from './institutionalBrief';
+import type { InstitutionalBriefBinding, InstitutionalDraftReview, InstitutionalLibraryRemitEvidence } from './institutionalBrief';
 import { canonicalDigest, institutionalBriefMaxBytes, record, requireCatalogue, text } from './institutionalEvidence';
 
 export type InstitutionalRenditionSource = Extract<InstitutionalDraftReview, { kind: 'library-service-remits' }>;
@@ -54,13 +54,14 @@ export interface InstitutionalRenditionRequest {
   readonly purpose: string;
 }
 
-export function verifyInstitutionalRenditionReview(pair: InstitutionalRenditionPair, review: unknown): void {
+export function verifyInstitutionalRenditionReview(pair: Pick<InstitutionalRenditionPair, 'manifest' | 'digest'>, review: unknown) {
   const expected = {
     pairDigest: pair.digest, policyRevision: pair.manifest.policyRevision, decision: 'approved',
     reviewer: 'fictional-library-language-reviewer', role: 'fictional-language-pair-reviewer',
     issuer: 'fictional-library-review-office', operation: 'review-rendition-pair',
   };
   requireCatalogue(canonicalDigest(review) === canonicalDigest(expected));
+  return expected;
 }
 
 export function verifyInstitutionalRenditionAccess(pair: InstitutionalRenditionPair, request: InstitutionalRenditionRequest, access: unknown): void {
@@ -90,4 +91,47 @@ export function renderInstitutionalRenditions(pair: InstitutionalRenditionPair, 
     `<li>${escapeHtml(id)}, ${escapeHtml(revision)}, <code>${escapeHtml(hash)}</code></li>`);
   return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>` +
     `<body><main>${heading}${sections.join('')}<h2>Sources</h2><ul>${citations.join('')}</ul></main></body></html>`;
+}
+
+export type InstitutionalRenditionHistoryRequest = Omit<InstitutionalRenditionRequest, 'selection'> & {
+  readonly pairDigest: string;
+};
+
+export interface InstitutionalRenditionHistoryHost {
+  readonly formerPair: (digest: string) => { readonly manifest: InstitutionalRenditionPair['manifest']; readonly review: unknown } | undefined;
+  readonly currentHistoryAccess: () => unknown;
+}
+
+export function institutionalRenditionHistoryMetadata(
+  request: InstitutionalRenditionHistoryRequest, former: ReturnType<InstitutionalRenditionHistoryHost['formerPair']>,
+  access: unknown, binding: InstitutionalBriefBinding, admitted: InstitutionalLibraryRemitEvidence,
+) {
+  requireCatalogue(former);
+  const { manifest } = former;
+  const digest = canonicalDigest(manifest);
+  requireCatalogue(digest === request.pairDigest && manifest.sourceVersion === request.version &&
+    manifest.project === binding.project && manifest.directory === binding.directory &&
+    manifest.product === 'library-service-remits' && manifest.product === admitted.productId &&
+    request.purpose === admitted.purpose && admitted.records.length === 2);
+  requireCatalogue(manifest.renditions.length === languages.length && manifest.renditions.every(({ language, origin }, index) =>
+    language === languages[index] && origin === 'manual'));
+
+  const sourceIds = manifest.sources.map(({ id }) => id).sort();
+  const admittedIds = [admitted.liaisonLead.sourceId, ...admitted.records.flatMap(({ mandate, consent }) =>
+    mandate ? [mandate.sourceId, consent.evidence.sourceId] : [consent.evidence.sourceId])].sort();
+  requireCatalogue(canonicalDigest(sourceIds) === canonicalDigest(admittedIds));
+
+  const expected = {
+    project: binding.project, directory: binding.directory, product: admitted.productId,
+    formerVersion: manifest.sourceVersion, pairDigest: digest, sourceIds, requester: request.requester, purpose: admitted.purpose,
+    policyRevision: admitted.policyRevision, currentScopeDigest: canonicalDigest(admitted),
+    operation: 'read-historical-review-metadata', decision: 'allow',
+  };
+  requireCatalogue(canonicalDigest(access) === canonicalDigest(expected));
+  const review = verifyInstitutionalRenditionReview({ manifest, digest }, former.review);
+  return {
+    sourceVersion: manifest.sourceVersion,
+    renditions: manifest.renditions.map(({ language, origin, digest }) => ({ language, origin, digest })),
+    review,
+  };
 }

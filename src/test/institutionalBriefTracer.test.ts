@@ -21,7 +21,7 @@ import { prepareInstitutionalRenditions } from './helpers/institutional/institut
 import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload } from '../domain/team/signedPayload';
 import { setCasProbe } from '../staff/staffFiles';
-import { recordInstitutionalRenditions, readInstitutionalDraftReview, storeInstitutionalDraft, verifyInstitutionalDraftTarget } from './helpers/institutional/institutionalDraftStore';
+import { readInstitutionalRenditionHistory, recordInstitutionalRenditions, readInstitutionalDraftReview, storeInstitutionalDraft, verifyInstitutionalDraftTarget } from './helpers/institutional/institutionalDraftStore';
 import { readConfirmedInstitutionalJointTier } from './helpers/institutional/institutionalSetup';
 import type { MementoLike } from '../services/stateHome';
 import type { AgentTurnRequest } from '../services/agentSession';
@@ -1699,6 +1699,52 @@ test('registered G9 preserves independent library mandates and holds the exact c
   await denied({ ...request, version: correctedVersion });
   pairReview = { ...reviewReceipt, pairDigest: prepareInstitutionalRenditions(corrected, renditions).digest };
   await record({ ...request, version: correctedVersion });
+
+  const historyRequest = { version, pairDigest: pair.digest, requester: request.requester, purpose };
+  const former = { manifest: pair.manifest, review: reviewReceipt, ignoredFixtureBody: draft.body, ignoredRenditions: pair.content };
+  let historyAccess: unknown;
+  const historyHost = {
+    formerPair: (digest: string) => digest === pair.digest ? former : undefined,
+    currentHistoryAccess: () => historyAccess,
+  };
+  const history = (override = historyRequest) => readInstitutionalRenditionHistory(scope, override, historyHost);
+  const denyHistory = async (override = historyRequest) =>
+    assert.rejects(history(override), { message: 'This catalogue metadata is unavailable.' });
+  await denyHistory();
+  historyAccess = access;
+  await denyHistory();
+
+  assert.ok(scope.libraryRemits);
+  const historyGrant = {
+    project, directory: scope.binding.directory, product: receipt.productId, formerVersion: version, pairDigest: pair.digest,
+    sourceIds: pair.manifest.sources.map(({ id }) => id), requester: request.requester, purpose, policyRevision: receipt.policyRevision,
+    currentScopeDigest: createHash('sha256').update(canonicalBytes(scope.libraryRemits())).digest('hex'),
+    operation: 'read-historical-review-metadata', decision: 'allow',
+  };
+  historyAccess = historyGrant;
+  await denied();
+  const metadata = await history();
+  assert.deepEqual(metadata, {
+    sourceVersion: version, renditions: pair.manifest.renditions, review: reviewReceipt,
+  });
+  await denyHistory({ ...historyRequest, pairDigest: 'f'.repeat(64) });
+  await denyHistory({ ...historyRequest, version: correctedVersion });
+  historyAccess = { ...historyGrant, sourceIds: historyGrant.sourceIds.slice(1) };
+  await denyHistory();
+  historyAccess = historyGrant;
+
+  const beforeWithdrawal = currentReceipt;
+  currentReceipt = { ...currentReceipt, policyRevision: 'remit-r2' };
+  await denyHistory();
+  currentReceipt = { ...beforeWithdrawal, grants: beforeWithdrawal.grants.slice(1) };
+  await denyHistory();
+  currentReceipt = beforeWithdrawal;
+  now = expiredInstant;
+  await denyHistory();
+  now = validInstant;
+  historyAccess = undefined;
+  await denyHistory();
+  await denyHistory({ ...historyRequest, pairDigest: 'f'.repeat(64) });
   activeSources = sources;
 
   const expiredRead = await runFixture(fixture, team, {

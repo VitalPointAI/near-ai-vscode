@@ -11,8 +11,9 @@ import { institutionalLegalReferencesDirectory, institutionalPolicySourcesDirect
 import { institutionalBudgetDirectory, institutionalInventoryDirectory, prepareInstitutionalBudget, prepareInstitutionalInventory } from './institutionalReconciliation';
 import { institutionalServiceMonitoringDirectory, prepareInstitutionalServiceMonitoring } from './institutionalServiceMonitoring';
 import {
-  prepareInstitutionalRenditions, renderInstitutionalRenditions, verifyInstitutionalRenditionAccess,
-  verifyInstitutionalRenditionReview, type InstitutionalRenditionHost, type InstitutionalRenditionRequest,
+  institutionalRenditionHistoryMetadata, prepareInstitutionalRenditions, renderInstitutionalRenditions,
+  verifyInstitutionalRenditionAccess, verifyInstitutionalRenditionReview, type InstitutionalRenditionHistoryHost,
+  type InstitutionalRenditionHistoryRequest, type InstitutionalRenditionHost, type InstitutionalRenditionRequest,
 } from './institutionalRenditions';
 import { requireCatalogue } from './institutionalEvidence';
 import { replaceKeepingEdits } from '../../../staff/staffFiles';
@@ -233,4 +234,19 @@ export async function recordInstitutionalRenditions(
     if (recording) throw error;
     throw new Error(institutionalCatalogueUnavailable);
   });
+}
+
+export async function readInstitutionalRenditionHistory(
+  scope: InstitutionalDraftScope, request: InstitutionalRenditionHistoryRequest, host: InstitutionalRenditionHistoryHost,
+) {
+  const currentRemits = scope.libraryRemits;
+  requireCatalogue(currentRemits && hexDigest.test(request.version) && hexDigest.test(request.pairDigest));
+  return scope.withStableParents(async () => {
+    requireCatalogue(await scope.bindingIsCurrent());
+    const former = host.formerPair(request.pairDigest);
+    const access = host.currentHistoryAccess();
+    const metadata = institutionalRenditionHistoryMetadata(request, former, access, scope.binding, currentRemits());
+    requireCatalogue(scope.stagedIsCurrent());
+    return metadata;
+  }).catch(() => { throw new Error(institutionalCatalogueUnavailable); });
 }
