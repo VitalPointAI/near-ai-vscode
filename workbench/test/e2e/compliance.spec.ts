@@ -159,4 +159,22 @@ test('Projection', async ({ page }) => {
   const totals = view.locator('.sterling-evidence-summary tfoot tr');
   await expect(totals.locator('td').nth(1)).toHaveText('0');
   await shot(page, 'S9-projection');
+
+  const summary = view.locator('.sterling-evidence-summary-region');
+  for (const width of [1140, 460]) {
+    await page.setViewportSize({ width, height: 2000 });
+    await expect.poll(() => summary.evaluate(region => {
+      const headers = Array.from(region.querySelectorAll('thead th'));
+      return headers.map(header => {
+        const text = document.createRange();
+        text.selectNodeContents(header);
+        return text.getClientRects().length;
+      });
+    })).toEqual([1, 1, 1, 1, 1, 1, 1]);
+    const layout = await summary.evaluate(region => ({
+      tableScrolls: region.scrollWidth > region.clientWidth,
+      pageScrolls: region.closest('.sterling-compliance')!.scrollWidth > region.closest('.sterling-compliance')!.clientWidth,
+    }));
+    expect(layout).toEqual({ tableScrolls: width === 460, pageScrolls: false });
+  }
 });
