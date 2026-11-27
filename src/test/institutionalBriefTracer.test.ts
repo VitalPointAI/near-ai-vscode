@@ -2,16 +2,17 @@ import { createInstitutionalStaffSetupFixture } from './helpers/institutional/in
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rename, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectSyntheticInstitutionalJ8Budget, selectSyntheticInstitutionalJ1Monitoring, selectSyntheticInstitutionalAccessibility, selectedInstitutionalScope, institutionalChildTools, selectedTeamAgents } from './helpers/institutional/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectSyntheticInstitutionalJ8Budget, selectSyntheticInstitutionalJ1Monitoring, selectSyntheticInstitutionalAccessibility, selectSyntheticInstitutionalJointTier, selectSyntheticInstitutionalLegalReferences, selectSyntheticInstitutionalPolicySources, selectedInstitutionalScope, institutionalChildTools, selectedTeamAgents } from './helpers/institutional/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
+import type { ActorRef } from '../domain/gate/decide';
 import { bundleHash } from '../domain/gate/bundle';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
@@ -20,12 +21,22 @@ import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload } from '../domain/team/signedPayload';
 import { setCasProbe } from '../staff/staffFiles';
 import { readInstitutionalDraftReview, storeInstitutionalDraft, verifyInstitutionalDraftTarget } from './helpers/institutional/institutionalDraftStore';
+import { readConfirmedInstitutionalJointTier } from './helpers/institutional/institutionalSetup';
+import type { MementoLike } from '../services/stateHome';
 import type { AgentTurnRequest } from '../services/agentSession';
 import { StreamInterruptedError, type AgentMessage, type CompletionEvent, type ToolCall, type ToolDefinition } from '../services/nearAiClient';
 import { newTestConversation, testBundleState, testGateRuntime } from './helpers/gatedRuns';
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const jointTierTeam = 'institutional-joint-tier-fixture-v1';
+const readJointTier = 'ReadInstitutionalJointTier';
+const policySourcesTeam = 'institutional-ss-policy-sources-v1';
+const readPolicySources = 'ReadInstitutionalPolicySource';
+const savePolicySources = 'SaveInstitutionalPolicySourcesDraft';
+const legalTeam = 'institutional-ss-legal-references-v1';
+const readLegal = 'ReadInstitutionalLegalReference';
+const saveLegal = 'SaveInstitutionalLegalReferencesDraft';
 const accessibilityTeam = 'institutional-ss-accessibility-v1';
 const accessibilityDirectory = '.planning/staff/institutional/special/accessibility-reviews';
 const readAccessibility = 'ReadInstitutionalAccessibilityEvidence';
@@ -193,7 +204,8 @@ async function runFixture(
   fixture: Awaited<ReturnType<typeof newFixture>>['fixture'],
   team: TeamDefinition,
   options: {
-    steps?: readonly ToolCall[]; onChildTurn?: (turn: number) => void; root?: string; runId?: string;
+    steps?: readonly ToolCall[]; onChildTurn?: (turn: number) => void | Promise<void>; root?: string; runId?: string;
+    onGatedActor?: (actor: ActorRef) => void;
     onStart?: (stop: () => void) => void; modelInterruption?: 'retryable' | 'silent'; wrongChildActor?: boolean;
   } = {},
 ) {
@@ -214,22 +226,23 @@ async function runFixture(
         results.push(message.content);
         toolResults.set(message.tool_call_id, message.content);
       }
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison|Draft a fictional J4-02 office inventory reconciliation|Draft a fictional J8-02 office budget evidence reconciliation|Draft a fictional J1-05 office help aggregate|Draft a fictional SS-18 help-sheet accessibility review/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison|Draft a fictional J4-02 office inventory reconciliation|Draft a fictional J8-02 office budget evidence reconciliation|Draft a fictional J1-05 office help aggregate|Draft a fictional SS-18 help-sheet accessibility review|Read the fictional institutional joint tier selection|Draft a fictional SS-01 office reference bibliography|Draft a fictional SS-16 public office source comparison/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
         childRequests.push({ model: selectedModel, idle: deadlines.idleTimeoutMs, turn: deadlines.turnTimeoutMs, admitted });
-        options.onChildTurn?.(childTurn);
+        const beforeCall = options.onChildTurn?.(childTurn);
+        if (beforeCall) await beforeCall;
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
-        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam || team.slug === inventoryTeam || team.slug === budgetTeam || team.slug === monitoringTeam || team.slug === accessibilityTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
+        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam || team.slug === inventoryTeam || team.slug === budgetTeam || team.slug === monitoringTeam || team.slug === accessibilityTeam || team.slug === legalTeam || team.slug === policySourcesTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === accessibilityTeam ? 'accessibility-review-drafter' : team.slug === monitoringTeam ? 'service-monitoring-drafter' : team.slug === budgetTeam ? 'budget-evidence-drafter' : team.slug === inventoryTeam ? 'inventory-count-drafter' : team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === jointTierTeam ? 'joint-tier-reader' : team.slug === policySourcesTeam ? 'policy-sources-drafter' : team.slug === legalTeam ? 'legal-references-drafter' : team.slug === accessibilityTeam ? 'accessibility-review-drafter' : team.slug === monitoringTeam ? 'service-monitoring-drafter' : team.slug === budgetTeam ? 'budget-evidence-drafter' : team.slug === inventoryTeam ? 'inventory-count-drafter' : team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -257,6 +270,9 @@ async function runFixture(
   conversation.gateHost = { async runtimeFor(request) {
     const actor = { ...request.actor, deviceFingerprint: 'fictional-brief' };
     if (options.wrongChildActor && actor.kind === 'sub-agent') actor.agentId = 'other-fictional-child';
+    if (actor.kind === 'sub-agent' && actor.agentId && actor.agentLabel) {
+      options.onGatedActor?.(actor);
+    }
     const runtime = testGateRuntime({ actor, presence: request.presence, context: request.context });
     runtimes.push(runtime);
     return { ...runtime, bundleState: fixture.bundleState };
@@ -2104,5 +2120,420 @@ test('registered Special Staff keeps help-sheet observations, issues and evidenc
     assert.deepEqual(await readdir(directory), [name]);
   } finally { setCasProbe(undefined); }
   currentReceipt = receipt;
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+});
+
+
+test('registered joint tier switches revoke the previous plan probe and never produce a draft', async () => {
+  const subject = await newFixture();
+  const { root } = subject.fixture;
+  const other = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-joint-tier-other-')));
+  const library = new TeamLibrary(path.join(root, 'unused-joint-library'));
+  const stub = createVscodeStub();
+  Object.assign(stub.vscode as object, { QuickPickItemKind: { Separator: -1 } });
+  const uninstall = installVscodeStub(stub);
+  const moduleId = require.resolve('../services/staffSetupCommand');
+  const cached = require.cache[moduleId];
+  delete require.cache[moduleId];
+  const records = new Map<string, unknown>();
+  const writes: string[] = [];
+  let updateHook: (() => Promise<void>) | undefined;
+  const state: MementoLike = {
+    get<T>(key: string) { return records.get(key) as T | undefined; },
+    async update(key, value) {
+      writes.push(key);
+      records.set(key, structuredClone(value));
+      await updateHook?.();
+    },
+  };
+  const pause = () => {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => { release = resolve; });
+    return { promise, release };
+  };
+  const level1 = 'L1 Joint (J)';
+  const level0 = 'L0 Strategic joint (J)';
+  const setupLabel = 'Institutional Joint Tier';
+  const confirmLabel = '$(check) Confirm joint tier';
+  const read = toolCall('joint-tier-probe', readJointTier, {});
+  const expectedL1 = { level: 'L1', name: 'Joint', designation: 'J' };
+  const expectedL0 = { level: 'L0', name: 'Strategic joint', designation: 'J' };
+  let beforeConfirmation: (() => Promise<void>) | undefined;
+  try {
+    const { registerStaffSetup, SET_UP_ACTION } = require('../services/staffSetupCommand') as typeof import('../services/staffSetupCommand');
+    registerStaffSetup({ subscriptions: [], globalState: state } as never, {
+      chat: { async prefill() { assert.fail('fixture setup cannot start a team'); } },
+      library,
+      fixture: createInstitutionalStaffSetupFixture(stub.vscode as never, SET_UP_ACTION),
+    });
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    const window = (stub.vscode as typeof import('vscode')).window;
+    const pick = window.showQuickPick;
+    Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async (...args: unknown[]) => {
+      const result = await Reflect.apply(pick, window, args);
+      if ((args[1] as { title?: string })?.title?.includes('confirm level') && beforeConfirmation) {
+        const hook = beforeConfirmation;
+        beforeConfirmation = undefined;
+        await hook();
+      }
+      return result;
+    } });
+    stub.setWorkspaceFolders([root]);
+    const configure = async (level: string, confirm = true) => {
+      assert.equal(stub.quickPickAnswers.length, 0);
+      stub.quickPickAnswers.push(setupLabel, level, confirm ? confirmLabel : undefined);
+      try { await execute(); } finally { stub.quickPickAnswers.length = 0; }
+    };
+    await configure(level1);
+    assert.deepEqual(stub.quickPickRequests.find(({ items }) => items.some(({ label }) => label === level1))?.items.map(({ label }) => label), [level1, level0]);
+    assert.equal(records.size, 1);
+    const [[key, first]] = [...records];
+    const readCurrent = readConfirmedInstitutionalJointTier;
+    const select = selectSyntheticInstitutionalJointTier;
+    const fixture = { ...subject.fixture, readConfiguredTier: () => readCurrent(root, state) };
+    const firstL1 = await select(fixture);
+    const currentL1 = await runFixture(fixture, firstL1, { steps: [read, toolCall('invalid-probe-arguments', readJointTier, { level: 'L0' })] });
+    assert.deepEqual(currentL1.offers[0], [readJointTier]);
+    assert.deepEqual(JSON.parse(currentL1.toolResults.get(read.id)!), expectedL1);
+    assert.ok(!currentL1.decisions.some((entry) => entry.api.request.uid === 'invalid-probe-arguments' && entry.action_id === 1));
+    await configure(level1);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(records.get(key), first);
+    assert.ok(stub.quickPickRequests.some(({ items }) => items.some((item) => item.label === level1 && /currently configured/i.test(item.detail ?? ''))));
+    await configure(level0, false);
+    assert.deepEqual(records.get(key), first);
+
+    const raced = await runFixture(fixture, firstL1, {
+      steps: [read],
+      async onChildTurn(turn) { if (turn === 0) await configure(level0); },
+    });
+    assert.deepEqual(raced.offers[0], [readJointTier]);
+    assert.ok(!raced.results.some((result) => /"designation"|"level"|"review"|"draft"/.test(result)));
+    const configuredL0 = records.get(key);
+    assert.notDeepEqual(configuredL0, first);
+    const freshL0 = await select(fixture);
+    assert.deepEqual(JSON.parse((await runFixture(fixture, freshL0, { steps: [read] })).toolResults.get(read.id)!), expectedL0);
+    await configure(level0);
+    assert.equal(writes.length, 2);
+    assert.deepEqual(records.get(key), configuredL0);
+    assert.ok(stub.quickPickRequests.some(({ items }) => items.some((item) => item.label === level0 && /currently configured/i.test(item.detail ?? ''))));
+
+    const pausedConfirmation = pause();
+    const confirmEntered = pause();
+    beforeConfirmation = async () => { confirmEntered.release(); await pausedConfirmation.promise; };
+    const competing = configure(level0);
+    try {
+      await Promise.race([confirmEntered.promise, competing.then(() => assert.fail('did not enter confirmation'))]);
+      await configure(level1);
+    } finally { pausedConfirmation.release(); }
+    await competing;
+    assert.equal(writes.length, 3);
+    assert.notDeepEqual(records.get(key), first);
+    assert.deepEqual(JSON.parse((await runFixture(fixture, await select(fixture), { steps: [read] })).toolResults.get(read.id)!), expectedL1);
+    assert.deepEqual((await runFixture(fixture, firstL1, { steps: [read] })).offers, []);
+
+    const stableL1 = records.get(key);
+    const updateEntered = pause();
+    const finishUpdate = pause();
+    updateHook = async () => { updateEntered.release(); await finishUpdate.promise; throw new Error('Fictional Memento write rejected'); };
+    const failed = configure(level0);
+    try {
+      await Promise.race([updateEntered.promise, failed.then(() => assert.fail('did not enter update'))]);
+      assert.equal(readCurrent(root, state), undefined);
+      await assert.rejects(select(fixture));
+    } finally { finishUpdate.release(); }
+    await failed;
+    const rejectedCache = records.get(key);
+    assert.notDeepEqual(rejectedCache, stableL1);
+    assert.equal(readCurrent(root, state), undefined);
+    updateHook = undefined;
+    await configure(level0);
+    assert.equal(writes.length, 5);
+    assert.notDeepEqual(records.get(key), rejectedCache);
+    assert.deepEqual(JSON.parse((await runFixture(fixture, await select(fixture), { steps: [read] })).toolResults.get(read.id)!), expectedL0);
+
+    const lastGood = records.get(key);
+    records.set(key, { level: 'L0', extra: true });
+    await configure(level1);
+    assert.equal(readCurrent(root, state), undefined);
+    assert.equal(writes.length, 5);
+    records.set(key, lastGood);
+    beforeConfirmation = async () => { stub.setWorkspaceFolders([other]); };
+    await configure(level1);
+    assert.deepEqual(records.get(key), lastGood);
+    assert.equal(records.size, 1);
+    assert.equal(writes.length, 5);
+
+    stub.setWorkspaceFolders([other]);
+    beforeConfirmation = async () => { await rename(other, other + '-moved'); await mkdir(other); };
+    await configure(level0);
+    assert.equal(writes.length, 5);
+    assert.deepEqual(await readdir(other), []);
+    assert.deepEqual(await readdir(other + '-moved'), []);
+    assert.deepEqual(await library.list(root), []);
+    assert.equal(await library.findRunTeam(jointTierTeam, root), undefined);
+    assert.ok(!existsSync(path.join(root, '.planning', '.near-ai', 'project.json')));
+    assert.deepEqual(await readdir(subject.drafts), []);
+    assert.ok([currentL1, raced].flatMap(({ decisions }) => decisions).every((entry) => entry.unmapped.nearAi.capability?.verb !== 'workspaceWrite'));
+  } finally {
+    uninstall();
+    if (cached) require.cache[moduleId] = cached;
+    else delete require.cache[moduleId];
+  }
+});
+
+
+test('registered Legal References drafts only source citations and an open factual question', async () => {
+  const subject = await newFixture();
+  const { root } = subject.fixture;
+  const label = 'Institutional Special Staff Legal References';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: legalTeam, keySegment: 'specialLegalReferences',
+    checkPrompts(requests) {
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional legal adviser')?.detail ?? '', /owns.*advice/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional reference custodian')?.detail ?? '', /record references/i);
+    },
+  });
+  const directoryName = '.planning/staff/institutional/special/legal-references';
+  const directory = path.join(root, directoryName);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const roles = [
+    ['receipt-01a', 'fictional-legal-adviser'], ['receipt-01b', 'fictional-reference-custodian'],
+    ['receipt-01c', 'fictional-legal-reference-attestor'], ['receipt-01d', 'fictional-legal-reference-attestor'],
+  ];
+  const sources = roles.map(([id], i): InstitutionalBriefSource => {
+    const text = `Synthetic underlying source ${i}. This text stays outside the bibliography.`;
+    return { id, revision: 'r1', date: '2026-11-30', label: 'org/Public', project, text, spans: [{ start: 0, end: text.length }] };
+  });
+  const reference = (index: number) => ({ sourceId: sources[index].id, revision: sources[index].revision, role: roles[index][1] });
+  const ids = ['item-01000001', 'item-01000002'];
+  const hiddenId = 'item-01000003';
+  const rows = [
+    { id: ids[0], kind: 'booking-guidance', title: 'Fictional Meeting Room Booking Guide', date: '2026-11-30',
+      edition: 'edition-2', section: 'Booking hours', language: 'en', evidence: reference(2) },
+    { id: ids[1], kind: 'posted-notice', title: 'Fictional Meeting Room Notice', date: '2026-11-30',
+      edition: 'edition-1', section: 'Weekday postings', language: 'en', evidence: reference(3) },
+    { id: hiddenId, title: 'Fixture-only hidden reference' },
+  ];
+  const receipt = {
+    project, directory: staged.directoryDigest, purpose: 'fictional-office-booking-ss-01', requester: 'fictional-legal-reference-reviewer',
+    productId: 'office-booking-bibliography', policyRevision: 'reference-r1', adviser: reference(0), custodian: reference(1),
+    recordIds: ids, question: { kind: 'edition-posted-on-recorded-date', date: '2026-11-30', referenceIds: ids },
+  };
+  let currentReceipt = receipt;
+  let activeSources = sources;
+  const withdraw = () => { activeSources = sources.map((source) => source.id === sources[2].id ? { ...source, revision: 'r2' } : source); };
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => activeSources,
+    currentLegalReferences: () => ({ receipt: currentReceipt, rows }) };
+  const team = await selectSyntheticInstitutionalLegalReferences(fixture);
+  const args = { productId: receipt.productId, recordIds: ids };
+  const valid = await runFixture(fixture, team, { steps: [
+    toolCall('read-legal-reference', readLegal, { recordId: ids[0] }),
+    toolCall('hidden-legal-reference', readLegal, { recordId: hiddenId }),
+    toolCall('missing-legal-reference', readLegal, { recordId: 'item-01000004' }),
+    toolCall('refuse-legal-conclusion', saveLegal, { ...args, clearance: true, conclusion: 'Cleared' }),
+    toolCall('save-legal-bibliography', saveLegal, args),
+  ] });
+  assert.deepEqual(valid.offers[0], [readLegal, saveLegal].sort());
+  const unavailable = valid.toolResults.get('hidden-legal-reference');
+  assert.match(unavailable ?? '', /unavailable/i);
+  assert.equal(valid.toolResults.get('missing-legal-reference'), unavailable);
+  assert.equal(valid.toolResults.get('refuse-legal-conclusion'), unavailable);
+  const [name] = await readdir(directory);
+  assert.ok(name);
+  const bytes = await readFile(path.join(directory, name));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(name, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'SS-01');
+  assert.equal(draft.advice, 'pending');
+  assert.equal(draft.adviser.role, roles[0][1]);
+  assert.equal(draft.custodian.role, roles[1][1]);
+  assert.notEqual(draft.adviser.sourceId, draft.custodian.sourceId);
+  assert.deepEqual(draft.body.question, { ...receipt.question, status: 'open' });
+  const [first, second] = draft.body.records;
+  assert.deepEqual(first, JSON.parse(valid.toolResults.get('read-legal-reference')!));
+  assert.deepEqual([first.rendition, second.rendition], ['SRC', 'SRC']);
+  assert.deepEqual([first.evidence.revision, second.evidence.revision], ['r1', 'r1']);
+  assert.equal(first.edition, rows[0].edition);
+  assert.equal(first.section, rows[0].section);
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+  assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'save-legal-bibliography')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${directoryName}/${name}`] });
+  const shown = JSON.stringify([valid.catalogueOffers[0], valid.results, draft, review]);
+  for (const hidden of [hiddenId, rows[2].title, sources[2].text]) assert.ok(!shown.includes(hidden));
+
+  const heldRead = await runFixture(fixture, team, {
+    steps: [toolCall('withdrawn-legal-read', readLegal, { recordId: ids[0] })],
+    onChildTurn(turn) { if (turn === 0) withdraw(); },
+  });
+  assert.equal(heldRead.toolResults.get('withdrawn-legal-read'), unavailable);
+  assert.ok(!heldRead.results.some((entry) => entry.includes(rows[0].title) || entry.includes(sources[2].id)));
+
+  activeSources = sources;
+  currentReceipt = { ...receipt, policyRevision: 'reference-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; withdraw(); } });
+  try {
+    const held = await runFixture(fixture, team, { steps: [toolCall('withdrawn-legal-write', saveLegal, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'withdrawn-legal-write' && entry.action_id === 1));
+    assert.equal(held.toolResults.get('withdrawn-legal-write'), unavailable);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(directory), [name]);
+  } finally { setCasProbe(undefined); }
+  currentReceipt = receipt;
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+});
+
+
+test('registered Institutional Policy Sources keeps documented provisions and commentary separate', async () => {
+  const subject = await newFixture();
+  const { root } = subject.fixture;
+  const label = 'Institutional Special Staff Policy Sources';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: policySourcesTeam, keySegment: 'specialPolicySources',
+    checkPrompts(requests) {
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional institutional policy adviser')?.detail ?? '', /owns.*advice/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional public reference custodian')?.detail ?? '', /source references/i);
+    },
+  });
+  const directoryName = '.planning/staff/institutional/special/policy-sources';
+  const directory = path.join(root, directoryName);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const roles = [
+    ['receipt-16a', 'fictional-institutional-policy-adviser'],
+    ['receipt-16b', 'fictional-public-reference-custodian'],
+    ['receipt-16c', 'fictional-policy-notice-attestor'],
+    ['receipt-16d', 'fictional-policy-commentary-attestor'],
+  ];
+  const provision = 'The fictional office notice lists Tuesday as the earliest weekday for desk appointments.';
+  const commentary = 'The fictional bulletin suggests reviewing whether other weekdays would help.';
+  const sources = roles.map(([id], i): InstitutionalBriefSource => {
+    const extract = i === 2 ? provision : i === 3 ? commentary : 'Synthetic role receipt.';
+    const text = `${extract}
+Unshared fixture source detail ${i}.`;
+    return { id, revision: 'r1', date: i === 3 ? '2026-12-01' : '2026-11-30', label: 'org/Public', project, text,
+      spans: [{ start: 0, end: extract.length }] };
+  });
+  const reference = (index: number) => ({ sourceId: sources[index].id, revision: sources[index].revision, role: roles[index][1] });
+  const ids = ['item-16000001', 'item-16000002'];
+  const hiddenId = 'item-16000003';
+  const rows = [
+    { id: ids[0], kind: 'documented-provision', title: 'Fictional Office Appointment Notice', owner: 'Fictional Office Help Desk',
+      date: sources[2].date, language: 'en', extract: provision, evidence: reference(2) },
+    { id: ids[1], kind: 'commentary', title: 'Fictional Office Service Bulletin', owner: 'Fictional Office Service Board',
+      date: sources[3].date, language: 'en', extract: commentary, evidence: reference(3) },
+    { id: hiddenId, title: 'Unshared fixture policy source' },
+  ] as const;
+  const receipt = {
+    project, directory: staged.directoryDigest, purpose: 'fictional-office-help-policy-ss-16', requester: 'fictional-policy-source-reviewer',
+    productId: 'office-help-source-comparison', policyRevision: 'policy-r1', adviser: reference(0), custodian: reference(1),
+    recordIds: ids, consultation: { kind: 'confirm-office-desk-consultation', referenceIds: ids },
+  };
+  let currentReceipt = receipt;
+  let activeSources = sources;
+  const withdraw = () => { activeSources = sources.map((source) => source.id === sources[3].id ? { ...source, revision: 'r2' } : source); };
+  let currentActor: ActorRef | undefined;
+  let activeSettings = subject.fixture.currentActionSettings();
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => activeSources,
+    currentActionSettings: () => activeSettings, currentReviewActor: () => currentActor, currentReviewPolicy: subject.fixture.bundleState,
+    currentPolicySources: () => ({ receipt: currentReceipt, rows }) };
+  const onGatedActor = (actor: NonNullable<typeof currentActor>) => { currentActor = actor; };
+  await assert.rejects(selectSyntheticInstitutionalPolicySources({ ...fixture, currentPolicySources: () => ({
+    receipt: { ...receipt, adviser: { ...reference(0), role: 'fictional-legal-adviser' } }, rows,
+  }) }), { message: 'This catalogue metadata is unavailable.' });
+  await assert.rejects(selectSyntheticInstitutionalPolicySources({ ...fixture, currentPolicySources: () => ({
+    receipt, rows: [rows[0], { ...rows[1], evidence: { ...reference(3), role: 'fictional-legal-reference-attestor' } }],
+  }) }), { message: 'This catalogue metadata is unavailable.' });
+  const team = await selectSyntheticInstitutionalPolicySources(fixture);
+  const args = { productId: receipt.productId, recordIds: ids };
+  const valid = await runFixture(fixture, team, { onGatedActor, steps: [
+    ...ids.map((recordId, index) => toolCall(`read-policy-source-${index}`, readPolicySources, { recordId })),
+    toolCall('hidden-policy-source', readPolicySources, { recordId: hiddenId }),
+    toolCall('missing-policy-source', readPolicySources, { recordId: 'item-16000004' }),
+    toolCall('refuse-policy-adoption', savePolicySources, { ...args, approved: true, adopt: true, destination: 'external' }),
+    toolCall('save-policy-comparison', savePolicySources, args),
+  ] });
+  assert.deepEqual(valid.offers[0], [readPolicySources, savePolicySources].sort());
+  const unavailable = valid.toolResults.get('hidden-policy-source');
+  assert.match(unavailable ?? '', /unavailable/i);
+  assert.equal(valid.toolResults.get('missing-policy-source'), unavailable);
+  assert.equal(valid.toolResults.get('refuse-policy-adoption'), unavailable);
+  const [name] = await readdir(directory);
+  assert.ok(name);
+  const bytes = await readFile(path.join(directory, name));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(name, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'SS-16');
+  assert.equal(draft.advice, 'pending');
+  assert.equal(draft.signoff, 'pending');
+  assert.equal(draft.adviser.role, roles[0][1]);
+  assert.equal(draft.custodian.role, roles[1][1]);
+  assert.notEqual(draft.adviser.sourceId, draft.custodian.sourceId);
+  assert.deepEqual(draft.body.consultation, { ...receipt.consultation, status: 'open' });
+  assert.deepEqual(draft.body.records, ids.map((_id, index) => JSON.parse(valid.toolResults.get(`read-policy-source-${index}`)!)));
+  const [first, second] = draft.body.records;
+  assert.deepEqual([first.kind, second.kind], ['documented-provision', 'commentary']);
+  assert.deepEqual([first.extract, second.extract], [provision, commentary]);
+  assert.deepEqual([first.rendition, second.rendition], ['SRC', 'SRC']);
+  assert.deepEqual([first.owner, second.owner], [rows[0].owner, rows[1].owner]);
+  assert.deepEqual([first.evidence.sourceId, second.evidence.sourceId], [sources[2].id, sources[3].id]);
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const reopen = () => readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal((await reopen()).version, version);
+  const priorActor = currentActor;
+  assert.ok(priorActor);
+  const priorSettings = activeSettings;
+  const heldReview = { message: 'This catalogue metadata is unavailable.' };
+  activeSettings = { ...priorSettings, emergencyStop: true };
+  await assert.rejects(reopen(), heldReview, 'current emergency stop holds old review');
+  activeSettings = { ...priorSettings, mode: 'auto' };
+  await assert.rejects(reopen(), heldReview, 'a different current action mode holds old review');
+  activeSettings = priorSettings;
+  currentActor = { ...priorActor, agentId: 'other-fictional-review-actor' };
+  await assert.rejects(reopen(), heldReview, 'a same-label replacement actor holds old review');
+  currentActor = priorActor;
+  subject.changePolicy();
+  await assert.rejects(reopen(), heldReview, 'a different current gate policy holds old review');
+  subject.restorePolicy();
+  assert.equal((await reopen()).version, version);
+  assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'save-policy-comparison')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${directoryName}/${name}`] });
+  const shown = JSON.stringify([valid.catalogueOffers[0], valid.results, draft]);
+  for (const hidden of [hiddenId, rows[2].title, 'Unshared fixture source detail']) assert.ok(!shown.includes(hidden));
+
+  const heldRead = await runFixture(fixture, team, {
+    onGatedActor,
+    steps: [toolCall('withdrawn-policy-read', readPolicySources, { recordId: ids[1] })],
+    onChildTurn(turn) { if (turn === 0) withdraw(); },
+  });
+  assert.equal(heldRead.toolResults.get('withdrawn-policy-read'), unavailable);
+  assert.ok(!heldRead.results.some((entry) => entry.includes(commentary) || entry.includes(sources[3].id)));
+
+  activeSources = sources;
+  currentReceipt = { ...receipt, policyRevision: 'policy-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; withdraw(); } });
+  try {
+    const held = await runFixture(fixture, team, { onGatedActor, steps: [toolCall('withdrawn-policy-write', savePolicySources, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'withdrawn-policy-write' && entry.action_id === 1));
+    assert.equal(held.toolResults.get('withdrawn-policy-write'), unavailable);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(directory), [name]);
+  } finally { setCasProbe(undefined); }
+  currentReceipt = receipt;
+  currentActor = priorActor;
   await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
 });

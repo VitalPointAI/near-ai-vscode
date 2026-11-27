@@ -8,6 +8,7 @@ import {
 } from './institutionalEvidence';
 import type { InstitutionalBudgetEvidence, InstitutionalBudgetReview, InstitutionalInventoryEvidence, InstitutionalInventoryReview } from './institutionalReconciliation';
 
+import type { InstitutionalLegalReferencesEvidence, InstitutionalLegalReferencesReview, InstitutionalPolicySourcesEvidence, InstitutionalPolicySourcesReview } from './institutionalAdviserEvidence';
 import type { InstitutionalAccessibilityEvidence, InstitutionalAccessibilityReview } from './institutionalAccessibilityReview';
 import type { InstitutionalServiceMonitoringEvidence, InstitutionalServiceMonitoringReview } from './institutionalServiceMonitoring';
 
@@ -70,6 +71,9 @@ export interface InstitutionalDraftScope {
   readonly budget?: () => InstitutionalBudgetEvidence;
   readonly serviceMonitoring?: () => InstitutionalServiceMonitoringEvidence;
   readonly accessibility?: () => InstitutionalAccessibilityEvidence;
+  readonly legalReferences?: () => InstitutionalLegalReferencesEvidence;
+  readonly policySources?: () => InstitutionalPolicySourcesEvidence;
+  readonly policyReviewIsCurrent?: (version: string) => boolean;
   readonly findings?: {
     readonly current: () => InstitutionalFindingsEvidence;
     readonly predecessorCurrent: () => Promise<boolean>;
@@ -163,7 +167,7 @@ interface InstitutionalLibraryRemitReview extends Omit<InstitutionalBriefReview,
   readonly liaisonDecision: 'pending';
 }
 
-export type InstitutionalDraftReview = InstitutionalAccessibilityReview | InstitutionalServiceMonitoringReview | InstitutionalBudgetReview | InstitutionalInventoryReview | InstitutionalLibraryRemitReview | InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
+export type InstitutionalDraftReview = InstitutionalPolicySourcesReview | InstitutionalLegalReferencesReview | InstitutionalAccessibilityReview | InstitutionalServiceMonitoringReview | InstitutionalBudgetReview | InstitutionalInventoryReview | InstitutionalLibraryRemitReview | InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;

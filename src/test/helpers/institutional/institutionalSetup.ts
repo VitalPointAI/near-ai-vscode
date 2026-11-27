@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { parseTeam } from '../../../agent/teams';
@@ -6,7 +7,8 @@ import type { MementoLike } from '../../../services/stateHome';
 import { withRegisterLock } from '../../../staff/registerLock';
 import {
   INSTITUTIONAL_COMMAND_GROUP_TEAM, institutionalDigest, institutionalRole, institutionalRoleBinding, isInstitutionalRole,
-  readInstitutionalRoleBinding, type InstitutionalRoleBinding, type InstitutionalRoleId,
+  institutionalJointTierBinding, institutionalJointTierDirectory, readInstitutionalJointTierBinding, readInstitutionalRoleBinding,
+  type InstitutionalJointTier, type InstitutionalJointTierBinding, type InstitutionalRoleBinding, type InstitutionalRoleId,
 } from './institutionalCommand';
 
 export interface InstitutionalStaffSetupPlan {
@@ -56,6 +58,66 @@ export function institutionalStaffSetupKey(binding: InstitutionalRoleBinding): s
 // A rejected Memento update may leave its value in the current cache. Require
 // another confirmed update before treating that exact value as staged.
 const unconfirmedInstitutionalWrites = new WeakMap<MementoLike, Set<string>>();
+
+interface InstitutionalJointTierSetup {
+  readonly root: string;
+  readonly directoryDigest: string;
+  readonly previous: InstitutionalJointTierBinding | undefined;
+  readonly held: boolean;
+}
+
+function jointTierKey(root: string): string {
+  return `nearAi.staff.institutional.jointTier.v1.${institutionalDigest(root)}`;
+}
+
+export function planInstitutionalJointTierSetup(root: string, state: MementoLike): InstitutionalJointTierSetup {
+  const directoryDigest = institutionalJointTierDirectory(root);
+  if (!directoryDigest) throw new Error('The selected project folder changed or is unavailable.');
+  const key = jointTierKey(root);
+  const raw: unknown = state.get(key);
+  const previous = readInstitutionalJointTierBinding(raw, root, directoryDigest);
+  if (raw !== undefined && !previous) throw new Error('The stored joint tier is incomplete or inconsistent.');
+  return { root, directoryDigest, previous, held: unconfirmedInstitutionalWrites.get(state)?.has(key) ?? false };
+}
+
+export function readConfirmedInstitutionalJointTier(root: string, state: MementoLike): InstitutionalJointTierBinding | undefined {
+  try {
+    const current = planInstitutionalJointTierSetup(root, state);
+    return current.held ? undefined : current.previous;
+  } catch { return undefined; }
+}
+
+export async function persistInstitutionalJointTierSetup(
+  plan: InstitutionalJointTierSetup, level: InstitutionalJointTier, state: MementoLike, projectStillSelected: () => boolean,
+): Promise<void> {
+  const { root, directoryDigest, previous, held } = plan;
+  const key = jointTierKey(root);
+  await withRegisterLock(root, async () => {
+    const current = planInstitutionalJointTierSetup(root, state);
+    if (current.directoryDigest !== directoryDigest || !projectStillSelected()) {
+      throw new Error('The selected project changed during confirmation.');
+    }
+    if (current.held !== held || current.previous?.level !== previous?.level || current.previous?.transitionId !== previous?.transitionId) {
+      throw new Error('The configured joint tier changed during confirmation. Reopen setup to review it.');
+    }
+    if (!held && previous?.level === level) return;
+
+    const next = institutionalJointTierBinding(root, directoryDigest, level, randomBytes(16).toString('hex'));
+    const pending = unconfirmedInstitutionalWrites.get(state) ?? new Set<string>();
+    pending.add(key);
+    unconfirmedInstitutionalWrites.set(state, pending);
+    try {
+      await state.update(key, next);
+      const stored = planInstitutionalJointTierSetup(root, state);
+      if (stored.directoryDigest !== directoryDigest || stored.previous?.transitionId !== next.transitionId || stored.previous.level !== next.level) {
+        throw new Error('The saved tier does not match the confirmed project and selection.');
+      }
+    } catch (cause) {
+      throw new Error('Could not confirm the joint tier was saved. Confirm the choice again.', { cause });
+    }
+    pending.delete(key);
+  });
+}
 
 export async function persistInstitutionalStaffSetup(
   plan: InstitutionalStaffSetupPlan,
