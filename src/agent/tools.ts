@@ -3,13 +3,15 @@ import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/pro
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS } from '../domain/commandBounds';
-import type { ActionCapability } from '../domain/policy';
+import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import { parseToolManifest } from '../domain/gate/manifest';
 import { contentsOf } from '../domain/gate/pathCover';
 import { CREDENTIAL_STORES, EXTENSION_STORAGE_FOLDERS, VSCODE_SECRET_FILES, credentialReason, identityFilesReason, namesCredentialStore, namesIdentityFiles } from '../domain/gate/floor';
 import type { FloorLocations } from '../domain/gate/floor';
 import type { InputAs, RunsOn, ToolManifest } from '../domain/gate/manifest';
-import type { GateContextName } from '../domain/gate/bundle';
+import { bundleHash, type BundleState, type GateContextName } from '../domain/gate/bundle';
+import type { GateRuntime } from '../domain/gate/decide';
+import type { Capability } from '../domain/gate/vocabulary';
 import type { Label } from '../domain/gate/labels';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
 import { writeAllowedBy } from '../domain/staff/writeLimits';
@@ -23,9 +25,60 @@ import { displayPath, resolveInWorkspace, StateKeysError, ToolError } from './wo
 
 export interface Todo { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }
 
+type FixtureEffect = { readonly verb: 'plan' } | { readonly verb: 'workspaceWrite'; readonly path: string };
+
+export interface FixtureGateExpectation {
+  readonly policyHash: string;
+  readonly currentActionSettings: () => unknown;
+  readonly effect: FixtureEffect;
+}
+
+/** Evidence for a synthetic child call. It narrows an ordinary gate decision and cannot authorize a call. */
+export function bindFixtureGate(runtime: GateRuntime, readPolicy: () => ActionPolicy, expected: FixtureGateExpectation,
+  child: Pick<ToolContext, 'agentId' | 'agentLabel'>) {
+  const policy = Object.freeze({ ...readPolicy() });
+  const { deviceFingerprint, sessionId } = runtime.actor;
+  const { agentId, agentLabel } = child;
+  const { context, presence } = runtime;
+  const hash = expected.policyHash;
+  const effect = Object.freeze({ ...expected.effect });
+  const currentActionSettings = expected.currentActionSettings;
+  const requestModeValid = ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'].includes(policy.mode);
+  const sample = (candidate = runtime): BundleState | undefined => {
+    if (candidate !== runtime) return undefined;
+    try { return runtime.bundleState(); } catch { return undefined; }
+  };
+  const current = (state = sample()): boolean => {
+    const settings = readPolicy();
+    const live = runtime.actor;
+    if (!agentId || !agentLabel || child.agentId !== agentId || child.agentLabel !== agentLabel ||
+        live.kind !== 'sub-agent' || live.agentId !== agentId || live.agentLabel !== agentLabel ||
+        live.sessionId !== sessionId || live.deviceFingerprint !== deviceFingerprint ||
+        context !== 'interactive' || presence !== 'person' || runtime.context !== context || runtime.presence !== presence ||
+        !requestModeValid || policy.emergencyStop !== false || settings.mode !== policy.mode || settings.emergencyStop !== false ||
+        state?.state !== 'valid' || state.hash !== hash || state.expiresAt !== state.bundle.expiresAt ||
+        !(Date.parse(state.expiresAt) > (runtime.clock ?? Date.now)())) return false;
+    try {
+      const active = currentActionSettings();
+      if (!active || typeof active !== 'object' || Array.isArray(active) ||
+          !Object.hasOwn(active, 'mode') || !Object.hasOwn(active, 'emergencyStop')) return false;
+      const { mode, emergencyStop } = active as Partial<ActionPolicy>;
+      return mode === policy.mode && emergencyStop === false && bundleHash(state.bundle) === hash;
+    } catch { return false; }
+  };
+  const permits = (effects: readonly Capability[]): boolean => {
+    const actual = effects[0];
+    return effects.length === 1 && (effect.verb === 'plan' ? actual?.verb === 'plan'
+      : actual?.verb === 'workspaceWrite' && actual.paths.length === 1 && actual.paths[0] === effect.path);
+  };
+  return Object.freeze({ policy, hash, effect, sample, current, permits });
+}
+
 export interface ToolContext {
   root: string;
   signal: AbortSignal;
+  /** Supplied only for a permitted opt-in call, through the end of that exact dispatch. */
+  verifyFixtureGate?: (input: unknown, path?: string) => boolean;
   checkpoints: RunCheckpoints;
   shell: ShellSession;
   /** Files read in this run; Write and Edit refuse to change an existing file the model has not read. */
@@ -104,6 +157,8 @@ export interface AgentTool<I = Record<string, unknown>> {
    * its path is `**`), because a manifest names fields and cannot say "or the default". Absent means the arguments are used as given.
    */
   manifestInput?(raw: Record<string, unknown>): Record<string, unknown>;
+  /** Private synthetic child invocation. The expectation derives only from the admitted input. */
+  fixtureGate?(input: I): FixtureGateExpectation;
   /** Changes nothing, so it can run alongside other lookups from the same turn even though it is not a read (e.g. a web fetch). */
   concurrent?: boolean;
   /** PERF-04: this particular call changes nothing (a read-only shell command), so it may run alongside other lookups. */

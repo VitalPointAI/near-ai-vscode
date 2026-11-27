@@ -325,7 +325,7 @@ test('the setup command takes a section only as { section } and names the team a
   assert.match(source, /const actions = chat \? \[TASK_NOW_ACTION, OPEN_STAFF_ROOM_ACTION\] : \[OPEN_STAFF_ROOM_ACTION\];/);
   assert.match(source, /if \(choice === TASK_NOW_ACTION && chat\) void chat\.prefill\(`\/team:\$\{slug\}`\);/);
   const extension = await readFile(path.join(ROOT, 'src', 'extension.ts'), 'utf8');
-  assert.match(extension, /registerStaffSetup\(context, sidebar\);/);
+  assert.match(extension, /registerStaffSetup\(context, \{ chat: sidebar \}\);/, 'activation supplies Chat and leaves fixture setup disabled');
   assert.match(extension, /registerStaffRoom\(context, gate, sidebar\);/);
 });
 

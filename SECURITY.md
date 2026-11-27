@@ -426,6 +426,12 @@ is what that file and the records beside it do in this version.
   in another window), changes nothing.
 - **No network.** Nothing in a decision needs the network, so the policy
   works the same offline.
+- **Policy and paths used for a decision.** The record identifies the valid
+  policy evaluated for that decision. A new check after someone approves a
+  call uses its own policy record. A reply without a new check refers to the
+  original question. If the tool's host derives a write destination, the
+  gate checks that destination and retains any refusal from the original
+  call. The manifest records the exact destination the tool can write.
 - **Decision records.** Each decision, allowed, asked or refused, is written
   to a record for the project in this extension's storage. A call refused
   before it could be judged (a tool the run does not have, arguments that are
@@ -1053,6 +1059,11 @@ API keys are bound to the endpoint they were saved for, in SecretStorage, so
 editing the project's profile file cannot redirect a key.
 
 ### Staff products and a person's decisions
+
+The institutional staff tests use fictional sources and a host-supplied
+fixture. The extension package excludes the fixture's implementation.
+Ordinary Staff Setup and agent conversations have no fixture provider.
+The test results cover the isolated fixture and its exact draft authority.
 
 Staff section teams record each product's steps in a ledger in the project
 (`.planning/staff/ledger/products.jsonl`). Every entry is signed with this

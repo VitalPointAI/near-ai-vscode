@@ -1,12 +1,16 @@
+import { persistInstitutionalStaffSetup, planInstitutionalStaffSetup } from './helpers/institutional/institutionalSetup';
+import { createInstitutionalStaffSetupFixture } from './helpers/institutional/institutionalPicker';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, symlink, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
+import { INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, institutionalCommandGroupDefinition, institutionalCommandGroupSkill, institutionalRole, selectedTeamAgents } from './helpers/institutional/institutionalCommand';
 import { staffGuidanceIn, withStaffGuidance } from '../agent/staff/guidance';
-import { J2_STAFF_TEMPLATE, J5_STAFF_TEMPLATE } from '../agent/staff/templates';
+import { J2_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, STAFF_TEMPLATES } from '../agent/staff/templates';
 import { builtInStaffServers } from '../agent/staffServers';
 import { applyGuidanceUpdate, applyTeamUpdate, detectTemplate, planStaffGuidanceUpdate, planTeamUpdate } from '../agent/teamUpdate';
 import { parseTeam, TeamLibrary } from '../agent/teams';
@@ -145,6 +149,341 @@ test('applying the setup writes into the project and the team library, archives 
   await assert.rejects(applyStaffSetup(linked, library, { ...plan, roster: { ...plan.roster, fileName: 'another' } }), /symbolic link/);
   assert.deepEqual(await readdir(library.directory), before);
   assert.deepEqual(await readdir(path.join(root, 'elsewhere')), []);
+});
+
+function staffSetupVscode() {
+  const stub = createVscodeStub();
+  Object.assign(stub.vscode as object, { QuickPickItemKind: { Separator: -1 } });
+  const uninstall = installVscodeStub(stub);
+  const commandModule = require.resolve('../services/staffSetupCommand');
+  const cached = require.cache[commandModule];
+  delete require.cache[commandModule];
+  try {
+    const command = require(commandModule) as typeof import('../services/staffSetupCommand');
+    return { stub, registerStaffSetup: command.registerStaffSetup, fixture: createInstitutionalStaffSetupFixture(stub.vscode as never, command.SET_UP_ACTION), uninstall };
+  } catch (error) {
+    uninstall();
+    throw error;
+  } finally {
+    if (cached) require.cache[commandModule] = cached;
+    else delete require.cache[commandModule];
+  }
+}
+
+function profileState() {
+  const records = new Map<string, unknown>();
+  const writes: string[] = [];
+  const globalState = {
+    get: <T>(key: string) => records.get(key) as T | undefined,
+    async update(key: string, value: unknown) {
+      writes.push(key);
+      records.set(key, structuredClone(value));
+    },
+    setKeysForSync() { assert.fail('institutional staging is local to this profile'); },
+  };
+  return { records, writes, globalState, context: { subscriptions: [], globalState } as never };
+}
+
+const institutionalStageKey = (project: string) => `nearAi.staff.institutional.commandGroup.v1.${createHash('sha256').update(project).digest('hex')}`;
+
+test('ordinary Staff Setup only offers shipped templates and refuses an unexpected fixture choice', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'staff-setup-ordinary-')));
+  const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  try {
+    registerStaffSetup(profile.context);
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([root]);
+    await execute();
+    const [ordinary] = stub.quickPickRequests;
+
+    const window = (stub.vscode as typeof import('vscode')).window;
+    const originalQuickPick = window.showQuickPick;
+    Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async () => {
+      Object.defineProperty(window, 'showQuickPick', { configurable: true, value: originalQuickPick });
+      return { label: 'Institutional Command Group', value: INSTITUTIONAL_COMMAND_GROUP_TEAM };
+    } });
+    stub.quickPickAnswers.push('$(check) Set up the team');
+    await execute();
+
+    assert.deepEqual({
+      choices: ordinary.items.map(({ label }) => label),
+      writes: profile.writes,
+      files: await readdir(root),
+    }, { choices: STAFF_TEMPLATES.map(({ label }) => label), writes: [], files: [] });
+  } finally { uninstall(); }
+});
+
+test('registered Staff Setup stages only a profile-local record for each selected brigade', async () => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-setup-')));
+  const library = new TeamLibrary(path.join(temp, 'library'));
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  try {
+    registerStaffSetup(profile.context, { library, fixture });
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute, 'the Team Studio command is registered');
+    const legacy = { ...defaultStaffSettings(), teams: { j2: 'existing-j2' } };
+    const original = JSON.stringify({ staff: legacy, type: 'research', custom: { retained: true } });
+    const keys: string[] = [];
+    for (const name of ['first', 'second']) {
+      const root = path.join(temp, name, 'brigade');
+      const metadataPath = path.join(root, '.planning', '.near-ai', 'project.json');
+      await mkdir(path.dirname(metadataPath), { recursive: true });
+      await writeFile(metadataPath, original);
+      stub.setWorkspaceFolders([root]);
+      stub.quickPickAnswers.push('Institutional Command Group', '$(check) Set up the team');
+      await execute();
+      const key = institutionalStageKey(root);
+      keys.push(key);
+      const recorded = profile.records.get(key) as Record<string, unknown> | undefined;
+      assert.ok(recorded, 'confirmation stages a reloadable record');
+      assert.equal(recorded.version, 1);
+      assert.equal(recorded.echelon, 'L3');
+      assert.equal(recorded.rootDigest, createHash('sha256').update(root).digest('hex'));
+      assert.match(String(recorded.directoryDigest), /^[a-f0-9]{64}$/);
+      assert.equal(recorded.team, 'institutional-command-group-v1');
+      assert.equal(recorded.teamDigest, createHash('sha256').update(institutionalCommandGroupDefinition).digest('hex'));
+      assert.equal(recorded.skillDigest, createHash('sha256').update(institutionalCommandGroupSkill).digest('hex'));
+      assert.ok(!JSON.stringify(recorded).includes(root), 'the profile record holds digests, not a raw path');
+      assert.equal(await library.findRunTeam('institutional-command-group-v1', root), undefined);
+      assert.deepEqual(await library.list(root), []);
+      assert.equal(await readFile(metadataPath, 'utf8'), original);
+      assert.deepEqual(await readdir(path.join(root, '.planning')), ['.near-ai']);
+
+      stub.quickPickAnswers.push('Institutional Command Group', '$(check) Set up the team');
+      await execute();
+      assert.deepEqual(profile.records.get(key), recorded, 'an identical record reloads without replacement');
+      assert.deepEqual(profile.writes, keys, 'an identical retry performs no storage write');
+    }
+    assert.deepEqual([...profile.records.keys()], keys);
+    assert.notEqual(keys[0], keys[1], 'equally named roots stage independently');
+    assert.deepEqual((await readdir(temp)).sort(), ['first', 'second'], 'the library was not created');
+    assert.ok(stub.quickPickRequests.some((request) => request.items.some((item) =>
+      item.label.includes('Institutional Command Group') && item.detail?.includes('L3'))));
+    assert.ok(stub.quickPickRequests.some((request) => request.items.some((item) => item.label === 'A person decides')));
+    assert.ok(stub.notifications.some(({ message }) => /staged.*test fixture/i.test(message)));
+    assert.ok(stub.notifications.every(({ message }) => !message.includes('IRON LANTERN')));
+    assert.ok(stub.notificationActions.every((actions) => !actions.includes('Task it now')));
+  } finally { uninstall(); }
+});
+
+test('registered Staff Setup stages the fictional action register separately from the legacy J3 link', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-action-setup-')));
+  const library = new TeamLibrary(path.join(root, 'unused-library'));
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  const slug = INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
+  const { definition, skill, lead } = institutionalRole(slug);
+  try {
+    registerStaffSetup(profile.context, { library, fixture, chat: { async prefill() { assert.fail('the staged role has no start action'); } } });
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([root]);
+    stub.quickPickAnswers.push('Institutional G3 Action Register', undefined);
+    await execute();
+    assert.deepEqual(profile.writes, [], 'cancelling the role roster has no effect');
+    stub.quickPickAnswers.push('Institutional G3 Action Register', '$(check) Set up the team');
+    assert.equal(await execute(), undefined, 'registered staging does not return a launchable team');
+    const rootDigest = createHash('sha256').update(root).digest('hex');
+    const key = `nearAi.staff.institutional.j3ActionRegister.v1.${rootDigest}`;
+    const recorded = profile.records.get(key) as Record<string, unknown> | undefined;
+    assert.ok(recorded, 'the J3 selection stages its own profile-local binding');
+    assert.equal(recorded.team, slug);
+    assert.equal(recorded.echelon, 'L3');
+    assert.equal(recorded.rootDigest, rootDigest);
+    assert.equal(recorded.teamDigest, createHash('sha256').update(definition).digest('hex'));
+    assert.equal(recorded.skillDigest, createHash('sha256').update(skill).digest('hex'));
+    assert.deepEqual(profile.writes, [key]);
+    assert.deepEqual(await readdir(root), []);
+    const general = stub.quickPickRequests[0];
+    for (const label of ['Institutional Command Group', 'Institutional G3 Action Register', 'J3 operations']) {
+      assert.ok(general.items.some((item) => item.label === label && (!label.startsWith('Institutional') || item.detail?.includes('L3'))));
+    }
+    const roster = stub.quickPickRequests.find((request) => request.title === 'Institutional G3 Action Register: check the roster');
+    assert.ok(roster);
+    assert.ok(roster.items.some((item) => /Stages the .*action register draft skill/i.test(item.detail ?? '')));
+    assert.ok(roster.items.some((item) => item.label === `$(person) ${lead}` && /reviews the action register draft/i.test(item.detail ?? '')));
+    assert.ok(roster.items.some((item) => item.label === '$(hubot) action-register-drafter' && /approved local test fixture/i.test(item.detail ?? '')));
+    assert.ok(stub.notifications.some(({ message }) => /staged.*office-hours action register draft.*approved local test fixture/i.test(message)));
+    assert.ok(!stub.notifications.some(({ message }) => /\/team:|IRON LANTERN/.test(message)));
+    assert.ok(stub.notificationActions.every((actions) => actions.length === 0));
+    assert.equal(await library.findRunTeam(slug, root), undefined);
+    assert.deepEqual(await library.list(root), []);
+    assert.deepEqual(selectedTeamAgents(parseTeam(definition, `${slug}.md`)), [], 'an unbranded reserved definition remains inert');
+
+    const requestCount = stub.quickPickRequests.length;
+    stub.quickPickAnswers.push(undefined);
+    await execute({ section: 'j3' });
+    const [legacy] = stub.quickPickRequests.slice(requestCount);
+    assert.equal(legacy.title, 'Set up a staff team (2/6)');
+    assert.match(legacy.placeHolder ?? '', /Which doctrine profile/);
+    assert.deepEqual(legacy.items.map(({ label }) => label), profileChoices(J3_STAFF_TEMPLATE).map(({ label }) => label));
+    assert.deepEqual(profile.writes, [key], 'the legacy section link never stages an institutional role');
+  } finally { uninstall(); }
+});
+
+test('a registered J3 write finishes for the confirmed project when selection switches in flight', async () => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-action-switch-')));
+  const [confirmed, other] = ['confirmed', 'other'].map((name) => path.join(temp, name, 'brigade'));
+  await Promise.all([confirmed, other].map((root) => mkdir(root, { recursive: true })));
+  const library = new TeamLibrary(path.join(temp, 'unused-library'));
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  const team = INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
+  const expected = await planInstitutionalStaffSetup({ root: confirmed, team });
+  const keyFor = (root: string) => `nearAi.staff.institutional.j3ActionRegister.v1.${createHash('sha256').update(root).digest('hex')}`;
+  const update = profile.globalState.update;
+  let entered!: (key: string) => void;
+  const writing = new Promise<string>((resolve) => { entered = resolve; });
+  let complete!: () => void;
+  const release = new Promise<void>((resolve) => { complete = resolve; });
+  profile.globalState.update = async (key, value) => {
+    entered(key);
+    await release;
+    await update(key, value);
+  };
+  try {
+    registerStaffSetup(profile.context, { library, fixture, chat: { async prefill() { assert.fail('the staged role has no start action'); } } });
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([confirmed]);
+    stub.quickPickAnswers.push('Institutional G3 Action Register', '$(check) Set up the team');
+    const command = Promise.resolve(execute());
+    assert.equal(await Promise.race([writing, command.then(() => assert.fail('confirmation never began the write'))]), keyFor(confirmed));
+    assert.deepEqual(profile.writes, []);
+    stub.setWorkspaceFolders([other]);
+    complete();
+    assert.equal(await command, undefined);
+    assert.deepEqual(profile.writes, [keyFor(confirmed)]);
+    assert.deepEqual(profile.records.get(keyFor(confirmed)), expected.institutional.binding);
+    assert.equal(profile.records.get(keyFor(other)), undefined);
+    assert.ok(stub.notifications.some(({ message, level }) => level === 'info' && /staged.*office-hours action register draft.*approved local test fixture/i.test(message) &&
+      message.includes(confirmed) && !message.includes(other)));
+    assert.ok(!stub.notifications.some(({ message }) => /on hold|\/team:|IRON LANTERN/i.test(message)));
+    assert.ok(stub.notificationActions.every((actions) => actions.length === 0));
+    assert.deepEqual(await readdir(confirmed), []);
+    assert.deepEqual(await readdir(other), []);
+    assert.deepEqual(await library.list(confirmed), []);
+    assert.deepEqual(await library.list(other), []);
+  } finally { complete(); uninstall(); }
+});
+
+test('registered institutional setup never persists after cancellation or a changed project identity', async () => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-setup-refusal-')));
+  const captured = path.join(temp, 'captured');
+  const switched = path.join(temp, 'switched');
+  const replaced = path.join(temp, 'replaced');
+  const library = new TeamLibrary(path.join(temp, 'library'));
+  await mkdir(captured);
+  await mkdir(switched);
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  try {
+    registerStaffSetup(profile.context, { library, fixture });
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([captured]);
+    stub.quickPickAnswers.push('Institutional Command Group', undefined);
+    await execute();
+    assert.ok(stub.quickPickRequests.some((request) => request.title?.includes('check the roster')));
+    const window = (stub.vscode as typeof import('vscode')).window;
+    const quickPick = window.showQuickPick;
+    for (const change of [
+      async () => { stub.setWorkspaceFolders([switched]); },
+      async () => { await rename(captured, replaced); await mkdir(captured); },
+    ]) {
+      Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async (...args: unknown[]) => {
+        const answer = await Reflect.apply(quickPick, window, args);
+        const options = args[1] as { title?: string } | undefined;
+        if (options?.title?.includes('check the roster')) await change();
+        return answer;
+      } });
+      stub.setWorkspaceFolders([captured]);
+      stub.quickPickAnswers.push('Institutional Command Group', '$(check) Set up the team');
+      const messageStart = stub.notifications.length;
+      await execute();
+      assert.ok(stub.notifications.slice(messageStart).some(({ message }) => /project.*changed/i.test(message)));
+    }
+    assert.deepEqual(profile.writes, []);
+    assert.equal(profile.records.size, 0);
+    for (const directory of [captured, switched, replaced]) assert.deepEqual(await readdir(directory), []);
+    assert.deepEqual((await readdir(temp)).sort(), ['captured', 'replaced', 'switched']);
+    assert.ok(stub.notifications.every(({ message }) => !/staged.*test fixture/i.test(message)));
+  } finally { uninstall(); }
+});
+
+test('registered institutional setup holds malformed profile state and unconfirmed persistence', async () => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-setup-held-')));
+  const project = path.join(temp, 'project');
+  await mkdir(project);
+  const library = new TeamLibrary(path.join(temp, 'library'));
+  const { stub, registerStaffSetup, fixture, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  try {
+    registerStaffSetup(profile.context, { library, fixture });
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([project]);
+    const key = institutionalStageKey(project);
+    const partial = { version: 1, echelon: 'L3' };
+    profile.records.set(key, partial);
+    stub.quickPickAnswers.push('Institutional Command Group', '$(check) Set up the team');
+    await execute();
+    assert.ok(stub.notifications.some(({ message }) => /incomplete|inconsistent/i.test(message)));
+    assert.deepEqual(profile.records.get(key), partial);
+    assert.deepEqual(profile.writes, []);
+
+    const failing = profileState();
+    const update = failing.globalState.update;
+    failing.globalState.update = async (name, value) => {
+      await update(name, value);
+      throw new Error('fixture write failure');
+    };
+    registerStaffSetup(failing.context, { library, fixture });
+    const failingCommand = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(failingCommand);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      stub.quickPickAnswers.length = 0;
+      stub.quickPickAnswers.push('Institutional Command Group', '$(check) Set up the team');
+      const messageStart = stub.notifications.length;
+      await failingCommand();
+      assert.ok(stub.notifications.slice(messageStart).some(({ message }) => /on hold|could not.*persist/i.test(message)));
+    }
+    assert.deepEqual(failing.writes, [key, key], 'a rejected update is not trusted on retry even if staging appears cached');
+    assert.ok(stub.notifications.every(({ message }) => !/staged.*test fixture/i.test(message)));
+    assert.deepEqual(await readdir(project), []);
+    assert.deepEqual(await readdir(temp), ['project']);
+  } finally { uninstall(); }
+});
+
+test('concurrent rejected institutional setup writes each require a confirmed retry', async () => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-setup-concurrent-')));
+  const roots = ['first', 'second'].map((name) => path.join(temp, name));
+  await Promise.all(roots.map((root) => mkdir(root)));
+  const plans = await Promise.all(roots.map(planInstitutionalStaffSetup));
+  const profile = profileState();
+  const update = profile.globalState.update;
+  let bothCached!: () => void;
+  const cached = new Promise<void>((resolve) => { bothCached = resolve; });
+  profile.globalState.update = async (key, value) => {
+    await update(key, value);
+    if (profile.writes.length === roots.length) bothCached();
+    await cached;
+    throw new Error('fixture write failure');
+  };
+
+  const rejected = await Promise.allSettled(plans.map((plan) => persistInstitutionalStaffSetup(plan, profile.globalState, () => true)));
+  for (const result of rejected) {
+    assert.equal(result.status, 'rejected');
+    assert.match(String(result.reason), /could not persist/i);
+  }
+  const keys = roots.map(institutionalStageKey);
+  assert.deepEqual([...profile.records.keys()].sort(), [...keys].sort());
+  profile.globalState.update = update;
+  for (const plan of plans) await persistInstitutionalStaffSetup(plan, profile.globalState, () => true);
+  assert.deepEqual(profile.writes.slice(roots.length), keys, 'each cached failure requires a newly accepted write');
 });
 
 test('Team Studio accepts the staff setup message and offers the button', () => {

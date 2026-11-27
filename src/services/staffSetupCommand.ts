@@ -14,6 +14,7 @@ import {
   applyStaffSetup, existingStaffSettings, requestedSection, levelChoices, nationChoices, planningTypeChoices, planStaffSetup, profileChoices, readStaffSetupInputs, settingsFrom,
   SET_UP_STAFF_TEAM_COMMAND, staffTeamTarget, templateQuestions, type Choice, type StaffSetupPlan
 } from './staffSetup';
+import type { MementoLike } from './stateHome';
 import { hasLoadedScenario, loadScenarioIntoProject, readScenarioFile, STARTER_SCENARIO_FILE } from './staffScenarioLoader';
 
 export const LOAD_STARTER_ACTION = 'Load IRON LANTERN';
@@ -59,23 +60,60 @@ export function localityChoices(): Array<Choice<'cloud' | 'local'>> {
 /** Where "Task it now" puts the team's command: the sidebar chat's composer (focused, nothing sent). */
 export interface StaffSetupChat { prefill(text: string): Promise<void> }
 
+export interface StaffSetupFixture {
+  readonly choices: readonly Choice<string>[];
+  stage(root: string, choice: string, state: MementoLike | undefined): Promise<void>;
+}
+
+interface StaffSetupRegistration {
+  readonly chat?: StaffSetupChat;
+  readonly library?: TeamLibrary;
+  /** Supplied only by the isolated host harness, never by a command argument or setting. */
+  readonly fixture?: StaffSetupFixture;
+}
+
+interface StaffSetupWizard extends StaffSetupRegistration {
+  readonly section?: StaffTeamSection | undefined;
+  readonly state?: MementoLike;
+}
+
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
 export function readyMessage(teamName: string, slug: string, archived: boolean): string {
   return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the SovAI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
 }
 
-export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection, chat?: StaffSetupChat): Promise<string | undefined> {
+async function confirmStaffSetup(plan: StaffSetupPlan): Promise<boolean> {
+  const detail = `Writes ${plan.roster.fileName}.md to your teams, PROFILE.md and the skills under .planning/staff/, the staff settings in project.json and the section's guidance in AGENTS.md.`;
+  const confirm = { label: `$(check) ${SET_UP_ACTION}`, detail };
+  const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], {
+    title: `${plan.roster.teamName}: check the roster`,
+    placeHolder: 'Members draft and recommend; the named person decides. Choose "Set up the team" to write it.',
+    ignoreFocusOut: true,
+  });
+  return answer === confirm;
+}
+
+export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<string | undefined> {
+  const { library = new TeamLibrary(teamLibraryDir(homeFolder())), section, chat, state, fixture } = options;
   const root = await projectFolder();
   if (!root) return undefined;
-  const inputs = await readStaffSetupInputs(root);
-  const existing = existingStaffSettings(inputs.projectJson);
   const title = 'Set up a staff team';
   const steps = 6;
 
   const asked = section ? STAFF_TEMPLATES.find((candidate) => candidate.section === section) : undefined;
-  const templateId = asked ? asked.id : await pick(title, 'Which staff section?', STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })), 1, steps);
+  const templateId = asked ? asked.id : await pick(title, 'Which staff section?', [
+    ...STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })),
+    ...(fixture?.choices ?? []),
+  ], 1, steps);
+  const fixtureChoice = asked ? undefined : fixture?.choices.find(({ value }) => value === templateId);
+  if (fixture && fixtureChoice) {
+    await fixture.stage(root, fixtureChoice.value, state);
+    return undefined;
+  }
   const template = STAFF_TEMPLATES.find((candidate) => candidate.id === templateId);
   if (!template) return undefined;
+  const inputs = await readStaffSetupInputs(root);
+  const existing = existingStaffSettings(inputs.projectJson);
   const profile = await pick(title, 'Which doctrine profile? Its terms, steps and annex letters follow it.', profileChoices(template), 2, steps);
   if (!profile) return undefined;
   const level = await pick(title, 'Which level?', levelChoices(template, profile), 3, steps);
@@ -95,15 +133,12 @@ export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(ho
   if (questions.redTeam && redTeam === undefined) return undefined;
   const where = await pick(title, 'Where may the members\' models run?', localityChoices(), 6, steps);
   if (!where) return undefined;
-  const options: StaffTemplateOptions = { settings, locality: where, ...(echelon ? { echelon } : {}), ...(variant ? { variant } : {}), ...(redTeam === false ? { redTeam: false } : {}) };
+  const templateOptions: StaffTemplateOptions = { settings, locality: where, ...(echelon ? { echelon } : {}), ...(variant ? { variant } : {}), ...(redTeam === false ? { redTeam: false } : {}) };
 
   let plan: StaffSetupPlan;
-  try { plan = planStaffSetup({ templateId: template.id, options, ...inputs }); } catch (error) { void vscode.window.showErrorMessage(`The staff team was not set up. ${(error as Error).message}`); return undefined; }
+  try { plan = planStaffSetup({ templateId: template.id, options: templateOptions, ...inputs }); } catch (error) { void vscode.window.showErrorMessage(`The staff team was not set up. ${(error as Error).message}`); return undefined; }
 
-  // The roster, checked before anything is written.
-  const confirm = { label: `$(check) ${SET_UP_ACTION}`, detail: `Writes ${plan.roster.fileName}.md to your teams, PROFILE.md and the skills under .planning/staff/, the staff settings in project.json and the section's guidance in AGENTS.md.` };
-  const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], { title: `${plan.roster.teamName}: check the roster`, placeHolder: 'Members draft and recommend; the named person decides. Choose "Set up the team" to write it.', ignoreFocusOut: true });
-  if (answer !== confirm) return undefined;
+  if (!await confirmStaffSetup(plan)) return undefined;
 
   const target = await staffTeamTarget(library, plan);
   if (target.exists) {
@@ -144,6 +179,7 @@ export const OPEN_STAFF_ROOM_ACTION = 'Open the Staff Room';
 /** The action on the "team is ready" message that puts `/team:<name> ` in the chat's message box. */
 export const TASK_NOW_ACTION = 'Task it now';
 
-export function registerStaffSetup(context: vscode.ExtensionContext, chat?: StaffSetupChat): void {
-  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, (arg?: unknown) => setUpStaffTeam(undefined, requestedSection(arg), chat)));
+export function registerStaffSetup(context: vscode.ExtensionContext, options: StaffSetupRegistration = {}): void {
+  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, (arg?: unknown) =>
+    setUpStaffTeam({ ...options, section: requestedSection(arg), state: context.globalState })));
 }

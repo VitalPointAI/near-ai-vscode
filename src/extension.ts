@@ -230,7 +230,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerRunReport(context);
   registerResearchVerifiers(context);
   registerStaffScenario(context);
-  registerStaffSetup(context, sidebar);
+  registerStaffSetup(context, { chat: sidebar });
   registerStaffSimulation(context);
   registerStaffImport(context);
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
