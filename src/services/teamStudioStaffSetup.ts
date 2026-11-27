@@ -13,6 +13,7 @@ import { projectStaffTeams } from './staffTeams';
 
 interface PreviewFolder { readonly root: string; readonly name: string }
 interface ProjectIdentity { readonly resolved: string; readonly device: bigint; readonly inode: bigint }
+interface CapturedProject { readonly folder: PreviewFolder; readonly identity: ProjectIdentity }
 
 interface PreviewRow {
   readonly id: StaffSectionId;
@@ -30,14 +31,16 @@ interface PreviewContent {
   readonly rows: readonly PreviewRow[];
 }
 
+type IssuedPreview = { readonly session: string } & PreviewContent;
 type PreviewState = { readonly type: 'staff-preview-state'; readonly request: number } &
-  ({ readonly session: string } & PreviewContent | { readonly error: PreviewError });
+  (IssuedPreview | { readonly error: PreviewError });
 
 interface HandoffResult {
   readonly type: 'staff-preview-result';
   readonly request: number;
   readonly session: string;
   readonly applied: boolean;
+  readonly preview?: IssuedPreview;
 }
 
 interface PreviewDeps {
@@ -150,7 +153,7 @@ function previewMessage(value: unknown): PreviewMessage | undefined {
 interface ChooserSession {
   readonly request: number;
   readonly id: string;
-  preview?: { readonly project: StudioStaffSelection; readonly offered: readonly StaffSectionId[] };
+  preview?: { readonly choice: CapturedProject; readonly project: StudioStaffSelection; readonly offered: readonly StaffSectionId[] };
 }
 
 export function createStaffSetupPreview(deps: PreviewDeps): {
@@ -170,6 +173,26 @@ export function createStaffSetupPreview(deps: PreviewDeps): {
     if (previous) publishError(previous.request, 'projectChanged');
   };
 
+  async function preparePreview(session: ChooserSession, choice: CapturedProject, previous = session): Promise<IssuedPreview | undefined> {
+    const { folder, identity } = choice;
+    const isSameDirectory = () => sameProject(identity, folder.root);
+    const isOpen = (active: ChooserSession) => current === active && isSameDirectory() && deps.folders().some(({ root }) => root === folder.root);
+    if (!isOpen(previous)) return undefined;
+    const { content, bytes } = await previewFor(folder, identity.resolved, deps.libraryDir);
+    if (!isOpen(previous)) return undefined;
+    const isPrimary = () => {
+      const primary = deps.folders()[0];
+      return Boolean(primary && isSameDirectory() && sameProject(identity, primary.root));
+    };
+    session.preview = {
+      choice,
+      project: { root: identity.resolved, name: folder.name, ...(bytes === undefined ? {} : { projectJson: bytes }), isCurrent: () => isOpen(session), isSameDirectory, isPrimary },
+      // A missing linked team can be recreated by the existing exact-link review.
+      offered: content.rows.filter((row) => row.template && (row.status === 'available' || row.status === 'unverified')).map((row) => row.id)
+    };
+    return { session: session.id, ...content };
+  }
+
   return {
     invalidate,
     reset: () => { current = undefined; latest = 0; },
@@ -186,18 +209,28 @@ export function createStaffSetupPreview(deps: PreviewDeps): {
         const session = current;
         const start = deps.startSection;
         if (!session?.preview || !start || session.request !== request || session.id !== message.session || !session.preview.offered.includes(message.section)) return;
-        const project = session.preview.project;
+        const { project, choice } = session.preview;
         delete session.preview;
         if (inFlight || !project.isCurrent()) { invalidate(); return; }
         inFlight = session;
         let applied = false;
+        let replacement: ChooserSession | undefined;
+        let preview: IssuedPreview | undefined;
         try {
           applied = await start(message.section, project);
+          const fresh: ChooserSession = { request, id: randomUUID() };
+          const next = await preparePreview(fresh, choice, session);
+          if (next && project.isCurrent()) {
+            replacement = fresh;
+            preview = next;
+          }
+        } catch {
+          // Without a fresh preview, the next section must wait for an explicit reopen.
         } finally {
           inFlight = undefined;
           if (current === session) {
-            current = undefined;
-            deps.post({ type: 'staff-preview-result', request, session: session.id, applied });
+            current = replacement;
+            deps.post({ type: 'staff-preview-result', request, session: session.id, applied, ...(preview ? { preview } : {}) });
           }
         }
         return;
@@ -220,21 +253,9 @@ export function createStaffSetupPreview(deps: PreviewDeps): {
         if (!selected) return fail('noSelection');
         const choice = offered.get(selected.root);
         if (!choice?.identity) return fail('projectChanged');
-        const { folder, identity } = choice;
-        const isSameDirectory = () => sameProject(identity, folder.root);
-        const isCurrent = () => current === session && isSameDirectory() && deps.folders().some(({ root }) => root === folder.root);
-        const isPrimary = () => {
-          const primary = deps.folders()[0];
-          return Boolean(primary && isSameDirectory() && sameProject(identity, primary.root));
-        };
-        if (!isCurrent()) return fail('projectChanged');
-        const { content, bytes } = await previewFor(folder, identity.resolved, deps.libraryDir);
-        if (!isCurrent()) return fail('projectChanged');
-        session.preview = {
-          project: { root: identity.resolved, name: folder.name, ...(bytes === undefined ? {} : { projectJson: bytes }), isCurrent, isSameDirectory, isPrimary },
-          offered: content.rows.filter((row) => row.template).map((row) => row.id)
-        };
-        deps.post({ type: 'staff-preview-state', request, session: session.id, ...content });
+        const preview = await preparePreview(session, { folder: choice.folder, identity: choice.identity });
+        if (!preview) return fail('projectChanged');
+        deps.post({ type: 'staff-preview-state', request, ...preview });
       } catch {
         fail('previewFailed');
       }

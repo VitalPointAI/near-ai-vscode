@@ -35,13 +35,12 @@
       waiting: 'Waiting for a project…',
       noProfile: 'No staff profile is saved for this project.',
       modelLocation: 'Model location unavailable until project setup records a policy.',
-      scope: 'Staff setup scope',
-      section: 'One section',
-      complete: 'Complete staff',
-      coverage: 'Review the coverage for this project. Whole-staff setup is unavailable.',
+      choose: 'Choose the sections to set up. You’ll review each section separately.',
+      coverage: 'Other sections',
+      noChoices: 'There are no new sections available for setup in this project.',
       handoff: 'Continue in the editor’s setup questions.',
       applied: 'The section is set up.',
-      held: 'Setup did not finish. Review the project to try again.',
+      held: 'Setup did not finish. You can review the selection and try again.',
       reviewAgain: 'Review again',
       continue: 'Continue to section setup',
       leave: 'Leave setup',
@@ -54,10 +53,9 @@
         previewFailed: 'Staff setup did not finish. Review the project and try again.'
       },
       statuses: {
-        noTemplate: 'Setup unavailable. No agent team template is available.',
-        linked: 'Linked agent team. Review before retaining or replacing it.',
+        noTemplate: 'No agent team template is available.',
+        linked: 'Agent team already linked.',
         unverified: 'The linked agent team could not be verified.',
-        available: 'Section template available. Whole-staff changes require review.',
         incompatible: 'Setup unavailable for this staff profile and level.'
       },
       profiles: { 'us-joint': 'US Joint', 'us-army': 'US Army', 'nato-ca': 'NATO/Canadian' },
@@ -74,13 +72,12 @@
       waiting: 'En attente d’un projet…',
       noProfile: 'Ce projet n’a aucun profil d’état-major enregistré.',
       modelLocation: 'Le lieu d’exécution des modèles sera disponible une fois la politique du projet enregistrée.',
-      scope: 'Portée de la configuration de l’état-major',
-      section: 'Une section',
-      complete: 'État-major complet',
-      coverage: 'Examinez les sections couvertes pour ce projet. La configuration de tout l’état-major est indisponible.',
+      choose: 'Choisissez les sections à configurer. Vous examinerez chaque section séparément.',
+      coverage: 'Autres sections',
+      noChoices: 'Aucune nouvelle section ne peut être configurée dans ce projet.',
       handoff: 'Poursuivez en répondant aux questions dans l’éditeur.',
       applied: 'La section est configurée.',
-      held: 'La configuration n’a pas abouti. Examinez le projet avant de réessayer.',
+      held: 'La configuration n’a pas abouti. Vous pouvez revoir votre sélection et réessayer.',
       reviewAgain: 'Examiner de nouveau',
       continue: 'Poursuivre la configuration de la section',
       leave: 'Quitter la configuration',
@@ -93,10 +90,9 @@
         previewFailed: 'La configuration de l’état-major n’a pas abouti. Examinez le projet et réessayez.'
       },
       statuses: {
-        noTemplate: 'Configuration indisponible. Aucun modèle d’équipe n’est disponible.',
-        linked: 'Équipe liée. Examinez-la avant de la conserver ou de la remplacer.',
+        noTemplate: 'Aucun modèle d’équipe n’est disponible.',
+        linked: 'Équipe d’agents déjà liée.',
         unverified: 'Impossible de vérifier l’équipe liée.',
-        available: 'Modèle de section disponible. Les changements touchant tout l’état-major exigent un examen.',
         incompatible: 'Configuration indisponible pour ce profil et ce niveau d’état-major.'
       },
       profiles: { 'us-joint': 'Forces interarmées des États-Unis', 'us-army': 'Armée de terre des États-Unis', 'nato-ca': 'OTAN/Canada' },
@@ -2386,7 +2382,7 @@
 
   function openStaffPreview() {
     const request = ++staffPreviewRequest;
-    staffPreview = { request, scope: 'section' };
+    staffPreview = { request, selected: new Set() };
     pendingFocus = 'staff-preview-title';
     vscode.postMessage({ type: 'staff-preview-open', request });
     render();
@@ -2400,6 +2396,37 @@
     render();
   }
 
+  function staffSectionAvailable(row) {
+    return row.template && (row.status === 'available' || row.status === 'unverified');
+  }
+
+  function renderStaffRows(entries, copy, disabled, selected) {
+    const rows = el('ul', 'choice-grid staff-preview-rows');
+    for (const row of entries) {
+      const card = el('li', '', '');
+      const name = copy.sections[row.id];
+      const label = row.code ? row.code + ' ' + name : name;
+      if (staffSectionAvailable(row)) {
+        const pick = button(label, () => {
+          if (selected.has(row.id)) selected.delete(row.id);
+          else selected.add(row.id);
+          pendingFocus = 'staff-section-' + row.id;
+          render();
+        }, { id: 'staff-section-' + row.id });
+        pick.setAttribute('aria-pressed', String(selected.has(row.id)));
+        pick.disabled = Boolean(disabled);
+        card.append(pick);
+      } else {
+        card.append(el('h4', '', label));
+      }
+      if (row.status !== 'available') card.append(el('p', '', copy.statuses[row.status]));
+      if (row.team) card.append(el('p', '', row.team));
+      if (row.decisionRole) card.append(el('p', 'hint', copy.decision));
+      rows.append(card);
+    }
+    return rows;
+  }
+
   function renderStaffPreview(root) {
     const copy = STAFF_COPY[staffLocale];
     const panel = el('section', 'panel staff-preview');
@@ -2409,7 +2436,7 @@
     title.setAttribute('tabindex', '-1');
     panel.setAttribute('aria-labelledby', title.id);
     panel.append(title);
-    const { data, scope, busy, finished, section } = staffPreview;
+    const { data, busy, finished, selected } = staffPreview;
     if (data?.error) {
       panel.append(el('p', '', copy.errors[data.error]));
     } else if (!data) {
@@ -2419,58 +2446,40 @@
       if (data.profile) panel.append(el('p', '', copy.profiles[data.profile] + ' · ' + copy.levels[data.level]));
       else panel.append(el('p', '', copy.noProfile));
       panel.append(el('p', 'hint', copy.modelLocation));
-      const scopes = el('div', 'actions staff-preview-scopes');
-      scopes.setAttribute('role', 'group');
-      scopes.setAttribute('aria-label', copy.scope);
-      for (const [value, label] of [['section', copy.section], ['complete', copy.complete]]) {
-        const control = button(label, () => {
-          staffPreview.scope = value;
-          pendingFocus = 'staff-preview-title';
-          render();
-        }, { id: 'staff-scope-' + value });
-        control.setAttribute('aria-pressed', String(scope === value));
-        control.disabled = Boolean(busy);
-        scopes.append(control);
+      const available = data.rows.filter(staffSectionAvailable);
+      const other = data.rows.filter(row => !staffSectionAvailable(row));
+      const nextSection = available.find(row => selected.has(row.id))?.id;
+      if (available.length) {
+        const instructions = el('p', '', copy.choose);
+        instructions.id = 'staff-preview-choices';
+        panel.append(instructions);
+        const rows = renderStaffRows(available, copy, busy || !data.session, selected);
+        rows.setAttribute('aria-labelledby', instructions.id);
+        panel.append(rows);
+      } else {
+        panel.append(el('p', 'hint', copy.noChoices));
       }
-      panel.append(scopes);
-      const rows = el('ul', 'choice-grid staff-preview-rows');
-      for (const row of data.rows) {
-        if (scope === 'section' && !row.template) continue;
-        const card = el('li', '', '');
-        const name = copy.sections[row.id];
-        const label = row.code ? row.code + ' ' + name : name;
-        if (scope === 'section') {
-          const pick = button(label, () => {
-            staffPreview.section = row.id;
-            pendingFocus = 'staff-section-' + row.id;
-            render();
-          }, { id: 'staff-section-' + row.id });
-          pick.setAttribute('aria-pressed', String(section === row.id));
-          pick.disabled = Boolean(busy);
-          card.append(pick);
-        } else {
-          card.append(el('h4', '', label));
-        }
-        card.append(el('p', '', copy.statuses[row.status]));
-        if (row.team) card.append(el('p', '', row.team));
-        if (row.decisionRole) card.append(el('p', 'hint', copy.decision));
-        rows.append(card);
-      }
-      if (scope === 'complete') panel.append(el('p', 'hint', copy.coverage));
-      panel.append(rows);
       if (busy) panel.append(el('p', 'hint', copy.handoff));
-      else if (finished) {
-        panel.append(el('p', '', finished === 'applied' ? copy.applied : copy.held));
-        if (finished !== 'applied') panel.append(button(copy.reviewAgain, openStaffPreview, { id: 'staff-preview-review' }));
-      } else if (scope === 'section') {
-        const next = button(copy.continue, () => {
-          staffPreview.busy = true;
-          vscode.postMessage({ type: 'staff-preview-continue', request: staffPreview.request, session: data.session, section });
-          announce(copy.handoff, staffLocale);
-          render();
-        }, { primary: true, id: 'staff-preview-continue' });
-        next.disabled = !section;
-        panel.append(next);
+      else {
+        if (finished) panel.append(el('p', '', finished === 'applied' ? copy.applied : copy.held));
+        if (!data.session) {
+          panel.append(button(copy.reviewAgain, openStaffPreview, { id: 'staff-preview-review' }));
+        } else if (available.length) {
+          const next = button(copy.continue, () => {
+            if (!nextSection || staffPreview.busy) return;
+            staffPreview.busy = true;
+            staffPreview.sectionInReview = nextSection;
+            vscode.postMessage({ type: 'staff-preview-continue', request: staffPreview.request, session: data.session, section: nextSection });
+            announce(copy.handoff, staffLocale);
+            render();
+          }, { primary: true, id: 'staff-preview-continue' });
+          next.disabled = !nextSection;
+          panel.append(next);
+        }
+      }
+      if (other.length) {
+        panel.append(el('h3', '', copy.coverage));
+        panel.append(renderStaffRows(other, copy, true, selected));
       }
     }
     panel.append(button(copy.leave, leaveStaffPreview, { id: 'staff-preview-leave' }));
@@ -2538,6 +2547,7 @@
       case 'staff-preview-state':
         if (staffPreview?.request !== message.request) break;
         staffPreview.data = message;
+        staffPreview.selected.clear();
         staffPreview.busy = false;
         announce(message.error ? STAFF_COPY[staffLocale].errors[message.error] : STAFF_COPY[staffLocale].ready, staffLocale);
         render();
@@ -2546,7 +2556,13 @@
         if (staffPreview?.request !== message.request || staffPreview.data?.session !== message.session || !staffPreview.busy) break;
         staffPreview.busy = false;
         staffPreview.finished = message.applied ? 'applied' : 'held';
-        pendingFocus = message.applied ? 'staff-preview-title' : 'staff-section-' + staffPreview.section;
+        if (message.applied) staffPreview.selected.delete(staffPreview.sectionInReview);
+        staffPreview.data = message.preview ?? { ...staffPreview.data, session: undefined };
+        const offered = new Set(message.preview?.rows.filter(staffSectionAvailable).map(row => row.id));
+        for (const id of staffPreview.selected) if (!offered.has(id)) staffPreview.selected.delete(id);
+        pendingFocus = !message.applied && offered.has(staffPreview.sectionInReview)
+          ? 'staff-section-' + staffPreview.sectionInReview : 'staff-preview-title';
+        staffPreview.sectionInReview = undefined;
         announce(message.applied ? STAFF_COPY[staffLocale].applied : STAFF_COPY[staffLocale].held, staffLocale);
         render();
         break;
