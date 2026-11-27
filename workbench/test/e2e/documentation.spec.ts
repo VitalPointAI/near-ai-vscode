@@ -1,9 +1,9 @@
-// The Documentation view shows figures, not their source: the architecture overview's diagrams are SVG drawn at build time and the
-// README's screenshots are bundled images, in the dark and the light theme, and the view still makes only same-origin, data: or blob:
-// requests (46-03). The container suite (test/container/smoke.test.ts) starts the image and runs this.
+// The architecture illustration and README screenshots are bundled images. The architecture flows remain searchable text,
+// follow the Workbench theme, and load no remote resources. The container suite runs this against the built image.
 import { expect, test, type Page } from '@playwright/test';
 
-const RAW = ['![', '<figure', '<img', '```mermaid', 'flowchart LR'];
+const RAW = ['![', '<figure', '<img', '```mermaid', 'flowchart LR', 'SystemArchitecture'];
+const MISSION_HUB_STEP = 'Mission hub validates sealed changes';
 
 async function runCommand(page: Page, label: string, pick?: string): Promise<void> {
   await page.keyboard.press('F1');
@@ -27,7 +27,7 @@ async function expectNoRawSyntax(page: Page): Promise<void> {
   for (const raw of RAW) expect(visible, `visible text holds ${raw}`).not.toContain(raw);
 }
 
-test('figures and diagrams render as images and SVG, never as source, and load only from the workbench', async ({ page, baseURL }) => {
+test('bundled figures and architecture flows render offline and remain usable across layouts and themes', async ({ page, baseURL }) => {
   const origin = new URL(baseURL ?? '').origin;
   const elsewhere: string[] = [];
   page.on('request', (request) => {
@@ -44,33 +44,32 @@ test('figures and diagrams render as images and SVG, never as source, and load o
   await expect(page.locator('.sterling-documentation nav button').first()).toBeVisible({ timeout: 30_000 });
 
   await openTopic(page, 'Architecture overview');
-  const diagrams = page.locator('.sterling-documentation article figure.sterling-doc-diagram svg');
-  await expect(diagrams).toHaveCount(3);
-  await expect(diagrams.first()).toBeVisible();
+  const article = page.locator('.sterling-documentation article');
+  const illustration = article.getByRole('img', { name: /^System blueprint of Sterling Sovereign AI/ });
+  const physicalLayout = article.getByRole('img', { name: /^Physical deployment of Sterling Sovereign AI/ });
+  const flows = article.locator('table').filter({ hasText: MISSION_HUB_STEP });
+  await expect(physicalLayout).toHaveCount(1);
+  await expect(physicalLayout).toHaveAttribute('src', /^sterling-documentation\/[0-9a-f]{16}\.webp$/);
+  await expect(illustration).toHaveCount(1);
+  await expect(illustration).toHaveAttribute('src', /^sterling-documentation\/[0-9a-f]{16}\.webp$/);
+  await expect(flows.locator('tbody tr')).toHaveCount(9);
   await expectNoRawSyntax(page);
 
-  // Wide diagrams are not cut off at the text column (seen at 1600 px): a diagram that does not fit whole gets the article's full width,
-  // shrinks to it but not below 85% of its drawn size (labels stay readable), and past that its own box scrolls to its right edge.
-  await page.setViewportSize({ width: 1600, height: 900 });
-  for (const diagram of await diagrams.all()) {
-    const fit = await diagram.evaluate((svg) => {
-      const box = svg.parentElement as HTMLElement;
-      const article = box.closest('article') as HTMLElement;
-      const style = getComputedStyle(article);
-      const articleWidth = article.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-      const whole = svg.getBoundingClientRect().right <= box.getBoundingClientRect().right;
-      box.scrollLeft = box.scrollWidth;
-      const scale = svg.getBoundingClientRect().width / (svg as SVGSVGElement).viewBox.baseVal.width;
-      const hidden = svg.getBoundingClientRect().right - box.getBoundingClientRect().right;
-      box.scrollLeft = 0;
-      return { whole, fullWidth: box.getBoundingClientRect().width >= articleWidth - 1, scale, hidden, scrolls: getComputedStyle(box).overflowX };
-    });
-    expect(fit.whole || fit.fullWidth, 'a diagram that does not fit whole uses the article width').toBe(true);
-    expect(fit.scale).toBeGreaterThanOrEqual(0.849);
-    expect(fit.scale).toBeLessThanOrEqual(1.001);
-    expect(fit.hidden, 'diagram right edge reachable inside its box').toBeLessThanOrEqual(1);
-    expect(fit.scrolls).toBe('auto');
+  for (const width of [1600, 640]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const blueprint of [physicalLayout, illustration]) {
+      await blueprint.scrollIntoViewIfNeeded();
+      await expect(blueprint).toBeVisible();
+      await expect.poll(() => blueprint.evaluate((node) => {
+        const image = node as HTMLImageElement;
+        if (!image.complete || image.naturalWidth === 0) return false;
+        const box = image.getBoundingClientRect();
+        const container = image.closest('article')!.getBoundingClientRect();
+        return box.width > 0 && box.left >= container.left - 1 && box.right <= container.right + 1;
+      }), { message: `the bundled blueprint loads and fits at ${width}px` }).toBe(true);
+    }
   }
+  await page.setViewportSize({ width: 1600, height: 900 });
 
   await openTopic(page, 'Features and settings');
   const screenshots = page.locator('.sterling-documentation article img');
@@ -84,26 +83,30 @@ test('figures and diagrams render as images and SVG, never as source, and load o
   }
   await expectNoRawSyntax(page);
 
-  // Links between pages still open the page in the view, and search still finds a diagram's words.
+  // Links between pages still open the architecture topic in the view.
   await openTopic(page, 'Welcome');
-  await page.locator('.sterling-documentation article a', { hasText: 'Architecture overview' }).first().click();
+  await article.getByRole('link', { name: 'Architecture overview' }).first().click();
+  const topics = page.locator('.sterling-documentation nav button');
   await expect(page.locator('.sterling-documentation nav button[aria-current="page"]')).toHaveText('Architecture overview');
-  await expect(diagrams).toHaveCount(3);
-  await page.locator('.sterling-documentation input[type="search"]').fill('Keycloak sign-in, no passwords');
-  await expect(page.locator('.sterling-documentation nav button')).toContainText(['Architecture overview']);
-  await page.locator('.sterling-documentation input[type="search"]').fill('');
+  await expect(illustration).toHaveCount(1);
 
-  // The diagrams follow the theme: in the dark and the light theme their text takes that theme's editor colour.
-  const diagramText = async (theme: string): Promise<string> => {
+  const search = page.locator('.sterling-documentation input[type="search"]');
+  await search.fill(MISSION_HUB_STEP);
+  await expect(topics).toContainText(['Architecture overview']);
+  await expect(topics.filter({ hasText: 'Welcome' })).toHaveCount(0);
+  await search.fill('');
+
+  const flowTextColour = async (theme: string): Promise<string> => {
     await runCommand(page, 'Preferences: Color Theme', theme);
     await openTopic(page, 'Architecture overview');
-    const fill = await diagrams.first().locator('g.node text').first().evaluate((node) => getComputedStyle(node).fill);
+    const colour = await flows.getByRole('cell', { name: MISSION_HUB_STEP, exact: true })
+      .evaluate((node) => getComputedStyle(node).color);
     const foreground = await page.locator('.sterling-documentation').evaluate((node) => getComputedStyle(node).color);
-    expect(fill, `diagram text in ${theme}`).toEqual(foreground);
+    expect(colour, `flow text inherits the documentation foreground in ${theme}`).toEqual(foreground);
     await expectNoRawSyntax(page);
-    return fill;
+    return colour;
   };
-  expect(await diagramText('Dark (Theia)')).not.toEqual(await diagramText('Light (Theia)'));
+  expect(await flowTextColour('Dark (Theia)')).not.toEqual(await flowTextColour('Light (Theia)'));
 
   await page.waitForLoadState('networkidle');
   expect(elsewhere, 'requests to another origin').toEqual([]);

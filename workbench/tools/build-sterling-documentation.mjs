@@ -24,7 +24,7 @@ const guides = [
   ['docs/staff-env-packs.md', 'Reference', 'Environment packs: terrain and weather for the COP map', 'using/reference/staff-env-packs.synced.md'],
   ['docs-site/content/security/trust-model.md', 'Security', 'The trust model in plain words', 'security/trust-model.md'],
   ['SECURITY.md', 'Security', 'Security policy', 'security/policy.synced.md'],
-  ['docs-site/content/architecture/overview.md', 'Architecture', 'Architecture overview', 'architecture/overview.md'],
+  ['docs-site/content/architecture/overview.mdx', 'Architecture', 'Architecture overview', 'architecture/overview.md'],
   ['CONTRIBUTING.md', 'Developing', 'Contributing', 'developing/contributing.synced.md'],
   ['docs/development-workflow.md', 'Developing', 'Development workflow', 'developing/development-workflow.synced.md'],
   ['docs/testing.md', 'Developing', 'Testing rules', 'developing/testing.synced.md'],
