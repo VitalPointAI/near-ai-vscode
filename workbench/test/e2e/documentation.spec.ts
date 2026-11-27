@@ -18,7 +18,7 @@ async function runCommand(page: Page, label: string, pick?: string): Promise<voi
 }
 
 async function openTopic(page: Page, title: string): Promise<void> {
-  await page.locator('.sterling-documentation nav button', { hasText: title }).click();
+  await page.locator('.sterling-documentation nav').getByRole('button', { name: title, exact: true }).click();
   await expect(page.locator('.sterling-documentation nav button[aria-current="page"]')).toHaveText(title);
 }
 
@@ -70,6 +70,29 @@ test('bundled figures and architecture flows render offline and remain usable ac
     }
   }
   await page.setViewportSize({ width: 1600, height: 900 });
+
+  for (const [blueprint, name, height] of [
+    [physicalLayout, /^Physical deployment .*Open full-size image$/, 2090],
+    [illustration, /^System blueprint .*Open full-size image$/, 2280],
+  ] as const) {
+    const link = article.getByRole('link', { name });
+    const asset = await blueprint.getAttribute('src');
+    expect(new URL((await link.getAttribute('href'))!, baseURL).href).toBe(new URL(asset!, baseURL).href);
+    const popupPromise = page.waitForEvent('popup');
+    await link.click();
+    const popup = await popupPromise;
+    try {
+      expect(new URL(popup.url()).origin).toBe(origin);
+      const image = popup.locator('img');
+      await expect(image).toHaveJSProperty('naturalWidth', 3500);
+      await expect(image).toHaveJSProperty('naturalHeight', height);
+    } finally {
+      await popup.close();
+    }
+  }
+
+  await article.getByRole('link', { name: 'Generated component catalogue' }).first().click();
+  await expect(page.locator('.sterling-documentation nav button[aria-current="page"]')).toHaveText('Component catalogue');
 
   await openTopic(page, 'Features and settings');
   const screenshots = page.locator('.sterling-documentation article img');

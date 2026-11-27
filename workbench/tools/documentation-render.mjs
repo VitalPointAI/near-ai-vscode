@@ -95,13 +95,16 @@ export function createDocumentationRenderer({ root }) {
     return `${ASSET_DIR}/${name}`;
   }
 
-  function imageHtml(src, alt, title, source) {
+  function imageHtml(src, alt, title, source, fullSize = false) {
     const bundled = bundleImage(src, source);
     const words = alt.trim();
     if (!bundled) {
       return `<span class="sterling-doc-image-missing">Image not available offline${words ? `: ${escapeHtml(words)}` : ''}</span>`;
     }
-    return `<img src="${escapeHtml(bundled)}" alt="${escapeHtml(words)}"${title ? ` title="${escapeHtml(title)}"` : ''} loading="lazy">`;
+    const image = `<img src="${escapeHtml(bundled)}" alt="${escapeHtml(words)}"${title ? ` title="${escapeHtml(title)}"` : ''} loading="lazy">`;
+    return fullSize
+      ? `<figure class="sterling-doc-figure"><a href="${escapeHtml(bundled)}">${image}<br>Open full-size image</a></figure>\n`
+      : image;
   }
 
   function diagramHtml(code, label, source) {
@@ -125,6 +128,17 @@ export function createDocumentationRenderer({ root }) {
   }
 
   const md = new MarkdownIt({ html: false, linkify: true, typographer: false });
+
+  md.core.ruler.before('inline', 'documentation_heading_ids', ({ tokens }) => {
+    for (const [index, heading] of tokens.entries()) {
+      if (heading.type !== 'heading_open') continue;
+      const inline = tokens[index + 1];
+      const marker = inline.content.match(/\s+\{#([\w-]+)\}$/);
+      if (!marker) continue;
+      heading.attrSet('id', marker[1]);
+      inline.content = inline.content.slice(0, marker.index);
+    }
+  });
 
   md.renderer.rules.image = (tokens, index, options, env) => {
     const token = tokens[index];
@@ -151,6 +165,9 @@ export function createDocumentationRenderer({ root }) {
     if (raw.startsWith('<!--') || DROPPED_TAGS.has(tag)) return '';
     if (EMBED_TAGS.has(tag)) return '<p class="sterling-doc-fallback">This embedded content is not shown in the workbench.</p>\n';
     const images = [...raw.matchAll(/<img\b[^>]*>/gi)].map((match) => tagAttributes(match[0]));
+    if (images.length && tag === 'systemarchitecturemap') {
+      return images.map(image => imageHtml(image.src, image.alt ?? '', image.title, env.source, true)).join('');
+    }
     if (images.length) {
       const caption = raw.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/i)?.[1];
       const figure = images.map((image) => imageHtml(image.src, image.alt ?? '', image.title, env.source)).join('');
