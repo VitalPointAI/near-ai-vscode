@@ -19,7 +19,6 @@ import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload } from '../domain/team/signedPayload';
 import { setCasProbe } from '../staff/staffFiles';
 import { readInstitutionalDraftReview } from '../staff/institutionalDraftStore';
-import { institutionalStaffSetupKey, persistInstitutionalStaffSetup, planInstitutionalStaffSetup } from '../services/staffSetup';
 import type { AgentTurnRequest } from '../services/agentSession';
 import { StreamInterruptedError, type AgentMessage, type CompletionEvent, type ToolCall, type ToolDefinition } from '../services/nearAiClient';
 import { newTestConversation, testBundleState, testGateRuntime } from './helpers/gatedRuns';
@@ -56,7 +55,9 @@ const toolCall = (id: string, name: string, input: unknown): ToolCall => ({
   id, type: 'function', function: { name, arguments: JSON.stringify(input) },
 });
 
-async function stageInstitutionalSetup(root: string) {
+async function stageInstitutionalSetup(root: string, choice: { label: string; team: string } = {
+  label: 'Institutional Command Group', team: INSTITUTIONAL_COMMAND_GROUP_TEAM,
+}) {
   const stub = createVscodeStub();
   Object.assign(stub.vscode as object, { QuickPickItemKind: { Separator: -1 } });
   const uninstall = installVscodeStub(stub);
@@ -73,13 +74,15 @@ async function stageInstitutionalSetup(root: string) {
     const library = new TeamLibrary(path.join(root, 'unused-library'));
     registerStaffSetup({ subscriptions: [], globalState } as never, undefined, library);
     stub.setWorkspaceFolders([root]);
-    stub.quickPickAnswers.push('Institutional Command Group', '$(check) Set up the team');
+    stub.quickPickAnswers.push(choice.label, '$(check) Set up the team');
     const setup = stub.commands.get('nearAi.setUpStaffTeam');
     assert.ok(setup);
     await setup();
-    assert.equal(profile.size, 1);
-    assert.equal(await library.findRunTeam(INSTITUTIONAL_COMMAND_GROUP_TEAM, root), undefined);
-    return [...profile.values()][0];
+    assert.equal(profile.size, 1, 'the registered setup stages only the selected institutional role');
+    const record = [...profile.values()][0] as Record<string, unknown>;
+    assert.equal(record.team, choice.team);
+    assert.equal(await library.findRunTeam(choice.team, root), undefined);
+    return record;
   } finally {
     uninstall();
     if (cached) require.cache[moduleId] = cached;
@@ -505,14 +508,7 @@ async function newRegisterFixture() {
   assert.ok(file);
   const briefVersion = path.basename(file, '.json');
   const briefReview = await subject.readReview(briefVersion);
-  // Task 2 adds a closed role choice to the existing staging service.
-  const plan = await planInstitutionalStaffSetup({ root: subject.fixture.root, team: registerTeam });
-  assert.equal(plan.roster.fileName, registerTeam, 'the normal staging service must keep the J3 role distinct');
-  const records = new Map<string, unknown>();
-  const state = { get: <T>(key: string) => records.get(key) as T | undefined, update: async (key: string, value: unknown) => { records.set(key, value); } };
-  await persistInstitutionalStaffSetup(plan, state, () => true);
-  const key = institutionalStaffSetupKey(plan.institutional.binding);
-  assert.equal(key, `nearAi.staff.institutional.j3ActionRegister.v1.${briefReview.project}`);
+  const staged = await stageInstitutionalSetup(subject.fixture.root, { label: 'Institutional G3 Action Register', team: registerTeam });
   const directory = path.join(subject.fixture.root, registerDirectory);
   await mkdir(directory, { recursive: true });
   const narratives = ['Facilities will prepare the office-hours notice. Desk lead confirmed receipt.',
@@ -548,7 +544,7 @@ async function newRegisterFixture() {
   let now = Date.parse(`${asOf}T12:00:00.000Z`);
   const fixture = {
     ...subject.fixture,
-    readStaged: () => records.get(key), currentSources: () => sources,
+    readStaged: () => staged, currentSources: () => sources,
     actionAuthority: {
       predecessorTeam: subject.team,
       chair: { fingerprint: chair.fingerprint, publicKey: chair.publicKey },

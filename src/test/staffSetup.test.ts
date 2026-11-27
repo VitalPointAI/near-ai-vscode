@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { institutionalCommandGroupDefinition, institutionalCommandGroupSkill } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, institutionalCommandGroupDefinition, institutionalCommandGroupSkill, institutionalRole, selectedTeamAgents } from '../agent/staff/institutionalCommand';
 import { staffGuidanceIn, withStaffGuidance } from '../agent/staff/guidance';
-import { J2_STAFF_TEMPLATE, J5_STAFF_TEMPLATE } from '../agent/staff/templates';
+import { J2_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J5_STAFF_TEMPLATE } from '../agent/staff/templates';
 import { builtInStaffServers } from '../agent/staffServers';
 import { applyGuidanceUpdate, applyTeamUpdate, detectTemplate, planStaffGuidanceUpdate, planTeamUpdate } from '../agent/teamUpdate';
 import { parseTeam, TeamLibrary } from '../agent/teams';
@@ -236,6 +236,107 @@ test('registered Staff Setup stages only a profile-local record for each selecte
     assert.ok(stub.notifications.every(({ message }) => !message.includes('IRON LANTERN')));
     assert.ok(stub.notificationActions.every((actions) => !actions.includes('Task it now')));
   } finally { uninstall(); }
+});
+
+test('registered Staff Setup stages the fictional action register separately from the legacy J3 link', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-action-setup-')));
+  const library = new TeamLibrary(path.join(root, 'unused-library'));
+  const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  const slug = INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
+  const { definition, skill, lead } = institutionalRole(slug);
+  try {
+    registerStaffSetup(profile.context, { async prefill() { assert.fail('the staged role has no start action'); } }, library);
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([root]);
+    stub.quickPickAnswers.push('Institutional G3 Action Register', undefined);
+    await execute();
+    assert.deepEqual(profile.writes, [], 'cancelling the role roster has no effect');
+    stub.quickPickAnswers.push('Institutional G3 Action Register', '$(check) Set up the team');
+    assert.equal(await execute(), undefined, 'registered staging does not return a launchable team');
+    const rootDigest = createHash('sha256').update(root).digest('hex');
+    const key = `nearAi.staff.institutional.j3ActionRegister.v1.${rootDigest}`;
+    const recorded = profile.records.get(key) as Record<string, unknown> | undefined;
+    assert.ok(recorded, 'the J3 selection stages its own profile-local binding');
+    assert.equal(recorded.team, slug);
+    assert.equal(recorded.echelon, 'L3');
+    assert.equal(recorded.rootDigest, rootDigest);
+    assert.equal(recorded.teamDigest, createHash('sha256').update(definition).digest('hex'));
+    assert.equal(recorded.skillDigest, createHash('sha256').update(skill).digest('hex'));
+    assert.deepEqual(profile.writes, [key]);
+    assert.deepEqual(await readdir(root), []);
+    const general = stub.quickPickRequests[0];
+    for (const label of ['Institutional Command Group', 'Institutional G3 Action Register', 'J3 operations']) {
+      assert.ok(general.items.some((item) => item.label === label && (!label.startsWith('Institutional') || item.detail?.includes('L3'))));
+    }
+    const roster = stub.quickPickRequests.find((request) => request.title === 'Institutional G3 Action Register: check the roster');
+    assert.ok(roster);
+    assert.ok(roster.items.some((item) => /Stages the .*action register draft skill/i.test(item.detail ?? '')));
+    assert.ok(roster.items.some((item) => item.label === `$(person) ${lead}` && /reviews the action register draft/i.test(item.detail ?? '')));
+    assert.ok(roster.items.some((item) => item.label === '$(hubot) action-register-drafter' && /approved local test fixture/i.test(item.detail ?? '')));
+    assert.ok(stub.notifications.some(({ message }) => /staged.*office-hours action register draft.*approved local test fixture/i.test(message)));
+    assert.ok(!stub.notifications.some(({ message }) => /\/team:|IRON LANTERN/.test(message)));
+    assert.ok(stub.notificationActions.every((actions) => actions.length === 0));
+    assert.equal(await library.findRunTeam(slug, root), undefined);
+    assert.deepEqual(await library.list(root), []);
+    assert.deepEqual(selectedTeamAgents(parseTeam(definition, `${slug}.md`)), [], 'an unbranded reserved definition remains inert');
+
+    const requestCount = stub.quickPickRequests.length;
+    stub.quickPickAnswers.push(undefined);
+    await execute({ section: 'j3' });
+    const [legacy] = stub.quickPickRequests.slice(requestCount);
+    assert.equal(legacy.title, 'Set up a staff team (2/6)');
+    assert.match(legacy.placeHolder ?? '', /Which doctrine profile/);
+    assert.deepEqual(legacy.items.map(({ label }) => label), profileChoices(J3_STAFF_TEMPLATE).map(({ label }) => label));
+    assert.deepEqual(profile.writes, [key], 'the legacy section link never stages an institutional role');
+  } finally { uninstall(); }
+});
+
+test('a registered J3 write finishes for the confirmed project when selection switches in flight', async () => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'institutional-action-switch-')));
+  const [confirmed, other] = ['confirmed', 'other'].map((name) => path.join(temp, name, 'brigade'));
+  await Promise.all([confirmed, other].map((root) => mkdir(root, { recursive: true })));
+  const library = new TeamLibrary(path.join(temp, 'unused-library'));
+  const { stub, registerStaffSetup, uninstall } = staffSetupVscode();
+  const profile = profileState();
+  const team = INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
+  const expected = await planInstitutionalStaffSetup({ root: confirmed, team });
+  const keyFor = (root: string) => `nearAi.staff.institutional.j3ActionRegister.v1.${createHash('sha256').update(root).digest('hex')}`;
+  const update = profile.globalState.update;
+  let entered!: (key: string) => void;
+  const writing = new Promise<string>((resolve) => { entered = resolve; });
+  let complete!: () => void;
+  const release = new Promise<void>((resolve) => { complete = resolve; });
+  profile.globalState.update = async (key, value) => {
+    entered(key);
+    await release;
+    await update(key, value);
+  };
+  try {
+    registerStaffSetup(profile.context, { async prefill() { assert.fail('the staged role has no start action'); } }, library);
+    const execute = stub.commands.get('nearAi.setUpStaffTeam');
+    assert.ok(execute);
+    stub.setWorkspaceFolders([confirmed]);
+    stub.quickPickAnswers.push('Institutional G3 Action Register', '$(check) Set up the team');
+    const command = Promise.resolve(execute());
+    assert.equal(await Promise.race([writing, command.then(() => assert.fail('confirmation never began the write'))]), keyFor(confirmed));
+    assert.deepEqual(profile.writes, []);
+    stub.setWorkspaceFolders([other]);
+    complete();
+    assert.equal(await command, undefined);
+    assert.deepEqual(profile.writes, [keyFor(confirmed)]);
+    assert.deepEqual(profile.records.get(keyFor(confirmed)), expected.institutional.binding);
+    assert.equal(profile.records.get(keyFor(other)), undefined);
+    assert.ok(stub.notifications.some(({ message, level }) => level === 'info' && /staged.*office-hours action register draft.*approved local test fixture/i.test(message) &&
+      message.includes(confirmed) && !message.includes(other)));
+    assert.ok(!stub.notifications.some(({ message }) => /on hold|\/team:|IRON LANTERN/i.test(message)));
+    assert.ok(stub.notificationActions.every((actions) => actions.length === 0));
+    assert.deepEqual(await readdir(confirmed), []);
+    assert.deepEqual(await readdir(other), []);
+    assert.deepEqual(await library.list(confirmed), []);
+    assert.deepEqual(await library.list(other), []);
+  } finally { complete(); uninstall(); }
 });
 
 test('registered institutional setup never persists after cancellation or a changed project identity', async () => {

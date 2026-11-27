@@ -8,7 +8,8 @@ import * as vscode from 'vscode';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { TeamLibrary } from '../agent/teams';
 import {
-  INSTITUTIONAL_COMMAND_GROUP_NAME, INSTITUTIONAL_COMMAND_GROUP_PROFILE, INSTITUTIONAL_COMMAND_GROUP_TEAM,
+  INSTITUTIONAL_COMMAND_GROUP_PROFILE, INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM,
+  institutionalRole, isInstitutionalRole, type InstitutionalRoleId,
 } from '../agent/staff/institutionalCommand';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
 import type { StaffTemplateOptions } from '../agent/staff/templates';
@@ -23,6 +24,14 @@ import { hasLoadedScenario, loadScenarioIntoProject, readScenarioFile, STARTER_S
 export const LOAD_STARTER_ACTION = 'Load IRON LANTERN';
 export const SET_UP_ACTION = 'Set up the team';
 export const REPLACE_TEAM_ACTION = 'Replace';
+
+const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM] as const).map((value) => ({
+  value,
+  label: institutionalRole(value).label,
+  detail: value === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM
+    ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office-hours action register draft for a local test fixture.`
+    : `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Local draft setup for a test fixture.`,
+}));
 
 async function pick<T>(title: string, placeHolder: string, choices: Array<Choice<T>>, step: number, steps: number): Promise<T | undefined> {
   if (choices.length === 1) return choices[0].value;
@@ -42,9 +51,13 @@ async function projectFolder(): Promise<string | undefined> {
 export function rosterItems(plan: StaffSetupPlan | InstitutionalStaffSetupPlan): vscode.QuickPickItem[] {
   const { roster } = plan;
   if ('institutional' in plan) {
+    const isActionRegister = plan.institutional.binding.team === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
+    const humanDetail = isActionRegister
+      ? 'Reviews the action register draft. The fictional chair owns the decision, and the assigned person acknowledges any action.'
+      : 'Reviews the draft and decides through the authorized process.';
     return [
-      { label: 'A person decides', kind: vscode.QuickPickItemKind.Separator },
-      { label: `$(person) ${roster.humanLead}`, description: 'human lead', detail: 'Reviews the draft and decides through the authorized process.' },
+      { label: isActionRegister ? 'Human review' : 'A person decides', kind: vscode.QuickPickItemKind.Separator },
+      { label: `$(person) ${roster.humanLead}`, description: 'human lead', detail: humanDetail },
       { label: 'Agent drafts', kind: vscode.QuickPickItemKind.Separator },
       ...roster.members.map((member) => ({ label: `$(hubot) ${member.name}`, description: member.role, detail: 'Requires an approved local test fixture.' })),
     ];
@@ -77,26 +90,33 @@ export function readyMessage(teamName: string, slug: string, archived: boolean):
 }
 
 async function confirmStaffSetup(plan: StaffSetupPlan | InstitutionalStaffSetupPlan): Promise<boolean> {
+  const isActionRegister = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
+  const skill = isActionRegister ? 'office-hours action register draft' : 'decision brief';
   const detail = 'institutional' in plan
-    ? `Stages the ${INSTITUTIONAL_COMMAND_GROUP_PROFILE} definition and decision brief skill in this editor profile.`
+    ? `Stages the ${INSTITUTIONAL_COMMAND_GROUP_PROFILE} definition and ${skill} skill in this editor profile.`
     : `Writes ${plan.roster.fileName}.md to your teams, PROFILE.md and the skills under .planning/staff/, the staff settings in project.json and the section's guidance in AGENTS.md.`;
   const confirm = { label: `$(check) ${SET_UP_ACTION}`, detail };
   const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], {
     title: `${plan.roster.teamName}: check the roster`,
-    placeHolder: 'Members draft and recommend; the named person decides. Choose "Set up the team" to write it.',
+    placeHolder: isActionRegister
+      ? 'The member drafts for review. The fictional chair owns the decision. Choose "Set up the team" to stage this role.'
+      : 'Members draft and recommend; the named person decides. Choose "Set up the team" to write it.',
     ignoreFocusOut: true,
   });
   return answer === confirm;
 }
 
-async function stageInstitutionalStaffSetup(root: string, state: MementoLike | undefined): Promise<void> {
+async function stageInstitutionalStaffSetup(root: string, team: InstitutionalRoleId, state: MementoLike | undefined): Promise<void> {
   try {
-    const plan = await planInstitutionalStaffSetup(root);
+    const plan = await planInstitutionalStaffSetup({ root, team });
     if (!await confirmStaffSetup(plan)) return;
-    await persistInstitutionalStaffSetup(plan, state, () => Boolean(
-      vscode.workspace.workspaceFolders?.some((folder) => folder.uri.fsPath === root)
-    ));
-    void vscode.window.showInformationMessage('Staged for this project. The draft member requires the approved local test fixture before it can run.');
+    const projectStillSelected = () => vscode.workspace.workspaceFolders?.some((folder) => folder.uri.fsPath === root) === true;
+    await persistInstitutionalStaffSetup(plan, state, projectStillSelected);
+    const status = projectStillSelected() ? 'Staged for this project.' : `Staged for the confirmed project "${plan.institutional.root}".`;
+    const readiness = team === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM
+      ? 'The office-hours action register draft requires the approved local test fixture before the member can run.'
+      : 'The draft member requires the approved local test fixture before it can run.';
+    void vscode.window.showInformationMessage(`${status} ${readiness}`);
   } catch (error) {
     void vscode.window.showErrorMessage(`Institutional setup is on hold. ${(error as Error).message}`);
   }
@@ -116,10 +136,10 @@ export async function setUpStaffTeam(
   const asked = section ? STAFF_TEMPLATES.find((candidate) => candidate.section === section) : undefined;
   const templateId = asked ? asked.id : await pick(title, 'Which staff section?', [
     ...STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })),
-    { value: INSTITUTIONAL_COMMAND_GROUP_TEAM, label: INSTITUTIONAL_COMMAND_GROUP_NAME, detail: `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Local draft setup for a test fixture.` },
+    ...institutionalChoices,
   ], 1, steps);
-  if (templateId === INSTITUTIONAL_COMMAND_GROUP_TEAM) {
-    await stageInstitutionalStaffSetup(root, state);
+  if (templateId !== undefined && isInstitutionalRole(templateId)) {
+    await stageInstitutionalStaffSetup(root, templateId, state);
     return undefined;
   }
   const template = STAFF_TEMPLATES.find((candidate) => candidate.id === templateId);

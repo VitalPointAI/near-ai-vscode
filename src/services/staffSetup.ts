@@ -257,16 +257,16 @@ export async function persistInstitutionalStaffSetup(
   if (!state) throw new Error('Profile-local storage is unavailable.');
   const { root, binding } = plan.institutional;
   const key = institutionalStaffSetupKey(binding);
-  const assertSelected = async (): Promise<void> => {
+  const selectionChanged = 'The selected project changed during confirmation. Run institutional setup again.';
+  const assertOriginalIdentity = async (failure: string): Promise<void> => {
     const current = await institutionalProject(root, binding.team);
-    if (!projectStillSelected() || readInstitutionalRoleBinding(current.binding, binding) === undefined) {
-      throw new Error('The selected project changed during confirmation. Run institutional setup again.');
-    }
+    if (!readInstitutionalRoleBinding(current.binding, binding)) throw new Error(failure);
   };
   await withRegisterLock(root, async () => {
     // Recheck inside the same-root lock, immediately before reading or updating
     // the local record. Concurrent first writes produce the same v1 value.
-    await assertSelected();
+    await assertOriginalIdentity(selectionChanged);
+    if (!projectStillSelected()) throw new Error(selectionChanged);
     const existing = state.get<unknown>(key);
     if (existing !== undefined && !readInstitutionalRoleBinding(existing, binding)) {
       throw new Error('The institutional setup record is incomplete or inconsistent.');
@@ -275,6 +275,8 @@ export async function persistInstitutionalStaffSetup(
     if (existing !== undefined && !pending?.has(key)) return;
     try {
       await state.update(key, binding);
+      // The write belongs to the confirmed root once started. Editor selection may have moved on.
+      await assertOriginalIdentity('The confirmed project folder changed while its profile record was being saved.');
       if (!readInstitutionalRoleBinding(state.get<unknown>(key), binding)) {
         throw new Error('The stored record does not match the confirmed definition.');
       }
@@ -282,10 +284,10 @@ export async function persistInstitutionalStaffSetup(
       const failures = unconfirmedInstitutionalWrites.get(state) ?? new Set<string>();
       failures.add(key);
       unconfirmedInstitutionalWrites.set(state, failures);
-      throw new Error('Could not persist the institutional setup record.', { cause });
+      const detail = cause instanceof Error ? ` ${cause.message}` : '';
+      throw new Error(`Could not persist or verify the institutional setup record.${detail}`, { cause });
     }
     pending?.delete(key);
-    await assertSelected();
   });
 }
 
