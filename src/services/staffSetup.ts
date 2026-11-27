@@ -235,6 +235,7 @@ export interface StudioStaffSelection {
   readonly projectJson?: string;
   isCurrent(): boolean;
   isSameDirectory?(): boolean;
+  isPrimary(): boolean;
 }
 
 interface StudioStaffInputs {
@@ -244,6 +245,7 @@ interface StudioStaffInputs {
 }
 
 interface StudioStaffReview {
+  readonly plan: StaffSetupPlan;
   readonly selection: StudioStaffSelection;
   readonly files: ReadonlyMap<string, Buffer | undefined>;
 }
@@ -320,6 +322,11 @@ async function verifyStudioFiles(selection: StudioStaffSelection, files: Readonl
 
 export async function reviewStudioStaffSetup(selection: StudioStaffSelection, original: StudioStaffInputs, plan: StaffSetupPlan): Promise<StudioStaffReview> {
   await verifyStudioFiles(selection, original.sources);
+  const section = plan.template.section;
+  const previous = isStaffTeamSection(section) ? existingStaffSettings(original.projectJson)?.teams?.[section] : undefined;
+  if (previous && previous !== plan.roster.fileName) {
+    throw new Error(`This project already links this section to ${previous}. Team Studio kept that link.`);
+  }
   const files = new Map(original.sources);
   for (const write of plan.writes) {
     if (files.has(write.path)) continue;
@@ -328,7 +335,7 @@ export async function reviewStudioStaffSetup(selection: StudioStaffSelection, or
     files.set(write.path, bytes);
   }
   await verifyStudioFiles(selection, files);
-  return { selection, files };
+  return { plan, selection, files };
 }
 
 /** The library file the plan's team goes to, and whether one is already there. */
@@ -351,7 +358,7 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
   const guard = review ? () => review.selection.isCurrent() : undefined;
   const mayRestore = review ? () => review.selection.isSameDirectory?.() ?? review.selection.isCurrent() : undefined;
   if (review) {
-    if (root !== review.selection.root || !plan.writes.every(({ path: file }) => review.files.has(file))) throw new Error(STUDIO_STAFF_CHANGED);
+    if (review.plan !== plan || root !== review.selection.root || !plan.writes.every(({ path: file }) => review.files.has(file))) throw new Error(STUDIO_STAFF_CHANGED);
     await verifyStudioFiles(review.selection, review.files);
   } else {
     for (const write of plan.writes) await setupFile(root, write.path);

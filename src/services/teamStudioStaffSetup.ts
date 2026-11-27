@@ -203,11 +203,15 @@ export function createStaffSetupPreview(deps: PreviewDeps): {
         const { folder, identity } = choice;
         const isSameDirectory = () => sameProject(identity, folder.root);
         const isCurrent = () => current === session && isSameDirectory() && deps.folders().some(({ root }) => root === folder.root);
+        const isPrimary = () => {
+          const primary = deps.folders()[0];
+          return Boolean(primary && isSameDirectory() && sameProject(identity, primary.root));
+        };
         if (!isCurrent()) return fail(changed);
         const { content, bytes } = await previewFor(folder, identity.resolved, deps.libraryDir);
         if (!isCurrent()) return fail(changed);
         session.preview = {
-          project: { root: identity.resolved, name: folder.name, ...(bytes === undefined ? {} : { projectJson: bytes }), isCurrent, isSameDirectory },
+          project: { root: identity.resolved, name: folder.name, ...(bytes === undefined ? {} : { projectJson: bytes }), isCurrent, isSameDirectory, isPrimary },
           offered: content.rows.filter((row) => row.template).map((row) => row.id)
         };
         deps.post({ type: 'staff-preview-state', request, session: session.id, ...content });

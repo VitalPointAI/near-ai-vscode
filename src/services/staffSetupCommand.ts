@@ -79,8 +79,9 @@ interface StaffSetupWizard extends StaffSetupRegistration {
 }
 
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
-export function readyMessage(teamName: string, slug: string, archived: boolean): string {
-  return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the SovAI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
+export function readyMessage(teamName: string, slug: string, archived: boolean, project = 'this project', shortcuts = true): string {
+  const followUp = shortcuts ? 'Task it now to put its command in the SovAI chat, or open the Staff Room.' : 'Open the project in its own window to use the team.';
+  return `${teamName} is set up for ${project} as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} ${followUp}${archived ? ' The earlier file is in your teams archive.' : ''}`;
 }
 
 async function confirmStaffSetup(plan: StaffSetupPlan, project?: string): Promise<boolean> {
@@ -173,9 +174,13 @@ export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<st
   try {
     const result = await applyStaffSetup(root, library, plan, review ? { studioReview: review } : { replace: target.exists });
     const slug = path.basename(result.teamFile, '.md');
+    const mayNavigate = () => !studio || studio.isPrimary();
+    const shortcuts = mayNavigate();
     const actions = chat ? [TASK_NOW_ACTION, OPEN_STAFF_ROOM_ACTION] : [OPEN_STAFF_ROOM_ACTION];
-    void Promise.resolve(vscode.window.showInformationMessage(readyMessage(plan.roster.teamName, slug, Boolean(result.archived)), ...actions))
+    const message = readyMessage(plan.roster.teamName, slug, Boolean(result.archived), studio?.name, shortcuts);
+    void Promise.resolve(vscode.window.showInformationMessage(message, ...(shortcuts ? actions : [])))
       .then((choice) => {
+        if (!shortcuts || !mayNavigate()) return;
         if (choice === TASK_NOW_ACTION && chat) void chat.prefill(`/team:${slug}`);
         if (choice === OPEN_STAFF_ROOM_ACTION) void vscode.commands.executeCommand(OPEN_STAFF_ROOM_COMMAND);
       }, () => undefined);

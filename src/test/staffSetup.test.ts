@@ -187,8 +187,8 @@ function profileState() {
 
 const institutionalStageKey = (project: string) => `nearAi.staff.institutional.commandGroup.v1.${createHash('sha256').update(project).digest('hex')}`;
 
-test('Studio staff setup confirms the selected physical project and holds changes to reviewed files or the shared team', async () => {
-  for (const scenario of ['write', 'edit during questions', 'edit at confirmation', 'replace directory', 'switch during apply', 'team appeared', 'existing shared team'] as const) {
+test('Studio staff setup confirms the selected physical project and holds changes to reviewed files or the shared team', async (context) => {
+  for (const scenario of ['write', 'first-project shortcut', 'stale shortcut', 'different linked team', 'edit during questions', 'edit at confirmation', 'replace directory', 'switch during apply', 'team appeared', 'existing shared team'] as const) await context.test(scenario, async () => {
     const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'studio-staff-setup-')));
     const other = path.join(temp, 'other');
     const root = path.join(temp, 'selected');
@@ -196,7 +196,7 @@ test('Studio staff setup confirms the selected physical project and holds change
     const agentsFile = path.join(root, 'AGENTS.md');
     const profileFile = path.join(root, '.planning', 'staff', 'PROFILE.md');
     const profileBytes = '# Existing staff profile\n';
-    const projectBytes = '{"custom":"preserve"}';
+    const projectBytes = JSON.stringify({ custom: 'preserve', ...(scenario === 'different linked team' ? { staff: { teams: { j4: 'existing-logistics' } } } : {}) });
     const agentBytes = '# Existing project notes\n';
     await mkdir(other);
     await mkdir(path.dirname(projectFile), { recursive: true });
@@ -213,13 +213,25 @@ test('Studio staff setup confirms the selected physical project and holds change
     const originalDirectory = await stat(root, { bigint: true });
     const { stub, setUpStaffTeam, uninstall } = staffSetupVscode();
     let selected = true;
+    let primary = scenario === 'first-project shortcut' || scenario === 'stale shortcut';
     let wroteAfterSwitch = false;
     const sameDirectory = () => {
       try { return statSync(root, { bigint: true }).ino === originalDirectory.ino; } catch { return false; }
     };
     try {
-      stub.setWorkspaceFolders([other, root]);
+      stub.setWorkspaceFolders(primary ? [root, other] : [other, root]);
+      const shortcuts: string[] = [];
+      stub.commands.set('nearAi.openStaffRoom', () => { shortcuts.push('room'); });
       const window = (stub.vscode as typeof import('vscode')).window;
+      const showInfo = window.showInformationMessage as (message: string, ...actions: string[]) => PromiseLike<string | undefined>;
+      Object.defineProperty(window, 'showInformationMessage', { configurable: true, value: async (message: string, ...actions: string[]) => {
+        const answer = await showInfo(message, ...actions);
+        if (scenario === 'stale shortcut' && message.includes('is set up for ')) {
+          primary = false;
+          stub.setWorkspaceFolders([other, root]);
+        }
+        return answer;
+      } });
       const quickPick = window.showQuickPick as (items: unknown, options: { title?: string; placeHolder?: string }) => Promise<unknown>;
       Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async (items: unknown, options: { title?: string; placeHolder?: string }) => {
         if (scenario === 'edit during questions' && options.placeHolder?.startsWith('Which doctrine profile')) await writeFile(agentsFile, '# Edited while answering\n');
@@ -237,9 +249,10 @@ test('Studio staff setup confirms the selected physical project and holds change
       } });
       stub.quickPickAnswers.push(profileChoices(J4_STAFF_TEMPLATE).find(({ value }) => value === 'us-joint')!.label,
         'Operational', 'Campaign', 'Local runtime only', '$(check) Set up the team');
-      const options = { library, section: 'j4' as const, studio: {
+      stub.messageAnswers.push(scenario === 'stale shortcut' ? 'Open the Staff Room' : 'Task it now');
+      const options = { library, section: 'j4' as const, chat: { prefill: async (text: string) => { shortcuts.push(text); } }, studio: {
         root, name: 'Selected project', projectJson: projectBytes,
-        isCurrent: () => selected && sameDirectory(), isSameDirectory: sameDirectory
+        isCurrent: () => selected && sameDirectory(), isSameDirectory: sameDirectory, isPrimary: () => primary && sameDirectory()
       } };
       if (scenario === 'switch during apply') setCasProbe(async (point, file) => {
         if (file !== profileFile) return;
@@ -250,11 +263,15 @@ test('Studio staff setup confirms the selected physical project and holds change
       assert.deepEqual(await readdir(other), [], scenario);
       assert.ok(stub.quickPickRequests.every(({ title }) => !title?.includes('which project?')), scenario);
       const roster = stub.quickPickRequests.find(({ title }) => title?.includes('check the roster'));
-      if (scenario === 'write') {
+      if (scenario === 'write' || scenario === 'first-project shortcut' || scenario === 'stale shortcut') {
         assert.equal(result, team);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const readyIndex = stub.notifications.findIndex(({ message }) => message.includes('is set up for '));
+        assert.deepEqual(stub.notificationActions[readyIndex], scenario === 'write' ? [] : ['Task it now', 'Open the Staff Room']);
+        assert.deepEqual(shortcuts, scenario === 'first-project shortcut' ? ['/team:j4-us-joint-operational'] : []);
         assert.match(roster?.items[0].detail ?? '', /Selected project/);
         assert.equal(JSON.parse(await readFile(projectFile, 'utf8')).custom, 'preserve');
-        continue;
+        return;
       }
       assert.equal(result, undefined, scenario);
       assert.equal(await readFile(projectFile, 'utf8'), projectBytes, scenario);
@@ -274,13 +291,13 @@ test('Studio staff setup confirms the selected physical project and holds change
       } else {
         assert.deepEqual(await readdir(library.directory), [], scenario);
       }
-      assert.ok(stub.notifications.some(({ message }) => /changed|shared/i.test(message)), scenario);
-      if (scenario === 'edit during questions' || scenario === 'existing shared team') assert.equal(roster, undefined, scenario);
+      assert.ok(stub.notifications.some(({ message }) => /changed|shared|already links/i.test(message)), scenario);
+      if (scenario === 'edit during questions' || scenario === 'existing shared team' || scenario === 'different linked team') assert.equal(roster, undefined, scenario);
     } finally {
       setCasProbe(undefined);
       uninstall();
     }
-  }
+  });
 });
 
 test('ordinary Staff Setup only offers shipped templates and refuses an unexpected fixture choice', async () => {
