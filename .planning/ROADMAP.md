@@ -1606,6 +1606,10 @@ The knowledge base of the paused former v0.5.0 knowledge-base plan returns here 
 | 23 Forecasting | Deferred, intelligence projects only | none |
 | 24 Hardening and release | Carries, extended to the database, caches and model server logs | 101 |
 
+### Canadian English and French
+
+Canadian deployments require a user-switchable English and French experience across the Workbench, setup and administration, plus both language renditions of approved shared products. Add source-linked translation and professional review to published outputs. Evaluate approved local or private translation options through Model Factory and extend the same controls to authorized multilingual document intake. Track the cross-cutting requirements LANG-01 to LANG-03 across Workbench localization, Phase 96 and Phase 98. See [Canadian official-language requirements and sequencing](research/canadian-official-languages.md).
+
 ### Stage A: host and spikes (Phases 85-87)
 
 ### Phase 85: Host and local inference on Strix Halo (L1a), measured
