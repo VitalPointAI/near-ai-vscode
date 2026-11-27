@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "Sterling Sovereign AI",
   "description": "AI agents for coding, research, presales, writing, and data work with configurable model providers, Open-GSD workflows, and project controls.",
-  "version": "0.4.40",
+  "version": "0.4.41",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
   "galleryBanner": {

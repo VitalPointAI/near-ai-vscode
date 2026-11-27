@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.41
+
+This maintenance release makes the Linux Workbench easier to start and improves reliability in Team Studio and Compare Models.
+
+- The Linux launcher checks prerequisites, reports CPU, memory and Docker storage, and starts the approved image in your local browser. The setup guides cover first launch, shutdown and running a Workbench and sync hub on the same development machine.
+- A sidebar shortcut that cannot open its page gives you feedback and a retry. Team Studio keeps replacement state with the project being saved when you switch projects.
+- Compare Models starts one comparison at a time. Repeated clicks during setup no longer trigger extra comparisons or cost prompts.
+- The offline on-premises lab configuration preview and the recorded capability checks provide evidence for later evaluation on your own infrastructure. Operational checks remain open.
+- The release build now prepares the pinned hub runtime so its collaboration tests run with the same prerequisites as normal CI.
+
 ## 0.4.40
 
 This update makes the Linux Workbench easier to start and improves reliability in Team Studio and Compare Models. It also adds deployment guidance and evidence for teams evaluating Sterling Sovereign AI on their own infrastructure.
