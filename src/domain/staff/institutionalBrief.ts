@@ -6,6 +6,7 @@ import { STAFF_SLUG } from './parse';
 export const institutionalBriefDirectory = '.planning/staff/institutional/command/briefs';
 export const institutionalActionRegisterDirectory = '.planning/staff/institutional/j3/action-registers';
 export const institutionalObservationDirectory = '.planning/staff/institutional/j7/observations';
+export const institutionalLibraryRemitsDirectory = '.planning/staff/institutional/j9/service-remits';
 export const institutionalPlanningDirectory = '.planning/staff/institutional/j5/evidence-assumptions';
 export const institutionalBusinessServicesDirectory = '.planning/staff/institutional/j6/business-services';
 export const institutionalCatalogueDirectory = '.planning/staff/institutional/j2/catalogue';
@@ -54,6 +55,7 @@ export interface InstitutionalDraftScope {
   readonly catalogue?: () => InstitutionalCatalogueEvidence;
   readonly businessServices?: () => InstitutionalBusinessServicesEvidence;
   readonly planningEvidence?: () => InstitutionalPlanningEvidence;
+  readonly libraryRemits?: () => InstitutionalLibraryRemitEvidence;
   readonly findings?: {
     readonly current: () => InstitutionalFindingsEvidence;
     readonly predecessorCurrent: () => Promise<boolean>;
@@ -138,7 +140,16 @@ interface InstitutionalPlanningReview extends Omit<InstitutionalBriefReview, 'du
   readonly planDecision: 'pending';
 }
 
-export type InstitutionalDraftReview = InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
+interface InstitutionalLibraryRemitReview extends Omit<InstitutionalBriefReview, 'duty' | 'kind'> {
+  readonly duty: 'J9-CL02';
+  readonly kind: 'library-service-remits';
+  readonly policyRevision: string;
+  readonly scopeDigest: string;
+  readonly liaisonLead: InstitutionalCatalogueSource;
+  readonly liaisonDecision: 'pending';
+}
+
+export type InstitutionalDraftReview = InstitutionalLibraryRemitReview | InstitutionalPlanningReview | InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;
@@ -1054,4 +1065,136 @@ export function prepareInstitutionalPlanningRegister(
   requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalPlanningDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
+}
+
+
+const remitPurpose = 'fictional-library-remit-comparison-j9-cl02' as const;
+const libraryScopes = ['branch-room-bookings', 'mobile-library-visits', 'reading-session-registration'] as const;
+type LibraryScope = typeof libraryScopes[number];
+const libraryAttestors = {
+  'fictional-library-branch-service': { mandate: 'fictional-branch-mandate-attestor', consent: 'fictional-branch-consent-attestor' },
+  'fictional-mobile-library-service': { mandate: 'fictional-mobile-mandate-attestor', consent: 'fictional-mobile-consent-attestor' },
+} as const;
+type LibraryOrganization = keyof typeof libraryAttestors;
+
+interface InstitutionalLibraryRemitRecord {
+  readonly id: string;
+  readonly organizationRole: LibraryOrganization;
+  readonly description: string;
+  readonly scope: readonly LibraryScope[];
+  readonly mandate: InstitutionalCatalogueSource | null;
+  readonly confirmation: 'verified' | 'disputed' | 'unconfirmed';
+  readonly reviewDate: string | null;
+  readonly consent: {
+    readonly organizationId: string;
+    readonly purpose: typeof remitPurpose;
+    readonly scope: readonly LibraryScope[];
+    readonly startsAt: string;
+    readonly expiresAt: string;
+    readonly state: 'verified';
+    readonly evidence: InstitutionalCatalogueSource;
+  };
+}
+
+export interface InstitutionalLibraryRemitEvidence {
+  readonly requester: 'fictional-library-remit-reviewer';
+  readonly purpose: typeof remitPurpose;
+  readonly productId: string;
+  readonly policyRevision: string;
+  readonly liaisonLead: InstitutionalCatalogueSource;
+  readonly records: readonly InstitutionalLibraryRemitRecord[];
+}
+
+function libraryScope(input: unknown): LibraryScope[] {
+  const scopes = list(input, (entry) => {
+    const scope = libraryScopes.find((known) => known === entry);
+    requireCatalogue(scope);
+    return scope;
+  }, 1);
+  requireCatalogue(new Set(scopes).size === scopes.length);
+  return scopes.sort();
+}
+
+function remitInstant(input: unknown): string {
+  requireCatalogue(typeof input === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(input));
+  const milliseconds = Date.parse(input);
+  requireCatalogue(Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === input);
+  return input;
+}
+
+export function admittedInstitutionalLibraryRemits(
+  raw: unknown, fixtureInstant: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[],
+): InstitutionalLibraryRemitEvidence {
+  const now = remitInstant(fixtureInstant);
+  const { receipt, organizations } = record(raw, ['receipt', 'organizations']);
+  const authorization = record(receipt, ['project', 'directory', 'requester', 'purpose', 'policyRevision', 'productId', 'liaisonLead', 'grants']);
+  const { requester, purpose } = authorization;
+  requireCatalogue(authorization.project === binding.project && authorization.directory === binding.directory &&
+    requester === 'fictional-library-remit-reviewer' && purpose === remitPurpose);
+  const liaisonLead = metadataSource(sources, authorization.liaisonLead, 'fictional-liaison-lead');
+  const grants = list(authorization.grants, (entry) => {
+    const grant = record(entry, ['id', 'scope']);
+    return [catalogueId(grant.id), libraryScope(grant.scope)] as const;
+  });
+  const authorizedScopes = new Map(grants);
+  requireCatalogue(authorizedScopes.size === grants.length);
+  const records: InstitutionalLibraryRemitRecord[] = [];
+  for (const entry of list(organizations, (value) => value)) {
+    requireCatalogue(entry && typeof entry === 'object' && !Array.isArray(entry));
+    const organization = entry as Record<string, unknown>;
+    const { id, organizationRole, confirmation } = organization;
+    if (typeof id !== 'string') continue;
+    const allowedScope = authorizedScopes.get(id);
+    if (!allowedScope) continue;
+    requireCatalogue(typeof organizationRole === 'string' && Object.hasOwn(libraryAttestors, organizationRole) &&
+      (confirmation === 'verified' || confirmation === 'disputed' || confirmation === 'unconfirmed'));
+    const role = organizationRole as LibraryOrganization;
+    const attestors = libraryAttestors[role];
+    const scope = libraryScope(organization.scope);
+    const receipt = record(organization.consent, ['organizationId', 'purpose', 'scope', 'startsAt', 'expiresAt', 'state', 'evidence']);
+    const consentScope = libraryScope(receipt.scope);
+    const startsAt = remitInstant(receipt.startsAt);
+    const expiresAt = remitInstant(receipt.expiresAt);
+    requireCatalogue(receipt.organizationId === id && receipt.purpose === purpose && receipt.state === 'verified' &&
+      startsAt <= now && now < expiresAt && canonicalDigest(scope) === canonicalDigest(allowedScope) &&
+      canonicalDigest(consentScope) === canonicalDigest(allowedScope));
+    const mandate = organization.mandate == null ? null : metadataSource(sources, organization.mandate, attestors.mandate);
+    const reviewDate = organization.reviewDate == null ? null : metadataDate(organization.reviewDate);
+    requireCatalogue(confirmation !== 'verified' || (mandate && reviewDate));
+    const description = text(organization.description, 180);
+    requireCatalogue(/^[a-z][a-z ,'’-]*\.?$/i.test(description));
+    records.push({ id, organizationRole: role, scope, description, mandate, confirmation, reviewDate,
+      consent: { organizationId: id, purpose, scope: consentScope, startsAt, expiresAt, state: 'verified',
+        evidence: metadataSource(sources, receipt.evidence, attestors.consent) } });
+  }
+  requireCatalogue(new Set(records.map(({ id }) => id)).size === records.length &&
+    new Set(records.map(({ organizationRole }) => organizationRole)).size === records.length);
+  const authorities = [liaisonLead.sourceId, ...records.flatMap(({ mandate, consent }) =>
+    mandate ? [mandate.sourceId, consent.evidence.sourceId] : [consent.evidence.sourceId])];
+  requireCatalogue(new Set(authorities).size === authorities.length);
+  return { requester, purpose, productId: slug(authorization.productId), policyRevision: revision(authorization.policyRevision),
+    liaisonLead, records: records.sort((a, b) => a.id.localeCompare(b.id)) };
+}
+
+export function prepareInstitutionalLibraryRemits(
+  input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalLibraryRemitEvidence,
+): PreparedInstitutionalDraft {
+  const records = requestedCatalogueRows(input, accepted);
+  requireCatalogue(records.length === 2);
+  const reviewRole = 'fictional-library-legal-reviewer';
+  const overlap = libraryScopes.flatMap((scope) => {
+    const organizationIds = records.filter((entry) => entry.scope.includes(scope)).map(({ id }) => id);
+    return organizationIds.length > 1 ? [{ scope, organizationIds, state: 'unresolved', reviewRole }] : [];
+  });
+  const unresolved = records.filter(({ confirmation }) => confirmation !== 'verified').map(({ id, confirmation }) => ({
+    organizationId: id, confirmation, state: 'unresolved', reviewRole,
+  }));
+  const evidenceIds = new Set([accepted.liaisonLead.sourceId, ...records.flatMap(({ mandate, consent }) => [mandate?.sourceId, consent.evidence.sourceId])]);
+  const identity = { ...binding, duty: 'J9-CL02' as const, echelon: 'L3' as const, kind: 'library-service-remits' as const,
+    productId: accepted.productId, policyRevision: accepted.policyRevision, scopeDigest: canonicalDigest(accepted),
+    liaisonLead: accepted.liaisonLead, liaisonDecision: 'pending' as const, sources: sourceReferences(sources.filter(({ id }) => evidenceIds.has(id))) };
+  const bytes = canonicalBytes({ schema: 1, ...identity, body: { records, overlap, unresolved } });
+  requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
+  const version = institutionalBriefDigest(bytes);
+  return { path: `${institutionalLibraryRemitsDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }

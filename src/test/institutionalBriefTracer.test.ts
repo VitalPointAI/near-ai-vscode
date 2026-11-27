@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -25,6 +25,10 @@ import { newTestConversation, testBundleState, testGateRuntime } from './helpers
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const remitTeam = 'institutional-j9-library-remits-v1';
+const remitDirectory = '.planning/staff/institutional/j9/service-remits';
+const readRemit = 'ReadInstitutionalLibraryRemit';
+const saveRemit = 'SaveInstitutionalLibraryRemitDraft';
 const planningTeam = 'institutional-j5-evidence-assumptions-v1';
 const planningDirectory = '.planning/staff/institutional/j5/evidence-assumptions';
 const readPlanningEvidence = 'ReadInstitutionalPlanningEvidence';
@@ -193,7 +197,7 @@ async function runFixture(
         results.push(message.content);
         toolResults.set(message.tool_call_id, message.content);
       }
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -201,14 +205,14 @@ async function runFixture(
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
-        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
+        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -1386,6 +1390,128 @@ test('registered G5 preserves estimate and assumption status and holds an exact 
     const held = await runFixture(fixture, team, { steps: [toolCall('withdrawn-planning-write', savePlanningRegister, args)] });
     assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'withdrawn-planning-write' && entry.action_id === 1));
     assert.equal(held.toolResults.get('withdrawn-planning-write'), unavailable);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(directory), [name]);
+  } finally { setCasProbe(undefined); }
+  currentReceipt = receipt;
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+});
+
+
+test('registered G9 preserves independent library mandates and holds the exact consent expiry', async () => {
+  const subject = await newFixture();
+  const root = subject.fixture.root;
+  const label = 'Institutional G9 Library Service Remits';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: remitTeam, keySegment: 'j9LibraryRemits',
+    checkPrompts(requests) {
+      assert.match(requests[0].items.find((item) => item.label === label)?.detail ?? '', /fictional liaison lead/i);
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(check) Set up the team')?.detail ?? '', /library service remit comparison draft skill/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional liaison lead')?.detail ?? '', /verifies each .*remit/i);
+    },
+  });
+  const directory = path.join(root, remitDirectory);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const sources = ['liaison-review', 'branch-mandate', 'branch-consent', 'mobile-mandate', 'mobile-consent'].map((id): InstitutionalBriefSource => {
+    const text = `Private fixture source text for ${id}.`;
+    return { id, revision: 'r1', date: '2026-11-02', label: 'org/Public', project, text, spans: [{ start: 0, end: text.length }] };
+  });
+  const reference = (index: number, role: string) => ({ sourceId: sources[index].id, revision: sources[index].revision, role });
+  const firstId = 'item-8e0aca01';
+  const secondId = 'item-8e0aca02';
+  const hiddenId = 'item-8e0aca03';
+  const hiddenDetail = 'Private library roster field';
+  const startsAt = '2026-11-03T08:00:00.000Z';
+  const expiresAt = '2026-11-03T10:00:00.000Z';
+  const validInstant = '2026-11-03T09:59:59.999Z';
+  const expiredInstant = '2026-11-03T10:00:00.001Z';
+  const purpose = 'fictional-library-remit-comparison-j9-cl02';
+  const branchScope = ['branch-room-bookings', 'reading-session-registration'];
+  const mobileScope = ['mobile-library-visits', 'reading-session-registration'];
+  const organizations = [
+    { id: firstId, organizationRole: 'fictional-library-branch-service', description: 'Coordinates branch reading registration and room bookings.',
+      mandate: reference(1, 'fictional-branch-mandate-attestor'), confirmation: 'verified', reviewDate: '2026-12-03', scope: branchScope,
+      consent: { organizationId: firstId, purpose, scope: branchScope, startsAt, expiresAt, state: 'verified',
+        evidence: reference(2, 'fictional-branch-consent-attestor') }, internalNote: hiddenDetail },
+    { id: secondId, organizationRole: 'fictional-mobile-library-service', description: 'Coordinates mobile visits and reading registration.',
+      mandate: reference(3, 'fictional-mobile-mandate-attestor'), confirmation: 'verified', reviewDate: '2026-12-04', scope: mobileScope,
+      consent: { organizationId: secondId, purpose, scope: mobileScope, startsAt, expiresAt, state: 'verified',
+        evidence: reference(4, 'fictional-mobile-consent-attestor') } },
+    { id: hiddenId, organizationRole: 'hidden-library-service', description: hiddenDetail },
+  ];
+  const receipt = {
+    project, directory: staged.directoryDigest, purpose, requester: 'fictional-library-remit-reviewer',
+    policyRevision: 'remit-r1', productId: 'library-service-remits', liaisonLead: reference(0, 'fictional-liaison-lead'),
+    grants: [{ id: firstId, scope: branchScope }, { id: secondId, scope: mobileScope }],
+  };
+  let currentReceipt = receipt;
+  let now = validInstant;
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => sources,
+    currentLibraryRemits: () => ({ receipt: currentReceipt, organizations }), currentLibraryRemitTime: () => now };
+  const team = await selectSyntheticInstitutionalJ9Remits(fixture);
+  const args = { productId: receipt.productId, recordIds: [firstId, secondId] };
+  const valid = await runFixture(fixture, team, { steps: [
+    toolCall('branch-remit', readRemit, { recordId: firstId }),
+    toolCall('hidden-remit', readRemit, { recordId: hiddenId }),
+    toolCall('missing-remit', readRemit, { recordId: 'item-8e0aca04' }),
+    toolCall('refuse-external-route', saveRemit, { ...args, destination: 'external', publish: true }),
+    toolCall('library-remits', saveRemit, args),
+  ] });
+  assert.deepEqual(valid.offers[0], [readRemit, saveRemit].sort());
+  const unavailable = valid.toolResults.get('hidden-remit');
+  assert.ok(unavailable);
+  assert.match(unavailable, /unavailable/i);
+  assert.equal(valid.toolResults.get('missing-remit'), unavailable);
+  assert.equal(valid.toolResults.get('refuse-external-route'), unavailable);
+  const [name] = await readdir(directory);
+  assert.ok(name);
+  const bytes = await readFile(path.join(directory, name));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(name, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'J9-CL02');
+  assert.equal(draft.liaisonLead.role, 'fictional-liaison-lead');
+  assert.equal(draft.liaisonDecision, 'pending');
+  const [branch, mobile] = draft.body.records;
+  assert.deepEqual(branch, JSON.parse(valid.toolResults.get('branch-remit')!));
+  assert.deepEqual(branch.scope, branchScope);
+  assert.deepEqual(mobile.scope, mobileScope);
+  assert.equal(branch.mandate.sourceId, sources[1].id);
+  assert.equal(mobile.mandate.sourceId, sources[3].id);
+  assert.equal(branch.consent.evidence.sourceId, sources[2].id);
+  assert.equal(mobile.consent.evidence.sourceId, sources[4].id);
+  assert.equal(branch.consent.expiresAt, expiresAt);
+  assert.equal(branch.consent.purpose, purpose);
+  assert.deepEqual(draft.body.overlap, [{ scope: 'reading-session-registration', organizationIds: [firstId, secondId],
+    state: 'unresolved', reviewRole: 'fictional-library-legal-reviewer' }]);
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+  for (const hidden of [hiddenId, hiddenDetail, sources[2].text]) {
+    assert.ok(!JSON.stringify([valid.catalogueOffers[0], valid.results, draft, review]).includes(hidden));
+  }
+  assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'library-remits')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${remitDirectory}/${name}`] });
+
+  const expiredRead = await runFixture(fixture, team, {
+    steps: [toolCall('expired-library-read', readRemit, { recordId: firstId })],
+    onChildTurn(turn) { if (turn === 0) now = expiredInstant; },
+  });
+  assert.equal(expiredRead.toolResults.get('expired-library-read'), unavailable);
+  assert.ok(!expiredRead.results.some((entry) => entry.includes(organizations[0].description) || entry.includes(sources[2].id)));
+
+  now = validInstant;
+  currentReceipt = { ...receipt, policyRevision: 'remit-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; now = expiredInstant; } });
+  try {
+    const held = await runFixture(fixture, team, { steps: [toolCall('expired-library-write', saveRemit, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'expired-library-write' && entry.action_id === 1));
+    assert.equal(held.toolResults.get('expired-library-write'), unavailable);
     assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
     assert.deepEqual(await readdir(directory), [name]);
   } finally { setCasProbe(undefined); }

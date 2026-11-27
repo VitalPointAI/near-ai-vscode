@@ -3,9 +3,9 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpat
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  admittedInstitutionalBusinessServices, admittedInstitutionalCatalogue, admittedInstitutionalFindings, admittedInstitutionalObservation, admittedInstitutionalPlanningEvidence, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, institutionalObservationDirectory,
+  admittedInstitutionalBusinessServices, admittedInstitutionalCatalogue, admittedInstitutionalFindings, admittedInstitutionalLibraryRemits, admittedInstitutionalObservation, admittedInstitutionalPlanningEvidence, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, institutionalObservationDirectory,
   institutionalCatalogueUnavailable, institutionalObservationInput, institutionalSourceHash, isInstitutionalCatalogueRecordId,
-  prepareInstitutionalActionRegister, prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalBrief, prepareInstitutionalFindings, prepareInstitutionalObservation, prepareInstitutionalPlanningRegister,
+  prepareInstitutionalActionRegister, prepareInstitutionalBusinessServices, prepareInstitutionalCatalogue, prepareInstitutionalBrief, prepareInstitutionalFindings, prepareInstitutionalLibraryRemits, prepareInstitutionalObservation, prepareInstitutionalPlanningRegister,
   validateInstitutionalBriefSource, verifyInstitutionalActionAcceptance, type InstitutionalActionAuthority, type InstitutionalBriefSource,
   type InstitutionalDraftReview, type InstitutionalDraftScope, type InstitutionalObservationEvidence, type InstitutionalObservationReview, type PreparedInstitutionalDraft,
 } from '../../domain/staff/institutionalBrief';
@@ -24,7 +24,8 @@ export const INSTITUTIONAL_J7_LESSONS_TEAM = 'institutional-j7-lessons-v1';
 export const INSTITUTIONAL_J2_CATALOGUE_TEAM = 'institutional-j2-records-catalogue-v1';
 export const INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM = 'institutional-j6-business-services-v1';
 export const INSTITUTIONAL_J5_EVIDENCE_TEAM = 'institutional-j5-evidence-assumptions-v1';
-export type InstitutionalRoleId = typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
+export const INSTITUTIONAL_J9_REMIT_TEAM = 'institutional-j9-library-remits-v1';
+export type InstitutionalRoleId = typeof INSTITUTIONAL_J9_REMIT_TEAM | typeof INSTITUTIONAL_J5_EVIDENCE_TEAM | typeof INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM | typeof INSTITUTIONAL_J2_CATALOGUE_TEAM | typeof INSTITUTIONAL_COMMAND_GROUP_TEAM | typeof INSTITUTIONAL_J3_ACTION_REGISTER_TEAM | typeof INSTITUTIONAL_J7_LESSONS_TEAM;
 
 const description = 'Prepare a local institutional decision brief for human review.';
 const instructions = 'Prepare a CG-07 decision brief using only evidence admitted for this project. Separate sourced facts, assumptions and alternatives. Preserve attributed disagreement. Leave the decision with the Command Group lead.';
@@ -60,6 +61,8 @@ const businessServicesName = 'Institutional G6 Business Services';
 const businessServicesInstructions = 'Draft a fictional J6-IT01 business-service catalogue from authorized office documentation. Keep gaps open for the human service portfolio owner.';
 const planningName = 'Institutional G5 Evidence and Assumptions';
 const planningInstructions = 'Draft a fictional J5-03 office migration evidence register from attested entries. Keep estimates and assumptions distinct from facts and leave all decisions with the human plan owner.';
+const libraryRemitsName = 'Institutional G9 Library Service Remits';
+const libraryRemitsInstructions = 'Draft a fictional J9-CL02 public-library remit comparison from the admitted organization-level evidence. Keep distinct mandates and unresolved overlap for the human liaison lead and legal reviewer.';
 const institutionalRoles = {
   [INSTITUTIONAL_COMMAND_GROUP_TEAM]: {
     label: INSTITUTIONAL_COMMAND_GROUP_NAME, member: INSTITUTIONAL_COMMAND_GROUP_MEMBER, lead: INSTITUTIONAL_COMMAND_GROUP_LEAD,
@@ -110,6 +113,15 @@ const institutionalRoles = {
     skill: ['# Office migration evidence and assumptions (J5-03)', '', planningInstructions,
       'Keep unknown quantities unresolved. Record admitted assumption reviewers and dates for the plan owner.', ''].join('\n'),
     keySegment: 'j5EvidenceAssumptions', read: 'ReadInstitutionalPlanningEvidence', save: 'SaveInstitutionalPlanningRegisterDraft',
+  },
+  [INSTITUTIONAL_J9_REMIT_TEAM]: {
+    label: libraryRemitsName, member: 'library-remit-drafter', lead: 'Fictional liaison lead',
+    definition: renderTeam(libraryRemitsName, 'Prepare a local comparison of the fictional library organizations and their service scopes.', [{
+      name: 'library-remit-drafter', role: 'Library service remit drafter', instructions: libraryRemitsInstructions,
+    }], { private: true }),
+    skill: ['# Fictional library service remits (J9-CL02)', '', libraryRemitsInstructions,
+      'Use the exact approved comparison scope and leave each organization and its consent evidence distinct.', ''].join('\n'),
+    keySegment: 'j9LibraryRemits', read: 'ReadInstitutionalLibraryRemit', save: 'SaveInstitutionalLibraryRemitDraft',
   },
 } as const;
 
@@ -180,6 +192,11 @@ export interface InstitutionalCommandFixture {
   readonly withStableParents: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
+interface InstitutionalLibraryRemitsFixture extends InstitutionalCommandFixture {
+  readonly currentLibraryRemits: () => unknown;
+  readonly currentLibraryRemitTime: () => unknown;
+}
+
 interface InstitutionalPlanningFixture extends InstitutionalCommandFixture {
   readonly currentPlanningEvidence: () => unknown;
 }
@@ -246,14 +263,22 @@ export async function selectSyntheticInstitutionalJ5Evidence(fixture: Institutio
   return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J5_EVIDENCE_TEAM, { currentPlanningEvidence: fixture.currentPlanningEvidence });
 }
 
+export async function selectSyntheticInstitutionalJ9Remits(fixture: InstitutionalLibraryRemitsFixture): Promise<TeamDefinition> {
+  return selectSyntheticInstitutionalRole(fixture, INSTITUTIONAL_J9_REMIT_TEAM, {
+    currentLibraryRemits: fixture.currentLibraryRemits, currentLibraryRemitTime: fixture.currentLibraryRemitTime,
+  });
+}
+
 async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFixture, teamId: InstitutionalRoleId, {
-  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence,
+  authority, currentObservation, findingsAuthority, currentCatalogue, currentBusinessServices, currentPlanningEvidence, currentLibraryRemits, currentLibraryRemitTime,
 }: { authority?: InstitutionalActionRegisterFixture['actionAuthority']; currentObservation?: () => unknown;
-  findingsAuthority?: InstitutionalFindingsFixture['findingsAuthority']; currentCatalogue?: () => unknown; currentBusinessServices?: () => unknown; currentPlanningEvidence?: () => unknown } = {}): Promise<TeamDefinition> {
+  findingsAuthority?: InstitutionalFindingsFixture['findingsAuthority']; currentCatalogue?: () => unknown; currentBusinessServices?: () => unknown; currentPlanningEvidence?: () => unknown;
+  currentLibraryRemits?: () => unknown; currentLibraryRemitTime?: () => unknown } = {}): Promise<TeamDefinition> {
   const exact = await captureInstitutionalBinding(fixture.root, teamId);
   if (!readInstitutionalRoleBinding(fixture.readStaged(), exact) || typeof fixture.withStableParents !== 'function' ||
       typeof fixture.currentSources !== 'function' || typeof fixture.currentActionSettings !== 'function' || !fixture.runId || !fixture.model ||
       !/^[a-f0-9]{64}$/.test(fixture.policyHash) || (teamId === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM && !authority) ||
+      (teamId === INSTITUTIONAL_J9_REMIT_TEAM && (typeof currentLibraryRemits !== 'function' || typeof currentLibraryRemitTime !== 'function')) ||
       (teamId === INSTITUTIONAL_J5_EVIDENCE_TEAM && typeof currentPlanningEvidence !== 'function') ||
       (teamId === INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM && typeof currentBusinessServices !== 'function') ||
       (teamId === INSTITUTIONAL_J2_CATALOGUE_TEAM && typeof currentCatalogue !== 'function') ||
@@ -285,6 +310,11 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
     try { return admittedInstitutionalPlanningEvidence(currentPlanningEvidence(), binding, currentSources()); }
     catch { throw new ToolError(institutionalCatalogueUnavailable); }
   });
+  const libraryRemits = currentLibraryRemits && currentLibraryRemitTime && (() => {
+    try { return admittedInstitutionalLibraryRemits(currentLibraryRemits(), currentLibraryRemitTime(), binding, currentSources()); }
+    catch { throw new ToolError(institutionalCatalogueUnavailable); }
+  });
+  libraryRemits?.();
   planningEvidence?.();
   catalogue?.();
   businessServices?.();
@@ -380,7 +410,7 @@ async function selectSyntheticInstitutionalRole(fixture: InstitutionalCommandFix
   }
   fixtureSelections.set(team, { fixture: provider, scope: Object.freeze({
     root: fixture.root, binding, withStableParents: fixture.withStableParents, currentSources, stagedIsCurrent,
-    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}),
+    ...(actionRegister ? { actionRegister } : {}), ...(observation ? { observation } : {}), ...(findings ? { findings } : {}), ...(catalogue ? { catalogue } : {}), ...(businessServices ? { businessServices } : {}), ...(planningEvidence ? { planningEvidence } : {}), ...(libraryRemits ? { libraryRemits } : {}),
     bindingIsCurrent: async () => {
       const sampled = await captureInstitutionalBinding(provider.root, teamId);
       return sampled.directoryDigest === exact.directoryDigest && stagedIsCurrent();
@@ -517,8 +547,9 @@ export async function institutionalChildTools(
   const approvedCatalogue = scope.catalogue?.();
   const approvedBusinessServices = scope.businessServices?.();
   const approvedPlanningEvidence = scope.planningEvidence?.();
-  const approvedMetadata = approvedCatalogue ?? approvedBusinessServices ?? approvedPlanningEvidence;
-  const currentMetadata = scope.catalogue ?? scope.businessServices ?? scope.planningEvidence;
+  const approvedLibraryRemits = scope.libraryRemits?.();
+  const approvedMetadata = approvedCatalogue ?? approvedBusinessServices ?? approvedPlanningEvidence ?? approvedLibraryRemits;
+  const currentMetadata = scope.catalogue ?? scope.businessServices ?? scope.planningEvidence ?? scope.libraryRemits;
   const metadataDigest = approvedMetadata && institutionalBriefDigest(canonicalBytes(approvedMetadata));
   const accepted = scope.actionRegister?.current();
   const approvedObservation = scope.observation?.current();
@@ -557,6 +588,7 @@ export async function institutionalChildTools(
       if (approvedCatalogue) catalogueDraft = prepareInstitutionalCatalogue(raw, scope.binding, sources, approvedCatalogue);
       if (approvedBusinessServices) catalogueDraft = prepareInstitutionalBusinessServices(raw, scope.binding, sources, approvedBusinessServices);
       if (approvedPlanningEvidence) catalogueDraft = prepareInstitutionalPlanningRegister(raw, scope.binding, sources, approvedPlanningEvidence);
+      if (approvedLibraryRemits) catalogueDraft = prepareInstitutionalLibraryRemits(raw, scope.binding, sources, approvedLibraryRemits);
     } catch { throw new ToolError(institutionalCatalogueUnavailable); }
     const draft = catalogueDraft ?? (approvedFindings ? prepareInstitutionalFindings(raw, scope.binding, sources, approvedFindings)
       : approvedObservation ? prepareInstitutionalObservation(raw, scope.binding, sources, approvedObservation)
@@ -564,6 +596,7 @@ export async function institutionalChildTools(
       : prepareInstitutionalBrief(raw, scope.binding, sources));
     draft.review.sources.forEach(Object.freeze);
     Object.freeze(draft.review.sources);
+    if (draft.review.kind === 'library-service-remits') Object.freeze(draft.review.liaisonLead);
     if (draft.review.kind === 'planning-evidence') Object.freeze(draft.review.planOwner);
     if (draft.review.kind === 'business-services') Object.freeze(draft.review.portfolioOwner);
     if (draft.review.kind === 'records-catalogue') Object.freeze(draft.review.steward);
@@ -587,7 +620,8 @@ export async function institutionalChildTools(
     return Object.freeze(draft);
   };
   const read: AgentTool<string> = {
-    name: readEvidence, description: approvedPlanningEvidence ? 'Read one authorized fictional office migration evidence entry by opaque ID.'
+    name: readEvidence, description: approvedLibraryRemits ? 'Read one authorized fictional library service remit by opaque ID.'
+      : approvedPlanningEvidence ? 'Read one authorized fictional office migration evidence entry by opaque ID.'
       : approvedBusinessServices ? 'Read authorized fictional office-service documentation by opaque ID.'
       : approvedCatalogue ? 'Read the authorized metadata for one fictional office record by opaque ID.'
       : 'Read the admitted text spans of one fictional evidence source by ID.',
@@ -603,7 +637,7 @@ export async function institutionalChildTools(
       if (Object.keys(raw).length !== 1 || typeof raw.sourceId !== 'string' || !quoteSources.some((source) => source.id === raw.sourceId)) throw new ToolError('This evidence is unavailable.');
       return raw.sourceId;
     },
-    title: () => approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
+    title: () => approvedLibraryRemits ? 'Read approved library service remit' : approvedPlanningEvidence ? 'Read approved planning evidence' : approvedBusinessServices ? 'Read approved office-service documentation'
       : approvedCatalogue ? 'Read approved record metadata' : 'Read admitted brief evidence',
     async forbidden(_id, context) { return approvedMetadata || await fresh(context) ? undefined : stale; },
     async run(id, context) {
@@ -634,7 +668,8 @@ export async function institutionalChildTools(
     },
   };
   const save: AgentTool<PreparedInstitutionalDraft> = {
-    name: saveDraft, description: approvedPlanningEvidence ? 'Save an evidence and assumptions register draft for the human plan owner.'
+    name: saveDraft, description: approvedLibraryRemits ? 'Save a fictional library service remit comparison for the human liaison lead.'
+      : approvedPlanningEvidence ? 'Save an evidence and assumptions register draft for the human plan owner.'
       : approvedBusinessServices ? 'Save a fictional office-service catalogue for the human service portfolio owner.'
       : approvedCatalogue ? 'Save authorized fictional records metadata for the human domain steward.'
       : approvedFindings ? 'Save cited fictional office-hours candidate findings for independent human validation.'
@@ -644,7 +679,7 @@ export async function institutionalChildTools(
     manifest: declareManifest({ tool: saveDraft, effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_ONLY }),
     fixtureGate: (draft) => ({ policyHash, currentActionSettings, effect: { verb: 'workspaceWrite', path: draft.path } }),
     parse: project,
-    title: () => approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
+    title: () => approvedLibraryRemits ? 'Save local library remit comparison draft' : approvedPlanningEvidence ? 'Save local evidence register draft' : approvedBusinessServices ? 'Save local business-service catalogue draft'
       : approvedCatalogue ? 'Save local records catalogue draft' : approvedFindings ? 'Save local candidate findings draft' : approvedObservation ? 'Save local observation draft' : accepted ? 'Save local action register draft' : 'Save local decision brief draft',
     async forbidden(draft, context) {
       const unavailable = approvedMetadata ? institutionalCatalogueUnavailable : stale;
