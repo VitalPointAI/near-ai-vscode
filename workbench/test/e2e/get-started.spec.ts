@@ -364,16 +364,26 @@ test('Team Studio staff setup previews the selected project in the User language
     const englishSection = frame.getByRole('button', { name: 'J4 Logistics', exact: true });
     await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
 
-    await frame.getByRole('button', { name: 'Continue to section setup', exact: true }).click();
+    const switchBack = await openLanguageSetting(workbench);
+    await pickLanguage(switchBack, 'ArrowDown', 'Français (Canada)');
+    await studioTab.click();
+    await expect(frenchSection).toHaveAttribute('aria-pressed', 'true');
+    await frame.getByRole('button', { name: 'Poursuivre la configuration de la section', exact: true }).click();
     const questions = workbench.locator('.quick-input-widget').filter({ visible: true });
-    for (const answer of ['US Joint', 'Operational', 'Campaign', 'Local runtime only']) {
+    await expect(questions).toContainText('Niveaux : stratégique, opérationnel.');
+    await questions.getByText('Forces interarmées des États-Unis', { exact: true }).click();
+    await expect(questions).toContainText('JPP au niveau de la JTF (05 T2).');
+    for (const answer of ['Opérationnel', 'Campagne', 'Exécution locale seulement']) {
       await questions.getByText(answer, { exact: true }).click();
     }
-    await expect(questions).toContainText('check the roster');
-    await expect(questions).toContainText(`Project: ${project}.`);
+    await expect(questions).toContainText('vérifier la composition');
+    await expect(questions).toContainText(`Projet : ${project}.`);
     await workbench.keyboard.press('Escape');
     await expect(questions).toBeHidden();
-    await expect(englishSection).toBeFocused();
+    await expect(frenchSection).toBeFocused();
+
+    const reset = await openLanguageSetting(workbench);
+    await pickLanguage(reset, 'ArrowUp', 'English (Canada)');
   } finally {
     await reopenedContext.close();
   }

@@ -312,18 +312,25 @@ test('Studio staff setup localizes one picker at a time and keeps the same confi
     const window = (stub.vscode as typeof import('vscode')).window;
     const pick = window.showQuickPick as (items: unknown, options: { title?: string }) => Promise<unknown>;
     Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async (items: unknown, options: { title?: string }) => {
-      if (options.title?.endsWith('(2/6)')) locale = 'en-CA';
+      if (options.title?.endsWith('(3/6)')) locale = 'en-CA';
       if (options.title?.endsWith('(6/6)')) locale = 'fr-CA';
       return pick(items, options);
     } });
-    stub.quickPickAnswers.push('Forces interarmées des États-Unis', 'Operational', 'Campaign', 'Local runtime only', undefined);
+    stub.quickPickAnswers.push('Forces interarmées des États-Unis', 'Opérationnel', 'Campaign', 'Local runtime only', undefined);
     const outcome = await setUpStaffTeam({
       library: new TeamLibrary(path.join(root, 'library')), section: 'j4', language: () => locale,
       studio: { root, name: 'Project Écho', projectJson: bytes, isCurrent: () => true, isSameDirectory: () => true, isPrimary: () => true }
     });
     assert.equal(outcome, undefined);
     assert.match(stub.quickPickRequests[0].title ?? '', /Configurer une équipe d’état-major/);
-    assert.match(stub.quickPickRequests[1].title ?? '', /Set up a staff team/);
+    assert.deepEqual(stub.quickPickRequests[0].items.map(({ detail }) => detail), [
+      'Niveaux : stratégique, opérationnel.', 'Niveaux : tactique.', 'Niveaux : stratégique, opérationnel, tactique.'
+    ]);
+    assert.deepEqual(stub.quickPickRequests[1].items.map(({ label, detail }) => [label, detail]), [
+      ['Stratégique', 'JPP dans les quatre fonctions de planification. Produits du CCMD ou de l’état-major interarmées (05 T2).'],
+      ['Opérationnel', 'JPP au niveau de la JTF (05 T2).']
+    ]);
+    assert.match(stub.quickPickRequests[2].title ?? '', /Set up a staff team/);
     const review = stub.quickPickRequests.at(-1)!;
     assert.match(review.title ?? '', /vérifier la composition/);
     assert.match(review.items[0].detail ?? '', /Projet : Project Écho/);

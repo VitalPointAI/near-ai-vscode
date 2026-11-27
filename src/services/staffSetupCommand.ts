@@ -2,6 +2,7 @@
 // shows the roster (who drafts and who decides), then writes the team, its skills, PROFILE.md, the staff settings and the section's guidance, and offers
 // to load the starter exercise scenario. The planning and writing live in staffSetup.ts; this file only asks and confirms.
 import { OPEN_STAFF_ROOM_COMMAND } from '../domain/staff/commands';
+import type { StaffLevel, StaffProfileId } from '../domain/staff/doctrine';
 import { STAFF_PRIVATE_MODELS_TEXT } from '../domain/staff/products';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -105,10 +106,25 @@ const frenchChoices: Record<string, Omit<Choice<unknown>, 'value'>> = {
   battalion: { label: 'Bataillon', detail: 'Cinq membres.' },
   standard: { label: 'Standard', detail: 'Deux cellules chargées des modes d’action.' },
   mdo: { label: 'Multidomaine', detail: 'Un planificateur de la convergence remplace la cellule B.' },
-  true: { label: 'Avec l’équipe rouge', detail: 'Cette option nationale du Royaume-Uni est activée par défaut. Le commandant peut la désactiver.' },
+  true: { label: 'Avec l’équipe rouge', detail: 'Dans l’AJP-5, l’équipe rouge relève d’une disposition nationale du Royaume-Uni, distincte de la doctrine de l’OTAN. Elle est activée par défaut. Le commandant peut la désactiver.' },
   false: { label: 'Sans l’équipe rouge' },
   cloud: { label: 'NEAR AI Cloud', detail: `Modèles privés dans l’environnement d’exécution de confiance de NEAR. Les agents de recherche peuvent utiliser les outils Web. ${frenchModelUse}` },
   local: { label: 'Exécution locale seulement', detail: 'Les modèles s’exécutent sur cet ordinateur. L’équipe ne dispose pas d’outils Web.' }
+};
+
+const frenchLevelNotes: Record<StaffProfileId, Partial<Record<StaffLevel, string>>> = {
+  'us-joint': {
+    strategic: 'JPP dans les quatre fonctions de planification. Produits du CCMD ou de l’état-major interarmées (05 T2).',
+    operational: 'JPP au niveau de la JTF (05 T2).'
+  },
+  'us-army': {
+    tactical: 'MDMP du corps d’armée au bataillon. Procédures de commandement des troupes aux échelons inférieurs (05 s2).'
+  },
+  'nato-ca': {
+    strategic: 'AJP-5, édition B, avec la COPD comme procédure. Le réglage Canada applique les fonctions stratégiques canadiennes.',
+    operational: 'AJP-5, édition B.',
+    tactical: 'APP-28 pour la planification tactique des forces terrestres.'
+  }
 };
 
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
@@ -138,11 +154,15 @@ export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<st
   const french = () => Boolean(studio && options.language?.() === 'fr-CA');
   const title = 'Set up a staff team';
   const steps = 6;
-  function pickStep<T>(english: string, translation: string, choices: Array<Choice<T>>, step: number): Promise<T | undefined> {
+  function pickStep<T>(
+    english: string, translation: string, choices: Array<Choice<T>>, step: number,
+    translateDetail?: (value: T) => string | undefined
+  ): Promise<T | undefined> {
     if (!french()) return pick(title, english, choices, step, steps);
     const translated = choices.map(choice => {
       const copy = frenchChoices[String(choice.value)];
-      return copy ? { ...copy, value: choice.value } : choice;
+      const detail = translateDetail?.(choice.value) ?? copy?.detail;
+      return { ...choice, label: copy?.label ?? choice.label, ...(detail ? { detail } : {}) };
     });
     return pick('Configurer une équipe d’état-major', translation, translated, step, steps);
   }
@@ -177,9 +197,15 @@ export async function setUpStaffTeam(options: StaffSetupWizard = {}): Promise<st
   const profiles = profileChoices(template);
   const preferredProfile = studio && existing ? profiles.findIndex(({ value }) => value === existing.profile) : -1;
   if (preferredProfile > 0) profiles.unshift(...profiles.splice(preferredProfile, 1));
-  const profile = await pickStep('Which doctrine profile? Its terms, steps and annex letters follow it.', 'Quel profil doctrinal utiliser? Il détermine les termes, les étapes et les lettres des annexes.', profiles, 2);
+  const profile = await pickStep(
+    'Which doctrine profile? Its terms, steps and annex letters follow it.',
+    'Quel profil doctrinal utiliser? Il détermine les termes, les étapes et les lettres des annexes.',
+    profiles, 2, candidate => `Niveaux : ${levelChoices(template, candidate).map(({ value }) => frenchChoices[value].label.toLowerCase()).join(', ')}.`
+  );
   if (!profile) return undefined;
-  const level = await pickStep('Which level?', 'Quel niveau?', levelChoices(template, profile), 3);
+  const level = await pickStep(
+    'Which level?', 'Quel niveau?', levelChoices(template, profile), 3, candidate => frenchLevelNotes[profile][candidate]
+  );
   if (!level) return undefined;
   const nations = nationChoices(profile);
   const nation = nations.length ? await pickStep('Which nation\'s terms?', 'Quels termes nationaux utiliser?', nations, 4) : undefined;
