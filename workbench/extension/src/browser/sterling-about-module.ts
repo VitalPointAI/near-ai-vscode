@@ -98,6 +98,7 @@ class AboutSovAiContribution implements CommandContribution, MenuContribution, F
 
   registerMenus(registry: MenuModelRegistry): void {
     registry.registerMenuAction(CommonMenus.MANAGE_SETTINGS, { commandId: aboutCommandId, order: 'z90' });
+    registry.registerMenuAction(CommonMenus.HELP, { commandId: aboutCommandId, order: '8' });
   }
 
   private async readVersion(): Promise<unknown> {

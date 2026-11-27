@@ -48,7 +48,7 @@ async function pickLanguage(selection: Locator, direction: 'ArrowDown' | 'ArrowU
   await expect(selection).toBeFocused();
 }
 
-test('About SovAI opens from Manage and the palette with the running extension version', async ({ page, context }) => {
+test('About SovAI opens from Help, Manage and the palette with the running extension version', async ({ page, context }) => {
   test.setTimeout(180_000);
   await openGetStarted(page);
   const bundled = process.env.STERLING_BUNDLED_EXTENSION === '1';
@@ -73,12 +73,25 @@ test('About SovAI opens from Manage and the palette with the running extension v
 
   const start = rail(page).getByRole('button', { name: 'Get Started', exact: true });
   const manage = page.locator('.theia-sidebar-menu-item').filter({ has: page.locator('.codicon-settings-gear') });
-  const dialog = page.getByRole('dialog', { name: 'About SovAI', exact: true });
+  const englishTitle = 'About Sterling Sov AI';
+  const dialog = page.getByRole('dialog', { name: englishTitle, exact: true });
   const close = dialog.getByRole('button', { name: 'Close', exact: true });
+  const openHelpAbout = async (title: string): Promise<void> => {
+    await page.getByRole('menubar').getByRole('menuitem', { name: 'Help', exact: true }).click();
+    const about = page.getByRole('menuitem', { name: title, exact: true });
+    await expect(about).toHaveCount(1);
+    await about.click();
+  };
+
+  await openHelpAbout(englishTitle);
+  await expect(dialog.getByText(versionText, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await close.click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveTitle(/Sterling Sov AI/);
 
   await start.focus();
   await manage.click();
-  const englishMenuItem = page.getByRole('menuitem', { name: 'About SovAI', exact: true });
+  const englishMenuItem = page.getByRole('menuitem', { name: englishTitle, exact: true });
   await expect(englishMenuItem).toHaveCount(1);
   await englishMenuItem.click();
   await expect(dialog.getByText(versionText, { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -88,8 +101,8 @@ test('About SovAI opens from Manage and the palette with the running extension v
   await expect(start).toBeFocused();
 
   await openPalette();
-  await palette.fill('>About SovAI');
-  const englishResult = commandResults.filter({ hasText: 'About SovAI' });
+  await palette.fill(`>${englishTitle}`);
+  const englishResult = commandResults.filter({ hasText: englishTitle });
   await expect(englishResult).toHaveCount(1);
   await englishResult.click();
   await expect(dialog.getByText(versionText, { exact: true })).toBeVisible();
@@ -108,11 +121,17 @@ test('About SovAI opens from Manage and the palette with the running extension v
     try {
       await pickLanguage(settings, 'ArrowDown', 'Français (Canada)');
       await expect(page.locator('.sterling-welcome')).toHaveAttribute('lang', 'fr-CA');
-      const frenchTitle = 'À propos de SovAI';
+      const frenchTitle = 'À propos de Sterling Sov AI';
       const frenchDialog = page.getByRole('dialog', { name: frenchTitle, exact: true });
       const frenchClose = frenchDialog.getByRole('button', { name: 'Fermer', exact: true });
       const frenchVersion = bundled ? versionText : 'Version indisponible';
       const frenchStart = page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas', exact: true });
+
+      await openHelpAbout(frenchTitle);
+      await expect(frenchDialog).toHaveAttribute('lang', 'fr-CA');
+      await expect(frenchDialog.getByText(frenchVersion, { exact: true })).toBeVisible();
+      await frenchClose.click();
+      await expect(frenchDialog).toBeHidden();
 
       await frenchStart.focus();
       await manage.click();

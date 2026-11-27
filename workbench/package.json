@@ -47,7 +47,7 @@
     "target": "browser",
     "frontend": {
       "config": {
-        "applicationName": "Sterling Sovereign AI",
+        "applicationName": "Sterling Sov AI",
         "preferences": {
           "telemetry.telemetryLevel": "off"
         }
