@@ -26,7 +26,30 @@ async function declineWorkspaceTrust(page: Page): Promise<void> {
 const currentTab = (page: Page) => page.locator('#theia-main-content-panel .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabLabel');
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Sterling shortcuts' });
 
-test('About SovAI opens from Manage and the palette with the running extension version', async ({ page }) => {
+async function openLanguageSetting(page: Page): Promise<Locator> {
+  await page.keyboard.press('F1');
+  const palette = page.locator('.quick-input-widget input');
+  await expect(palette).toBeVisible();
+  await palette.fill('>Open User Settings');
+  await page.locator('.quick-input-list .monaco-list-row').filter({ hasText: 'Open User Settings' }).click();
+  const search = page.getByPlaceholder('Search settings');
+  await expect(search).toBeVisible();
+  await search.fill('sterling.displayLanguage');
+  const selection = page.locator('[data-pref-id="sterling.displayLanguage"] .theia-select-component');
+  await expect(selection, 'the Canadian language enum is offered in User Settings').toBeVisible({ timeout: 10_000 });
+  return selection;
+}
+
+async function pickLanguage(selection: Locator, direction: 'ArrowDown' | 'ArrowUp', name: string): Promise<void> {
+  await selection.press('Enter');
+  await selection.press(direction);
+  await selection.press('Enter');
+  await expect(selection).toContainText(name);
+  await expect(selection).toBeFocused();
+}
+
+test('About SovAI opens from Manage and the palette with the running extension version', async ({ page, context }) => {
+  test.setTimeout(180_000);
   await openGetStarted(page);
   const bundled = process.env.STERLING_BUNDLED_EXTENSION === '1';
   const expectedVersion = process.env.STERLING_BUNDLED_VERSION;
@@ -55,7 +78,9 @@ test('About SovAI opens from Manage and the palette with the running extension v
 
   await start.focus();
   await manage.click();
-  await page.getByRole('menuitem', { name: 'About SovAI', exact: true }).click();
+  const englishMenuItem = page.getByRole('menuitem', { name: 'About SovAI', exact: true });
+  await expect(englishMenuItem).toHaveCount(1);
+  await englishMenuItem.click();
   await expect(dialog.getByText(versionText, { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(close).toBeFocused();
   await page.keyboard.press('Escape');
@@ -64,12 +89,68 @@ test('About SovAI opens from Manage and the palette with the running extension v
 
   await openPalette();
   await palette.fill('>About SovAI');
-  await commandResults.filter({ hasText: 'About SovAI' }).click();
+  const englishResult = commandResults.filter({ hasText: 'About SovAI' });
+  await expect(englishResult).toHaveCount(1);
+  await englishResult.click();
   await expect(dialog.getByText(versionText, { exact: true })).toBeVisible();
   await expect(close).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
   await expect(start).toBeFocused();
+
+  const settings = await openLanguageSetting(page);
+  const settingsPage = await context.newPage();
+  try {
+    await settingsPage.goto('/');
+    await expect(settingsPage.locator('.sterling-welcome')).toBeVisible({ timeout: 90_000 });
+    await declineWorkspaceTrust(settingsPage);
+    const otherSettings = await openLanguageSetting(settingsPage);
+    try {
+      await pickLanguage(settings, 'ArrowDown', 'Français (Canada)');
+      await expect(page.locator('.sterling-welcome')).toHaveAttribute('lang', 'fr-CA');
+      const frenchTitle = 'À propos de SovAI';
+      const frenchDialog = page.getByRole('dialog', { name: frenchTitle, exact: true });
+      const frenchClose = frenchDialog.getByRole('button', { name: 'Fermer', exact: true });
+      const frenchVersion = bundled ? versionText : 'Version indisponible';
+      const frenchStart = page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas', exact: true });
+
+      await frenchStart.focus();
+      await manage.click();
+      const frenchMenuItem = page.getByRole('menuitem', { name: frenchTitle, exact: true });
+      await expect(frenchMenuItem).toHaveCount(1, { timeout: 5_000 });
+      await frenchMenuItem.click();
+      await expect(frenchDialog).toHaveAttribute('lang', 'fr-CA');
+      await expect(frenchDialog.getByText(frenchVersion, { exact: true })).toBeVisible();
+      await expect(frenchClose).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(frenchDialog).toBeHidden();
+      await expect(frenchStart).toBeFocused();
+
+      await openPalette();
+      await palette.fill(`>${frenchTitle}`);
+      const frenchResult = commandResults.filter({ hasText: frenchTitle });
+      await expect(frenchResult).toHaveCount(1);
+      await frenchResult.click();
+      await expect(frenchClose).toBeFocused();
+      const originalDialog = await frenchDialog.elementHandle();
+
+      await expect(otherSettings).toContainText('Français (Canada)');
+      await pickLanguage(otherSettings, 'ArrowUp', 'English (Canada)');
+      await expect(dialog).toHaveAttribute('lang', 'en-CA');
+      expect(await dialog.evaluate((node, original) => node === original, originalDialog)).toBe(true);
+      await expect(dialog.getByText(versionText, { exact: true })).toBeVisible();
+      await expect(close).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(dialog).toBeHidden();
+      await expect(start).toBeFocused();
+    } finally {
+      if ((await otherSettings.innerText()).includes('Français (Canada)')) {
+        await pickLanguage(otherSettings, 'ArrowUp', 'English (Canada)');
+      }
+    }
+  } finally {
+    await settingsPage.close();
+  }
 });
 
 test('the rail carries every shortcut, the planned ones disabled, and the native ones open their page', async ({ page }) => {
@@ -129,26 +210,6 @@ test('Get Started switches Canadian language live through User Settings and keep
   const original = await welcome.elementHandle();
   await welcome.getByRole('button', { name: 'Pause hero animation' }).click();
 
-  const openLanguageSetting = async (window: Page): Promise<Locator> => {
-    await window.keyboard.press('F1');
-    const palette = window.locator('.quick-input-widget input');
-    await expect(palette).toBeVisible();
-    await palette.fill('>Open User Settings');
-    await window.locator('.quick-input-list .monaco-list-row').filter({ hasText: 'Open User Settings' }).click();
-    const search = window.getByPlaceholder('Search settings');
-    await expect(search).toBeVisible();
-    await search.fill('sterling.displayLanguage');
-    const selection = window.locator('[data-pref-id="sterling.displayLanguage"] .theia-select-component');
-    await expect(selection, 'the Canadian language enum is offered in User Settings').toBeVisible({ timeout: 10_000 });
-    return selection;
-  };
-  const pickLanguage = async (selection: Locator, direction: 'ArrowDown' | 'ArrowUp', name: string): Promise<void> => {
-    await selection.press('Enter');
-    await selection.press(direction);
-    await selection.press('Enter');
-    await expect(selection).toContainText(name);
-    await expect(selection).toBeFocused();
-  };
   const selection = await openLanguageSetting(page);
   await expect(selection).toContainText('English (Canada)');
   await pickLanguage(selection, 'ArrowDown', 'Français (Canada)');

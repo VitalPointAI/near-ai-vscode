@@ -16,7 +16,7 @@ export const sterlingLanguagePreference: PreferenceContribution = {
         default: defaultSterlingLocale,
         scope: PreferenceScope.User,
         overridable: false,
-        description: 'Display language for Sterling Get Started. Langue d’affichage des premiers pas de Sterling.'
+        description: 'Display language for supported Sterling views. Langue d’affichage des vues Sterling prises en charge.'
       }
     }
   }
@@ -48,6 +48,10 @@ export function observeSterlingLocale(
 }
 
 const english = {
+  aboutTitle: 'About SovAI',
+  aboutVersion: 'Version {version}',
+  aboutVersionUnavailable: 'Version unavailable',
+  aboutClose: 'Close',
   started: 'Get Started',
   edition: 'Canadian Defence Edition',
   heroDescription: 'Choose where your models run, build agent teams, and govern what they can do.',
@@ -88,6 +92,10 @@ export type SterlingMessage = keyof typeof english;
 export const sterlingMessages: Record<SterlingLocale, Readonly<Record<SterlingMessage, string>>> = {
   'en-CA': english,
   'fr-CA': {
+    aboutTitle: 'À propos de SovAI',
+    aboutVersion: 'Version {version}',
+    aboutVersionUnavailable: 'Version indisponible',
+    aboutClose: 'Fermer',
     started: 'Premiers pas',
     edition: 'Édition canadienne pour la défense',
     heroDescription: 'Choisissez où exécuter vos modèles, créez des équipes d’agents et définissez ce qu’elles peuvent faire.',
