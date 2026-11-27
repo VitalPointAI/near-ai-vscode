@@ -57,21 +57,27 @@ async function fixturePage(browser, site, permits) {
   return { context, page };
 }
 
+export async function openWorkbench(page, origin, now = () => performance.now()) {
+  const start = now();
+  const response = await page.goto(origin, { waitUntil: 'domcontentloaded' });
+  assert.equal(response?.status(), 200);
+  await page.locator('.sterling-welcome').first().waitFor({ state: 'visible', timeout: 40_000 });
+  const elapsed = Math.round(now() - start);
+
+  const trust = page.getByRole('button', { name: 'Yes, I trust the authors', exact: true });
+  const prompted = await trust.waitFor({ state: 'visible', timeout: 3_500 })
+    .then(() => true, error => {
+      if (error.name !== 'TimeoutError') throw error;
+      return false;
+    });
+  if (prompted) await trust.click();
+  return elapsed;
+}
+
 async function workbenchSample({ browser, workspace, profile, workbenchOrigin, permitsFixtureRequest }) {
   const { context, page } = await fixturePage(browser, 'workbench', permitsFixtureRequest);
   try {
-    const getStartedMs = await timed(async () => {
-      const response = await page.goto(workbenchOrigin, { waitUntil: 'domcontentloaded' });
-      assert.equal(response?.status(), 200);
-      await page.locator('.sterling-welcome').first().waitFor({ state: 'visible', timeout: 40_000 });
-      const trust = page.getByRole('button', { name: 'Yes, I trust the authors', exact: true });
-      const prompted = await trust.waitFor({ state: 'visible', timeout: 3_500 })
-        .then(() => true, error => {
-          if (error.name !== 'TimeoutError') throw error;
-          return false;
-        });
-      if (prompted) await trust.click();
-    });
+    const getStartedMs = await openWorkbench(page, workbenchOrigin);
 
     const [open, edit, , idle] = profile.steps;
     const quickInput = page.locator('.quick-input-widget input:visible').first();
@@ -115,7 +121,8 @@ async function workbenchSample({ browser, workspace, profile, workbenchOrigin, p
   }
 }
 
-async function passkeySample({ browser, passkeyOrigin, permitsFixtureRequest }) {
+async function passkeySample({ browser, passkeyOrigin, permitsFixtureRequest, signal }) {
+  signal.throwIfAborted();
   const server = createServer((request, response) => {
     if (request.method !== 'GET' || request.url !== '/' || request.headers.host !== 'localhost:3001') {
       response.writeHead(404).end();
@@ -126,7 +133,7 @@ async function passkeySample({ browser, passkeyOrigin, permitsFixtureRequest }) 
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(3001, '127.0.0.1', resolve);
+    server.listen({ port: 3001, host: '127.0.0.1', signal }, resolve);
   });
   try {
     const { context, page } = await fixturePage(browser, 'passkey', permitsFixtureRequest);
@@ -162,31 +169,75 @@ async function passkeySample({ browser, passkeyOrigin, permitsFixtureRequest }) 
       await context.close();
     }
   } finally {
-    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await new Promise((resolve, reject) => server.close(error => error && !signal.aborted ? reject(error) : resolve()));
   }
 }
 
-export async function runJourney({ chromium, executablePath, verifyBrowser, ...fixture }) {
-  const server = await chromium.launchServer({
-    executablePath, headless: true, host: '127.0.0.1', port: 0, timeout: 10_000,
-    args: ['--host-resolver-rules=MAP localhost 127.0.0.1'],
-  });
-  const deadline = setTimeout(() => { void server.close().catch(() => {}); }, 75_000).unref();
+async function within(operation, ms, message) {
+  const timer = new AbortController();
   try {
-    verifyBrowser(server.process().pid);
-    const endpoint = new URL(server.wsEndpoint());
-    assert(endpoint.protocol === 'ws:' && endpoint.hostname === '127.0.0.1' && !endpoint.username && !endpoint.password,
-      'Expected a local Chromium control socket');
-    const browser = await chromium.connect(endpoint.href, { timeout: 5_000 });
-    try {
-      const workbench = await workbenchSample({ ...fixture, browser });
-      const signInMs = await passkeySample({ ...fixture, browser });
-      return { ...workbench, signInMs };
-    } finally {
-      await browser.close();
+    return await Promise.race([
+      operation,
+      delay(ms, undefined, { signal: timer.signal }).then(() => { throw new Error(message); }),
+    ]);
+  } finally {
+    timer.abort();
+  }
+}
+
+async function stopBrowser(server, child, graceMs) {
+  const alive = () => child.exitCode === null && child.signalCode === null;
+  if (!alive()) return;
+  let onExit;
+  const reaped = new Promise(resolve => { onExit = resolve; child.once('exit', onExit); });
+  try {
+    // Playwright can wait longer for its protocol close than the fixture allows.
+    void Promise.resolve().then(() => server.close()).catch(() => {});
+    const exited = await within(reaped.then(() => true), graceMs, 'Chromium graceful close timed out')
+      .catch(() => false);
+    if (!exited && alive()) {
+      // The locked Playwright runtime kills the launched Chromium process group.
+      void Promise.resolve().then(() => server.kill()).catch(() => {});
+      await within(reaped, graceMs, 'Chromium did not exit after forced shutdown');
     }
   } finally {
-    clearTimeout(deadline);
-    await server.close();
+    child.off('exit', onExit);
+  }
+}
+
+async function sampleInBrowser(server, chromium, fixture, signal) {
+  const endpoint = new URL(server.wsEndpoint());
+  assert(endpoint.protocol === 'ws:' && endpoint.hostname === '127.0.0.1' && !endpoint.username && !endpoint.password,
+    'Expected a local Chromium control socket');
+  const browser = await chromium.connect(endpoint.href, { timeout: 5_000 });
+  try {
+    signal.throwIfAborted();
+    const workbench = await workbenchSample({ ...fixture, browser });
+    const signInMs = await passkeySample({ ...fixture, browser, signal });
+    return { ...workbench, signInMs };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function runJourney({ chromium, executablePath, verifyBrowser, ...fixture }, deadlineMs = 75_000, graceMs = 1_000) {
+  const started = performance.now();
+  const server = await chromium.launchServer({
+    executablePath, headless: true, host: '127.0.0.1', port: 0, timeout: Math.min(10_000, deadlineMs),
+    args: ['--host-resolver-rules=MAP localhost 127.0.0.1'],
+  });
+  const child = server.process();
+  const sample = new AbortController();
+  const deadlineMessage = 'Chromium sample exceeded the fixture deadline';
+  try {
+    verifyBrowser(child.pid);
+    const remaining = deadlineMs - (performance.now() - started);
+    assert(remaining > 0, deadlineMessage);
+    const result = await within(sampleInBrowser(server, chromium, fixture, sample.signal), remaining, deadlineMessage);
+    assert(performance.now() - started < deadlineMs, deadlineMessage);
+    return result;
+  } finally {
+    sample.abort();
+    await stopBrowser(server, child, graceMs);
   }
 }

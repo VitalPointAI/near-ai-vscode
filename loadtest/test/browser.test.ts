@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main, type CliDeps } from '../src/cli.ts';
-import { routeFixtureRequest, runJourney } from '../src/browser-journey.mjs';
+import { openWorkbench, routeFixtureRequest, runJourney } from '../src/browser-journey.mjs';
 import { assertFixtureIsolation, claimSample, permitsFixtureRequest, type FixtureIsolation } from '../src/browser.ts';
 
 test('the one-shot sample command requires its exact flags and the fixture marker excludes both ordinary run kinds', async () => {
@@ -65,11 +67,12 @@ test('browser request scope admits only the exact origins and expected Workbench
 
 test('the browser identity check happens before any browser connection or navigation', async () => {
   const calls: string[] = [];
+  const child = Object.assign(new EventEmitter(), { pid: 12, exitCode: null, signalCode: null });
   await assert.rejects(runJourney({
     chromium: {
       launchServer: async () => ({
-        process: () => ({ pid: 12 }),
-        close: async () => { calls.push('closed'); },
+        process: () => child,
+        close: async () => { calls.push('closed'); child.emit('exit', 0); },
       }),
       connect: () => { assert.fail('reached browser control socket without verified identity'); },
     },
@@ -102,4 +105,45 @@ test('an allowed request can receive a local response but never a redirect', asy
     }, 'workbench', permitsFixtureRequest);
   }
   assert.deepEqual(calls, ['aborted', 'disposed', 'delivered', 'disposed']);
+});
+
+
+test('Get Started elapsed time stops when the welcome view becomes visible', async () => {
+  let now = 0;
+  const elapsed = await openWorkbench({
+    goto: async () => { now += 20; return { status: () => 200 }; },
+    locator: (name: string) => {
+      assert.equal(name, '.sterling-welcome');
+      return { first: () => ({ waitFor: async () => { now += 30; } }) };
+    },
+    getByRole: () => ({
+      waitFor: async () => { now += 200; },
+      click: async () => { now += 300; },
+    }),
+  }, 'http://127.0.0.1:3000', () => now);
+  assert.equal(elapsed, 50);
+  assert.equal(now, 550);
+});
+
+test('a stalled browser command rejects at its deadline, then kills and reaps after the grace period', { timeout: 3000 }, async (t) => {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60000)'], { stdio: 'ignore' });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+  await once(child, 'spawn');
+  const calls: string[] = [];
+  const never = new Promise<never>(() => {});
+  await assert.rejects(runJourney({
+    chromium: {
+      launchServer: async () => ({
+        process: () => child,
+        wsEndpoint: () => 'ws://127.0.0.1:3002/fixture',
+        close: () => { calls.push('close'); return never; },
+        kill: () => { calls.push('kill'); assert(child.kill('SIGKILL')); return never; },
+      }),
+      connect: () => { calls.push('connect'); return never; },
+    },
+    executablePath: '/fixture/approved-chromium',
+    verifyBrowser: (pid: number) => assert.equal(pid, child.pid),
+  }, 30, 30), /exceeded the fixture deadline/);
+  assert.deepEqual(calls, ['connect', 'close', 'kill']);
+  assert.equal(child.signalCode, 'SIGKILL');
 });

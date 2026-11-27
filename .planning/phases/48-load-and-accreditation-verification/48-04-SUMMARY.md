@@ -163,13 +163,19 @@ Chromium namespaces, the workspace and the resource caps. It permits
 only fixed fixture origins, refuses redirects before Chromium follows
 them and claims the fixture once before browser launch. It returns
 local timings and the canonical profile identity with a configured
-sample count and stage total of one.
+sample count and stage total of one. Get Started timing ends when the
+welcome view appears, before any workspace trust interaction. At the
+75-second journey deadline, the sample fails and starts bounded
+Chromium shutdown. A stalled graceful close triggers forced process
+group shutdown, and the command waits for the process exit.
 
 The controller gives the existing per-person accounting only distinct
 completed stage sessions that fall inside each hold window. The ordinary
-rig command supplies no local sample data. Type checking and all 57
+rig command supplies no local sample data. Type checking and all 59
 load-test cases passed, with zero skips. The command, isolation checks,
-redirect refusal and stage accounting used local fakes. The approved
+redirect refusal, welcome timing, and stage accounting used local
+fakes. A disposable Node process verified forced shutdown and reaping
+after the fake browser connection and graceful close both stalled. The approved
 fixture evidence above came from the scratch harness before the command
 was registered. The registered command still needs an authorized
 end-to-end run on a fresh exact fixture.

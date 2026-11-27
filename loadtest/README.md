@@ -76,7 +76,9 @@ including dry-run. Review the signed artifact and fixture evidence before an aut
 Workbench uses literal `127.0.0.1:3000` with no sign-in. A separate server bound to `127.0.0.1:3001` uses `localhost` as the WebAuthn
 relying party for disposable virtual passkey registration and sign-in. The checksummed activity profile opens three synthetic documents,
 edits and saves one, runs a fixed terminal echo and waits briefly. The command refuses redirects and outside origins. It prints
-Get Started, step and standalone sign-in timings as JSON, with a configured sample count and stage total of one. It creates no rig run file.
+Get Started, step and standalone sign-in timings as JSON, with a configured sample count and stage total of one. Get Started timing
+ends when the welcome view is visible. Workspace trust interaction is outside that measurement. A 75-second journey deadline
+fails the sample and begins bounded shutdown of its Chromium process. The command creates no rig run file.
 
 ## The test realm
 
