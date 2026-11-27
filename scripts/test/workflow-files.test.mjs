@@ -56,6 +56,20 @@ function steps(job) {
   return job.split(/\n(?= {6}- )/).slice(1);
 }
 
+test('the release build prepares the pinned hub before running the root tests', () => {
+  const release = steps(jobs(read('release.yml')).get('build'));
+  const hubRequired = /if: hashFiles\('hub\/package\.json'\) != ''/;
+  const hubNode = release.findIndex((step) => step.includes("node-version: '26.13.1'"));
+  const hubBuild = release.findIndex((step) => step.includes('NEAR_AI_HUB_NODE='));
+  const rootNode = release.findIndex((step) => step.includes("node-version: '24'"));
+  const rootTest = release.findIndex((step) => /^\s*run: npm test$/m.test(step));
+  assert.ok(hubNode >= 0 && hubNode < hubBuild && hubBuild < rootNode && rootNode < rootTest,
+    'provision and build the hub before setting up and testing the extension');
+  assert.match(release[hubNode], hubRequired);
+  assert.match(release[hubBuild], hubRequired);
+  assert.match(release[hubBuild], /working-directory: hub[\s\S]*NEAR_AI_HUB_NODE=\$\(command -v node\)[\s\S]*\$GITHUB_ENV[\s\S]*npm ci --ignore-scripts[\s\S]*npm run build/);
+});
+
 test('release jobs that hold a write token or deployment approval run no npm install scripts and no npm cache', () => {
   const all = jobs(read('release.yml'));
   const privileged = [...all].filter(([, job]) => /(?:contents|packages):\s*write|environment:/.test(job));
