@@ -98,9 +98,7 @@ The complete Workbench lockfile also installed from the existing read-only
 package cache with lifecycle scripts disabled. The run installed 885 packages
 on Node 26.13.1 in a process namespace containing only loopback. The lockfile
 SHA-256 was `aa97b95f83b72c140e5a373ac4a7d3e6800ed7a38a271985f08bf25ed0e65044`.
-This verifies the locked dependencies. Task 3B still needs a digest-identified
-image built from the exact Workbench context and proof that the service and
-browser share an isolated loopback namespace.
+This verifies the locked dependencies used for the Task 3B preflight below.
 
 ## Task 3B local fixture readiness
 
@@ -115,15 +113,47 @@ and the original Workbench entrypoint. The protected release workflow
 verified the signature and SBOM before publication.
 [Protected build and release](https://github.com/VitalPointAI/near-ai-vscode/actions/runs/45935191405)
 
-A synthetic process in a private rootless Podman user namespace created
-a separate network namespace containing only loopback. The unprivileged
-runner joined that exact namespace and found no default route. The
-probe used an empty private store and did not start an image or
-Chromium. The real fixture still requires recorded authorization for
-the named run and its cleanup, plus the same check using the actual
-Workbench and Chromium process identities before navigation. No ports
-are published, no hosted login is used, and the owner’s Workbench
-instances are outside this test.
+The owner approved one disposable local fixture and cleanup of its
+test-created container and workspace. The exact rootless import retained
+manifest `sha256:b36a590c61bd979e6aaa1ce16d6ce34adc2f862a1444d1af9fd8e9cf211a6bb9`
+and config `sha256:d40f068134d3d2047977a5fdc7f864cbbac79151b8d6886a913625b953a19867`.
+Podman reported network mode `none` and an empty published-port list.
+The preflight checked a 2 GiB service limit and a 4 GiB runner limit
+with zero swap. Before navigation, the live listener and exact
+Chromium 1254 process shared `net:[4026533678]`, distinct from the host
+namespace. The namespace contained only loopback, and Workbench
+listened on literal `127.0.0.1:3000`. The import, preflight and final
+sample logs are under `.claude/worktrees/codex-phase4804-local-trial.bJCVcv`.
+
+## Task 3B local trial
+
+The bounded run reached Get Started, opened all three synthetic
+documents, verified the exact Notes edit on disk, ran the fixed
+terminal echo with a fresh marker, and completed the idle step.
+The standalone WebAuthn fixture registered a virtual passkey and used
+it for an assertion. The standalone server still bound literal
+loopback. Chromium used the separate `localhost` origin mapped
+explicitly to `127.0.0.1` to satisfy the WebAuthn effective-domain
+requirement. Workbench used its literal loopback origin. The browser
+refused a separate Workbench webview origin outside the fixture route list.
+[WebAuthn effective-domain check](https://www.w3.org/TR/webauthn-3/#sctn-createCredential)
+
+| Local fixture step | Elapsed ms |
+|---|---:|
+| Get Started | 6,232 |
+| Open three documents | 614 |
+| Edit and save | 324 |
+| Fixed terminal echo | 735 |
+| Idle | 1,001 |
+| Standalone synthetic sign-in | 10 |
+
+These are elapsed times from one local fixture run. The existing
+measure and capacity suites passed all 12 tests with zero skips,
+including separate active and idle inputs. The named scratch harness,
+final timings and checksums are retained in the same evidence
+directory. The exact test-created container and its private workspace
+were removed after the run. The archive, imported image and logs
+were retained.
 
 ## Self-Check: PASSED
 
@@ -132,13 +162,10 @@ execution branch. The measured execution metadata above records Task 1.
 The Task 2 checkpoint changes only this record. Independent source and
 evidence review passed Task 3A at `12f26985` and `edb0a5d2`. The namespace
 blocked an npm update metadata check. Package installation used the local
-cache, with no browser or stage execution.
+cache. The subsequent exact fixture trial recorded live browser process
+identity and the completed browser activity above.
 
 ## Open conditions
 
-- **G322.** Hosted target-scale and active-browser measurements still need
-  authorized site work. Task 3B requires a verified local image built from
-  `workbench/Dockerfile` and the shared private loopback fixture. No browser
-  session or rig activity ran.
-- **G323.** Representative hub load and resource measurements on the rig
-  remain pending. The local experiment supplies no capacity figure.
+- **G322.** Hosted target-scale and active-browser measurements still need authorized site work. The registered one-shot sample command and stage active-sample integration still need implementation and regression coverage.
+- **G323.** Representative hub load and resource measurements on the rig remain pending. The measured times above apply to one local fixture.
