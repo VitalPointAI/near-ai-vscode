@@ -79,6 +79,8 @@ export interface InstitutionalCommandFixture {
   readonly root: string;
   readonly runId: string;
   readonly model: string;
+  readonly policyHash: string;
+  readonly currentActionSettings: () => unknown;
   readonly readStaged: () => unknown;
   readonly currentSources: () => readonly InstitutionalBriefSource[];
   readonly withStableParents: <T>(operation: () => Promise<T>) => Promise<T>;
@@ -97,7 +99,7 @@ async function captureInstitutionalBinding(root: string): Promise<InstitutionalC
 export async function selectSyntheticInstitutionalCommandGroup(fixture: InstitutionalCommandFixture): Promise<TeamDefinition> {
   const exact = await captureInstitutionalBinding(fixture.root);
   if (!readInstitutionalCommandGroupBinding(fixture.readStaged(), exact) || typeof fixture.withStableParents !== 'function' ||
-      typeof fixture.currentSources !== 'function' || !fixture.runId || !fixture.model) throw new ToolError(stale);
+      typeof fixture.currentSources !== 'function' || typeof fixture.currentActionSettings !== 'function' || !fixture.runId || !fixture.model || !/^[a-f0-9]{64}$/.test(fixture.policyHash)) throw new ToolError(stale);
   const team = parseTeam(institutionalCommandGroupDefinition, `${INSTITUTIONAL_COMMAND_GROUP_TEAM}.md`);
   for (const member of team.members) {
     // Keep the already staged definition bytes stable. Only the trusted
@@ -160,7 +162,7 @@ export async function institutionalChildTools(
   const selected = fixtureSelections.get(team);
   if (!selected || !selection.local || !selection.onTeam || selection.detached || selection.label !== INSTITUTIONAL_COMMAND_GROUP_MEMBER ||
       selected.scope.root !== selection.root || selected.fixture.runId !== selection.runId || selected.fixture.model !== selection.model) throw new ToolError(stale);
-  const { scope } = selected;
+  const { scope, fixture: { policyHash, currentActionSettings } } = selected;
   if (!await scope.bindingIsCurrent()) throw new ToolError(stale);
   const sources = structuredClone(scope.currentSources());
   const currentMatches = () => {
@@ -171,12 +173,19 @@ export async function institutionalChildTools(
   const currentFacts = (context: ToolContext) => currentMatches() && scope.stagedIsCurrent() && !context.signal.aborted;
   const fresh = async (context: ToolContext) => Boolean(context.agentId && context.agentLabel === selection.label &&
     context.root === scope.root && !context.signal.aborted && await scope.bindingIsCurrent() && currentFacts(context));
-  const project = (raw: Record<string, unknown>) => prepareInstitutionalBrief(raw, scope.binding, sources);
+  const project = (raw: Record<string, unknown>) => {
+    const draft = prepareInstitutionalBrief(raw, scope.binding, sources);
+    draft.review.sources.forEach(Object.freeze);
+    Object.freeze(draft.review.sources);
+    Object.freeze(draft.review);
+    return Object.freeze(draft);
+  };
   const read: AgentTool<string> = {
     name: readEvidence, description: 'Read the admitted text spans of one fictional evidence source by ID.',
     parameters: exactSchema({ sourceId: { ...line, enum: sources.map((source) => source.id) } }), capability: 'read',
     // The admitted extracts are in memory and have no workspace path.
     manifest: declareManifest({ tool: readEvidence, effects: [{ verb: 'plan' }], contexts: INTERACTIVE_ONLY }),
+    fixtureGate: () => ({ policyHash, currentActionSettings, effect: { verb: 'plan' } }),
     parse(raw) {
       if (Object.keys(raw).length !== 1 || typeof raw.sourceId !== 'string' || !sources.some((source) => source.id === raw.sourceId)) throw new ToolError('This evidence is unavailable.');
       return raw.sourceId;
@@ -184,7 +193,7 @@ export async function institutionalChildTools(
     title: () => 'Read admitted brief evidence',
     async forbidden(_id, context) { return await fresh(context) ? undefined : stale; },
     async run(id, context) {
-      if (!await fresh(context)) throw new ToolError(stale);
+      if (!await fresh(context) || !context.verifyFixtureGate?.(id)) throw new ToolError(stale);
       const source = sources.find((candidate) => candidate.id === id)!;
       return JSON.stringify({ id, revision: source.revision, date: source.date, label: source.label,
         ...(source.dissentAttribution ? { dissentAttribution: source.dissentAttribution } : {}),
@@ -196,7 +205,7 @@ export async function institutionalChildTools(
     name: saveDraft, description: 'Save one cited CG-07 decision brief as a local draft for human review.',
     parameters: briefSchema, capability: 'workspaceWrite',
     manifest: declareManifest({ tool: saveDraft, effects: [{ verb: 'workspaceWrite', paths: [fromArgument('draftPath')] }], contexts: INTERACTIVE_ONLY }),
-    manifestInput: (raw) => ({ draftPath: project(raw).path }),
+    fixtureGate: (draft) => ({ policyHash, currentActionSettings, effect: { verb: 'workspaceWrite', path: draft.path } }),
     parse: project,
     title: () => 'Save local decision brief draft',
     async forbidden(draft, context) {
@@ -204,8 +213,9 @@ export async function institutionalChildTools(
       return store.verify(scope, draft).then(() => undefined, () => stale);
     },
     async run(draft, context) {
-      if (!await fresh(context)) throw new ToolError(stale);
-      return JSON.stringify({ state: 'draft', review: await store.commit(scope, draft, () => currentFacts(context)) });
+      if (!await fresh(context) || !context.verifyFixtureGate?.(draft, draft.path)) throw new ToolError(stale);
+      return JSON.stringify({ state: 'draft', review: await store.commit(scope, draft,
+        () => currentFacts(context) && Boolean(context.verifyFixtureGate?.(draft, draft.path))) });
     },
   };
   return [read, save];

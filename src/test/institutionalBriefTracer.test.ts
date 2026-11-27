@@ -11,13 +11,15 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
+import { bundleHash } from '../domain/gate/bundle';
 import type { DecisionRecord } from '../domain/gate/record';
+import type { ActionPolicy } from '../domain/policy';
 import type { InstitutionalBriefSource } from '../domain/staff/institutionalBrief';
 import { setCasProbe } from '../staff/staffFiles';
 import { readInstitutionalDraftReview } from '../staff/institutionalDraftStore';
 import type { AgentTurnRequest } from '../services/agentSession';
 import { StreamInterruptedError, type AgentMessage, type CompletionEvent, type ToolCall, type ToolDefinition } from '../services/nearAiClient';
-import { newTestConversation, testGateRuntime } from './helpers/gatedRuns';
+import { newTestConversation, testBundleState, testGateRuntime } from './helpers/gatedRuns';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 const draftDirectory = '.planning/staff/institutional/command/briefs';
@@ -89,8 +91,14 @@ async function newFixture(logText = publicExtracts[0].text as string) {
   let parentsProved = true;
   let lease = false;
   let onSourceRead: (() => void) | undefined;
+  const initial = testBundleState();
+  assert.equal(initial.state, 'valid');
+  const alternate = { ...initial.bundle, issuedAt: new Date(Date.parse(initial.bundle.issuedAt) - 1).toISOString() };
+  let current = initial;
+  let actionSettings: ActionPolicy = { mode: 'fully-autonomous', emergencyStop: false };
   const fixture = {
-    root, runId, readStaged: () => staged, model,
+    root, runId, policyHash: initial.hash, bundleState: () => current, readStaged: () => staged, model,
+    currentActionSettings: () => actionSettings,
     currentSources: () => { onSourceRead?.(); return sources; },
     // The suite alone controls the parents in the fresh 0700 root. A proof
     // withdrawal or another owner blocks entering the fixture's interlock.
@@ -107,7 +115,10 @@ async function newFixture(logText = publicExtracts[0].text as string) {
     assert.ok(scope);
     return readInstitutionalDraftReview(scope, resolveInWorkspace, hash);
   };
-  return { fixture, team, drafts, readReview, withdrawParents: () => { parentsProved = false; },
+  return { fixture, team, drafts, readReview,
+    stopThroughLiveSettings: () => { actionSettings = { ...actionSettings, emergencyStop: true }; },
+    changePolicy: () => { current = { ...initial, bundle: alternate, hash: bundleHash(alternate) }; },
+    withdrawParents: () => { parentsProved = false; },
     replaceStaged: () => { staged = { ...staged as object, echelon: 'L2' }; },
     reviseSources: () => { sources = sources.map((source) => ({ ...source, revision: 'next' })); },
     onSourceRead: (observe: () => void) => { onSourceRead = observe; } };
@@ -124,7 +135,7 @@ async function runFixture(
   team: TeamDefinition,
   options: {
     steps?: readonly ToolCall[]; onChildTurn?: (turn: number) => void; root?: string; runId?: string;
-    onStart?: (stop: () => void) => void; modelInterruption?: 'retryable' | 'silent';
+    onStart?: (stop: () => void) => void; modelInterruption?: 'retryable' | 'silent'; wrongChildActor?: boolean;
   } = {},
 ) {
   const root = options.root ?? fixture.root;
@@ -159,19 +170,22 @@ async function runFixture(
   const conversation = newTestConversation(root, (event) => posted.push(event), path.join(root, '.checkpoints'));
   const runtimes: ReturnType<typeof testGateRuntime>[] = [];
   conversation.gateHost = { async runtimeFor(request) {
-    const runtime = testGateRuntime({ actor: { ...request.actor, deviceFingerprint: 'fictional-brief' }, presence: request.presence, context: request.context });
+    const actor = { ...request.actor, deviceFingerprint: 'fictional-brief' };
+    if (options.wrongChildActor && actor.kind === 'sub-agent') actor.agentId = 'other-fictional-child';
+    const runtime = testGateRuntime({ actor, presence: request.presence, context: request.context });
     runtimes.push(runtime);
-    return runtime;
+    return { ...runtime, bundleState: fixture.bundleState };
   } };
+  const requestPolicy: ActionPolicy = { mode: 'fully-autonomous', emergencyStop: false };
   const request = {
     text: 'Prepare an internal decision brief for review.', client: client as never, model, local: true,
-    privacy: 'Local recording model', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, team,
+    privacy: 'Local recording model', policy: requestPolicy, rules: DEFAULT_RULES, team,
     route: { kind: 'local', attestation: false }, modelCatalog: [{ id: model, privacyBoundary: 'local' }, ...(options.modelInterruption ? [{ id: secondModel, privacyBoundary: 'local' }] : [])],
     ...(options.modelInterruption ? { backupModel: secondModel, modelStallMs: idleDeadline } : {}), runId: options.runId ?? fixture.runId,
   } satisfies AgentTurnRequest;
   options.onStart?.(() => conversation.stop());
   try { await conversation.send(request); } finally { conversation.dispose(); }
-  return { offers, results, posted, childRequests, decisions: runtimes.flatMap((runtime): DecisionRecord[] => runtime.records) };
+  return { offers, results, posted, childRequests, requestPolicy, decisions: runtimes.flatMap((runtime): DecisionRecord[] => runtime.records) };
 }
 
 test('registered setup passes the exact staged record into a real confined child and reviews its draft', async () => {
@@ -348,6 +362,63 @@ test('institutional authority is still needed at the exact leaf installation', a
       assert.ok((await subject.readReview(path.basename(files[0], '.json'))).sources.every((entry) => entry.revision === 'next'));
     }
   }
+});
+
+test('the real gate decision does not authorize a draft after the pinned policy changes', async () => {
+  const subject = await newFixture();
+  let reached = false;
+  let installs = 0;
+  setCasProbe((point) => {
+    if (point === 'after-install') installs += 1;
+    if (point !== 'before-rename') return;
+    reached = true;
+    subject.changePolicy();
+  });
+  let state: Awaited<ReturnType<typeof runFixture>>;
+  try { state = await runFixture(subject.fixture, subject.team, { steps: [acceptedSteps[2]] }); }
+  finally { setCasProbe(undefined); }
+  assert.ok(reached, 'the effect reached the last pre-link probe');
+  const admitted = state.decisions.find((decision) => decision.api.request.uid === 'draft');
+  assert.equal(admitted?.action_id, 1);
+  assert.equal(admitted.unmapped.nearAi.bundleHash, subject.fixture.policyHash);
+  assert.notEqual(subject.fixture.bundleState().hash, subject.fixture.policyHash);
+  assert.equal(installs, 0, 'the replacement policy must hold the exact save');
+  assert.deepEqual(await readdir(subject.drafts), []);
+  assert.ok(!state.results.some((value) => value.includes('"state":"draft"')));
+});
+
+test('the draft gate refuses an independent emergency stop even while the original request stays unchanged', async () => {
+  const subject = await newFixture();
+  let reached = false;
+  let installs = 0;
+  setCasProbe((point) => {
+    if (point === 'after-install') installs += 1;
+    if (point !== 'before-rename') return;
+    reached = true;
+    subject.stopThroughLiveSettings();
+  });
+  let state: Awaited<ReturnType<typeof runFixture>>;
+  try { state = await runFixture(subject.fixture, subject.team, { steps: [acceptedSteps[2]] }); }
+  finally { setCasProbe(undefined); }
+  assert.ok(reached);
+  assert.deepEqual(state.requestPolicy, { mode: 'fully-autonomous', emergencyStop: false });
+  assert.equal(subject.fixture.currentActionSettings().emergencyStop, true);
+  assert.equal(state.decisions.find((entry) => entry.api.request.uid === 'draft')?.action_id, 1);
+  assert.equal(installs, 0, 'live emergency stop must close the confined save');
+  assert.deepEqual(await readdir(subject.drafts), []);
+  assert.ok(!state.results.some((value) => value.includes('"state":"draft"')));
+});
+
+test('the real selected child cannot save through a same-label runtime with a different actor ID', async () => {
+  const subject = await newFixture();
+  const state = await runFixture(subject.fixture, subject.team, { steps: [acceptedSteps[2]], wrongChildActor: true });
+  assert.deepEqual(state.offers[0], [readTool, draftTool], 'the actual selected child was offered the confined tools');
+  assert.equal(state.decisions.find((entry) => entry.api.request.uid === 'draft')?.action_id, 2,
+    'a mismatched runtime actor must receive a denied gate decision');
+  assert.ok(!state.posted.some((entry) => entry.type === 'approval-request' ||
+    (entry.type === 'permission' && entry.tool === draftTool && entry.decision !== 'denied')));
+  assert.deepEqual(await readdir(subject.drafts), []);
+  assert.ok(!state.results.some((value) => value.includes('"state":"draft"')));
 });
 
 test('the final current-facts check and publication finish before queued fixture changes', async () => {
