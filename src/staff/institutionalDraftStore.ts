@@ -2,14 +2,18 @@ import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes, prepareInstitutionalBrief,
-  type InstitutionalBriefReview, type InstitutionalDraftScope, type PreparedInstitutionalBrief,
+  institutionalActionRegisterDirectory, institutionalBriefDigest, institutionalBriefDirectory, institutionalBriefMaxBytes,
+  prepareInstitutionalActionRegister, prepareInstitutionalBrief, type InstitutionalDraftReview, type InstitutionalDraftScope, type PreparedInstitutionalDraft,
 } from '../domain/staff/institutionalBrief';
 import { replaceKeepingEdits } from './staffFiles';
 
 type ResolveDraftPath = (root: string, requested: string) => Promise<string>;
-const directories = institutionalBriefDirectory.split('/');
 const hexDigest = /^[0-9a-f]{64}$/;
+const readLeafFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+
+function directoryOf(scope: InstitutionalDraftScope): string {
+  return scope.actionRegister ? institutionalActionRegisterDirectory : institutionalBriefDirectory;
+}
 
 function changed(): never {
   throw new Error('The institutional draft or its project scope changed. Review the current evidence.');
@@ -20,7 +24,7 @@ async function captureParents(scope: InstitutionalDraftScope): Promise<string> {
   // from this filesystem observation. The observation rejects wrong objects.
   let directory = scope.root;
   const identities = [];
-  for (const part of ['', ...directories]) {
+  for (const part of ['', ...directoryOf(scope).split('/')]) {
     directory = path.join(directory, part);
     const stat = await lstat(directory, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink() || await realpath(directory) !== directory) return changed();
@@ -38,7 +42,7 @@ async function readExact(file: string): Promise<Buffer | undefined> {
   const before = await lstat(file, { bigint: true }).catch((error: unknown) => { if (isMissing(error)) return undefined; throw error; });
   if (!before) return undefined;
   if (!before.isFile() || before.isSymbolicLink() || before.size > institutionalBriefMaxBytes) return changed();
-  const descriptor = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  const descriptor = await open(file, readLeafFlags);
   try {
     const opened = await descriptor.stat({ bigint: true });
     if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) return changed();
@@ -58,61 +62,90 @@ async function readExact(file: string): Promise<Buffer | undefined> {
 }
 
 async function draftPath(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, relative: string): Promise<string> {
-  if (!relative.startsWith(institutionalBriefDirectory + '/') ||
-      !hexDigest.test(relative.slice(institutionalBriefDirectory.length + 1, -5)) || !relative.endsWith('.json')) return changed();
+  const directory = directoryOf(scope);
+  if (!relative.startsWith(directory + '/') ||
+      !hexDigest.test(relative.slice(directory.length + 1, -5)) || !relative.endsWith('.json')) return changed();
   const expected = path.join(scope.root, relative);
   const resolved = await resolve(scope.root, relative);
   if (resolved !== expected) return changed();
   return expected;
 }
 
-function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected: string): PreparedInstitutionalBrief {
+function reconstruct(bytes: Buffer, scope: InstitutionalDraftScope, pathExpected: string): PreparedInstitutionalDraft {
   const payload: unknown = JSON.parse(bytes.toString('utf8'));
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return changed();
   const { body, productId } = payload as Record<string, unknown>;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return changed();
-  const expected = prepareInstitutionalBrief({ ...body, productId }, scope.binding, scope.currentSources());
+  const sources = scope.currentSources();
+  const expected = scope.actionRegister
+    ? prepareInstitutionalActionRegister({ productId, rows: storedActionRows(body) }, scope.binding, sources, scope.actionRegister.current())
+    : prepareInstitutionalBrief({ ...body, productId }, scope.binding, sources);
   if (expected.path !== pathExpected || !bytes.equals(Buffer.from(expected.text))) return changed();
   return expected;
 }
 
-export async function verifyInstitutionalDraftTarget(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalBrief): Promise<void> {
+function storedActionRows(body: object): unknown[] {
+  const { rows } = body as { rows?: unknown };
+  if (!Array.isArray(rows) || rows.length > 12) return changed();
+  return rows.map((row: unknown) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return changed();
+    const { overdue: _overdue, humanHandoff: _handoff, ...input } = row as Record<string, unknown>;
+    return input;
+  });
+}
+
+async function requireCurrentPredecessor(scope: InstitutionalDraftScope): Promise<void> {
+  if (scope.actionRegister && !await scope.actionRegister.predecessorCurrent()) return changed();
+}
+
+function exactPredecessorLeaf(scope: InstitutionalDraftScope, review: InstitutionalDraftReview): boolean {
+  return review.kind === 'brief' || scope.actionRegister?.predecessorAtEffect(review.predecessor.version) === true;
+}
+
+export async function verifyInstitutionalDraftTarget(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalDraft): Promise<void> {
+  await requireCurrentPredecessor(scope);
   await scope.withStableParents(async () => {
     const parents = await captureParents(scope);
     const file = await draftPath(scope, resolve, draft.path);
     const existing = await readExact(file);
     if (await captureParents(scope) !== parents || !await scope.bindingIsCurrent() || (existing && !existing.equals(Buffer.from(draft.text)))) return changed();
-    reconstruct(Buffer.from(draft.text), scope, draft.path);
+    const { review } = reconstruct(Buffer.from(draft.text), scope, draft.path);
+    if (!exactPredecessorLeaf(scope, review)) return changed();
   });
 }
 
 export async function storeInstitutionalDraft(
-  scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalBrief, verifyBeforeInstall: () => boolean,
-): Promise<InstitutionalBriefReview> {
+  scope: InstitutionalDraftScope, resolve: ResolveDraftPath, draft: PreparedInstitutionalDraft, verifyBeforeInstall: () => boolean,
+): Promise<InstitutionalDraftReview> {
+  await requireCurrentPredecessor(scope);
   return scope.withStableParents(async () => {
     const parents = await captureParents(scope);
     const file = await draftPath(scope, resolve, draft.path);
     const existing = await readExact(file);
     if (await captureParents(scope) !== parents || !await scope.bindingIsCurrent()) return changed();
-    reconstruct(Buffer.from(draft.text), scope, draft.path);
+    const prepared = reconstruct(Buffer.from(draft.text), scope, draft.path);
+    const stillValid = () => verifyBeforeInstall() && exactPredecessorLeaf(scope, prepared.review);
     if (!existing) {
-      const result = await replaceKeepingEdits(file, { exists: false }, draft.text, verifyBeforeInstall);
+      const result = await replaceKeepingEdits(file, { exists: false }, draft.text, stillValid);
       if (result.status !== 'written') return changed();
     }
     if (await captureParents(scope) !== parents) return changed();
     const bytes = await readExact(await draftPath(scope, resolve, draft.path));
-    if (!bytes || !await scope.bindingIsCurrent() || !verifyBeforeInstall()) return changed();
+    if (!bytes || !await scope.bindingIsCurrent() || !stillValid()) return changed();
     return reconstruct(bytes, scope, draft.path).review;
   });
 }
 
-export async function readInstitutionalDraftReview(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, version: string): Promise<InstitutionalBriefReview> {
+export async function readInstitutionalDraftReview(scope: InstitutionalDraftScope, resolve: ResolveDraftPath, version: string): Promise<InstitutionalDraftReview> {
   if (!hexDigest.test(version)) return changed();
+  await requireCurrentPredecessor(scope);
   return scope.withStableParents(async () => {
     const parents = await captureParents(scope);
-    const expected = `${institutionalBriefDirectory}/${version}.json`;
+    const expected = `${directoryOf(scope)}/${version}.json`;
     const bytes = await readExact(await draftPath(scope, resolve, expected));
     if (!bytes || await captureParents(scope) !== parents || !await scope.bindingIsCurrent()) return changed();
-    return reconstruct(bytes, scope, expected).review;
+    const { review } = reconstruct(bytes, scope, expected);
+    if (!exactPredecessorLeaf(scope, review)) return changed();
+    return review;
   });
 }

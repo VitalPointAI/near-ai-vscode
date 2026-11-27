@@ -17,8 +17,8 @@ import { defaultStaffSettings, isStaffTeamSection, levelOffer, parseStaffSetting
 import type { StaffSettings, StaffTeamSection } from '../domain/staff/profiles';
 import { withStaffGuidance } from '../agent/staff/guidance';
 import {
-  INSTITUTIONAL_COMMAND_GROUP_LEAD, institutionalCommandGroupBinding, institutionalCommandGroupDefinition,
-  institutionalDigest, readInstitutionalCommandGroupBinding, type InstitutionalCommandGroupBinding,
+  INSTITUTIONAL_COMMAND_GROUP_TEAM, institutionalDigest, institutionalRole, institutionalRoleBinding, isInstitutionalRole,
+  readInstitutionalRoleBinding, type InstitutionalRoleBinding, type InstitutionalRoleId,
 } from '../agent/staff/institutionalCommand';
 import { j2Renderings } from '../agent/staff/j2Template';
 import { j3OptionSets } from '../agent/staff/j3Operations';
@@ -205,11 +205,11 @@ export interface InstitutionalStaffSetupPlan {
   readonly roster: StaffRoster;
   readonly institutional: {
     readonly root: string;
-    readonly binding: InstitutionalCommandGroupBinding;
+    readonly binding: InstitutionalRoleBinding;
   };
 }
 
-async function institutionalProject(root: string): Promise<InstitutionalStaffSetupPlan['institutional']> {
+async function institutionalProject(root: string, team: InstitutionalRoleId): Promise<InstitutionalStaffSetupPlan['institutional']> {
   const canonicalRoot = await realpath(root);
   if (canonicalRoot !== path.resolve(root)) {
     throw new Error('Institutional setup requires the real project folder.');
@@ -219,27 +219,30 @@ async function institutionalProject(root: string): Promise<InstitutionalStaffSet
     throw new Error('The selected project changed during setup.');
   }
   const digest = institutionalDigest(`${identity.dev}:${identity.ino}:${identity.birthtimeNs}`);
-  return { root: canonicalRoot, binding: institutionalCommandGroupBinding(canonicalRoot, digest) };
+  return { root: canonicalRoot, binding: institutionalRoleBinding(canonicalRoot, digest, team) };
 }
 
 /** Captures the selected directory before roster confirmation. No project files are needed. */
-export async function planInstitutionalStaffSetup(root: string): Promise<InstitutionalStaffSetupPlan> {
-  const institutional = await institutionalProject(root);
-  const parsed = parseTeam(institutionalCommandGroupDefinition, `${institutional.binding.team}.md`);
+export async function planInstitutionalStaffSetup(target: string | { root: string; team: InstitutionalRoleId }): Promise<InstitutionalStaffSetupPlan> {
+  const { root, team } = typeof target === 'string' ? { root: target, team: INSTITUTIONAL_COMMAND_GROUP_TEAM } : target;
+  if (!isInstitutionalRole(team)) throw new Error('Unknown institutional staff role.');
+  const institutional = await institutionalProject(root, team);
+  const role = institutionalRole(team);
+  const parsed = parseTeam(role.definition, `${institutional.binding.team}.md`);
   return {
     institutional,
     roster: {
       teamName: parsed.name,
       description: parsed.description,
       fileName: institutional.binding.team,
-      humanLead: INSTITUTIONAL_COMMAND_GROUP_LEAD,
+      humanLead: role.lead,
       members: parsed.members.map(({ name, role }) => ({ name, ...(role ? { role } : {}) })),
     },
   };
 }
 
-export function institutionalStaffSetupKey(binding: InstitutionalCommandGroupBinding): string {
-  return `nearAi.staff.institutional.commandGroup.v1.${binding.rootDigest}`;
+export function institutionalStaffSetupKey(binding: InstitutionalRoleBinding): string {
+  return `nearAi.staff.institutional.${institutionalRole(binding.team).keySegment}.v1.${binding.rootDigest}`;
 }
 
 // A rejected Memento update may leave its value in the current cache. Require
@@ -255,8 +258,8 @@ export async function persistInstitutionalStaffSetup(
   const { root, binding } = plan.institutional;
   const key = institutionalStaffSetupKey(binding);
   const assertSelected = async (): Promise<void> => {
-    const current = await institutionalProject(root);
-    if (!projectStillSelected() || readInstitutionalCommandGroupBinding(current.binding, binding) === undefined) {
+    const current = await institutionalProject(root, binding.team);
+    if (!projectStillSelected() || readInstitutionalRoleBinding(current.binding, binding) === undefined) {
       throw new Error('The selected project changed during confirmation. Run institutional setup again.');
     }
   };
@@ -265,14 +268,14 @@ export async function persistInstitutionalStaffSetup(
     // the local record. Concurrent first writes produce the same v1 value.
     await assertSelected();
     const existing = state.get<unknown>(key);
-    if (existing !== undefined && !readInstitutionalCommandGroupBinding(existing, binding)) {
+    if (existing !== undefined && !readInstitutionalRoleBinding(existing, binding)) {
       throw new Error('The institutional setup record is incomplete or inconsistent.');
     }
     const pending = unconfirmedInstitutionalWrites.get(state);
     if (existing !== undefined && !pending?.has(key)) return;
     try {
       await state.update(key, binding);
-      if (!readInstitutionalCommandGroupBinding(state.get<unknown>(key), binding)) {
+      if (!readInstitutionalRoleBinding(state.get<unknown>(key), binding)) {
         throw new Error('The stored record does not match the confirmed definition.');
       }
     } catch (cause) {

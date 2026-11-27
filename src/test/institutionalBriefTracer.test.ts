@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,21 +8,29 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ3ActionRegister, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
-import type { InstitutionalBriefSource } from '../domain/staff/institutionalBrief';
+import { institutionalSourceHash, type InstitutionalBriefSource } from '../domain/staff/institutionalBrief';
+import { canonicalBytes } from '../domain/team/canonical';
+import { signPayload } from '../domain/team/signedPayload';
 import { setCasProbe } from '../staff/staffFiles';
 import { readInstitutionalDraftReview } from '../staff/institutionalDraftStore';
+import { institutionalStaffSetupKey, persistInstitutionalStaffSetup, planInstitutionalStaffSetup } from '../services/staffSetup';
 import type { AgentTurnRequest } from '../services/agentSession';
 import { StreamInterruptedError, type AgentMessage, type CompletionEvent, type ToolCall, type ToolDefinition } from '../services/nearAiClient';
 import { newTestConversation, testBundleState, testGateRuntime } from './helpers/gatedRuns';
+import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 const draftDirectory = '.planning/staff/institutional/command/briefs';
+const registerDirectory = '.planning/staff/institutional/j3/action-registers';
+const registerTeam = 'institutional-j3-action-register-v1';
+const readRegister = 'ReadInstitutionalActionEvidence';
+const saveRegister = 'SaveInstitutionalActionRegisterDraft';
 const readTool = 'ReadInstitutionalBriefEvidence';
 const draftTool = 'SaveInstitutionalBriefDraft';
 const model = 'fictional-local';
@@ -113,7 +121,9 @@ async function newFixture(logText = publicExtracts[0].text as string) {
     const reopened = await selectSyntheticInstitutionalCommandGroup(fixture);
     const scope = selectedInstitutionalScope(reopened);
     assert.ok(scope);
-    return readInstitutionalDraftReview(scope, resolveInWorkspace, hash);
+    const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, hash);
+    assert.equal(review.kind, 'brief');
+    return review;
   };
   return { fixture, team, drafts, readReview,
     stopThroughLiveSettings: () => { actionSettings = { ...actionSettings, emergencyStop: true }; },
@@ -148,7 +158,7 @@ async function runFixture(
     async *streamCompletion(selectedModel: string, messages: AgentMessage[], tools: ToolDefinition[], signal: AbortSignal,
       deadlines: { idleTimeoutMs?: number; turnTimeoutMs?: number }): AsyncGenerator<CompletionEvent> {
       results.push(...messages.filter((message) => message.role === 'tool').map((message) => String(message.content)));
-      const child = String(messages[0].content).includes('Prepare a CG-07 decision brief using only evidence');
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -161,7 +171,7 @@ async function runFixture(
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the administrative brief.' });
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
     },
@@ -485,3 +495,188 @@ for (const interruption of ['retryable', 'silent'] as const) {
     assert.ok(!state.results.some((value) => value.includes('"state":"draft"')));
   });
 }
+
+const digest = (value: unknown) => createHash('sha256').update(canonicalBytes(value)).digest('hex');
+
+async function newRegisterFixture() {
+  const subject = await newFixture();
+  await runFixture(subject.fixture, subject.team, { steps: [acceptedSteps[2]] });
+  const [file] = await readdir(subject.drafts);
+  assert.ok(file);
+  const briefVersion = path.basename(file, '.json');
+  const briefReview = await subject.readReview(briefVersion);
+  // Task 2 adds a closed role choice to the existing staging service.
+  const plan = await planInstitutionalStaffSetup({ root: subject.fixture.root, team: registerTeam });
+  assert.equal(plan.roster.fileName, registerTeam, 'the normal staging service must keep the J3 role distinct');
+  const records = new Map<string, unknown>();
+  const state = { get: <T>(key: string) => records.get(key) as T | undefined, update: async (key: string, value: unknown) => { records.set(key, value); } };
+  await persistInstitutionalStaffSetup(plan, state, () => true);
+  const key = institutionalStaffSetupKey(plan.institutional.binding);
+  assert.equal(key, `nearAi.staff.institutional.j3ActionRegister.v1.${briefReview.project}`);
+  const directory = path.join(subject.fixture.root, registerDirectory);
+  await mkdir(directory, { recursive: true });
+  const narratives = ['Facilities will prepare the office-hours notice. Desk lead confirmed receipt.',
+    'The second action depends on the staffing review. The chair still needs to assign a person and date.'];
+  const sources: InstitutionalBriefSource[] = narratives.map((text, index) => ({
+    id: `office-actions-${index}`, revision: '1', date: '2026-11-02', label: 'org/Public', text,
+    project: briefReview.project, spans: [{ start: 0, end: text.length }],
+  }));
+  const evidence = (index: number) => [{ sourceId: sources[index].id, revision: '1', start: 0, end: sources[index].text.length, quote: sources[index].text }];
+  const decisionId = 'office-hours-accepted';
+  const rows = [
+    { decisionId, actionId: 'draft-notice', text: 'Prepare the office-hours notice.', owner: 'facilities-desk', dueDate: '2026-11-05',
+      acceptanceCriteria: 'Draft ready for the chair.', dependencies: [], exceptions: [],
+      acknowledgments: [{ owner: 'facilities-desk', date: '2026-11-02', evidence: evidence(0) }], evidence: evidence(0) },
+    { decisionId, actionId: 'staffing-review', text: 'Review staffing before the office-hours change.', owner: null, dueDate: null,
+      acceptanceCriteria: 'Staffing options provided to the chair.', dependencies: [{ id: 'staffing-input', crossProgramme: true }],
+      exceptions: ['Chair to resolve assignment and date.'], acknowledgments: [], evidence: evidence(1) },
+  ];
+  const roster = { revision: '1', owners: [{ actionId: 'draft-notice', owner: 'facilities-desk' }] };
+  const chair = testSigner();
+  let acceptanceState = 'active';
+  const asOf = '2026-11-06';
+  const chairClaim = {
+    schema: 1, purpose: 'fictional-office-hours-j3-07', disposition: 'accepted', chair: 'fictional-office-chair',
+    decisionId, revision: '2', project: briefReview.project, directory: briefReview.directory, echelon: 'L3',
+    briefVersion, briefReviewDigest: digest(briefReview), expiresAt: '2026-11-08T00:00:00.000Z', asOf,
+    rosterRevision: roster.revision, rosterDigest: digest(roster),
+    sourceDigests: sources.map((source) => ({ id: source.id, hash: institutionalSourceHash(source) })), actions: rows,
+  };
+  const accepted = signPayload(chair, 'staff-decision', chairClaim, { memberId: 'fictional-office-chair', now: () => new Date('2026-11-02T00:00:00.000Z') });
+  let envelope: unknown = accepted;
+  let revision = '2';
+  let now = Date.parse(`${asOf}T12:00:00.000Z`);
+  const fixture = {
+    ...subject.fixture,
+    readStaged: () => records.get(key), currentSources: () => sources,
+    actionAuthority: {
+      predecessorTeam: subject.team,
+      chair: { fingerprint: chair.fingerprint, publicKey: chair.publicKey },
+      readPredecessor: () => subject.readReview(briefVersion),
+      current: () => ({ envelope, decisionId, revision, state: acceptanceState, roster, now }),
+    },
+  };
+  const team = await selectSyntheticInstitutionalJ3ActionRegister(fixture);
+  return {
+    ...subject, fixture, team, directory, accepted, rows, briefReview,
+    useReviewOnly: () => { envelope = briefReview; },
+    tamper: () => { envelope = { ...accepted, payload: { ...chairClaim, disposition: 'declined' } }; },
+    supersede: () => { revision = '3'; },
+    expire: () => { now = Date.parse('2026-11-08T00:00:00.000Z'); },
+    revoke: () => { acceptanceState = 'revoked'; },
+  };
+}
+
+test('the staged real J3 child saves one cited office-hours register from separate signed chair evidence', async () => {
+  const subject = await newRegisterFixture();
+  const result = await runFixture(subject.fixture, subject.team, { steps: [
+    toolCall('action-evidence', readRegister, { sourceId: 'office-actions-0' }),
+    toolCall('action-register', saveRegister, { productId: 'office-hours-register', rows: [...subject.rows, subject.rows[0]] }),
+  ] });
+  assert.deepEqual(result.offers[0], [readRegister, saveRegister]);
+  assert.ok(result.results.some((entry) => entry.includes(subject.rows[0].evidence[0].quote)));
+  assert.ok(!result.posted.some((entry) => entry.type === 'approval-request'));
+  const [file, ...others] = await readdir(subject.directory);
+  assert.ok(file);
+  assert.deepEqual(others, []);
+  const bytes = await readFile(path.join(subject.directory, file));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(file, `${version}.json`);
+  assert.ok(result.results.some((entry) => entry.includes(version)));
+  const saved = JSON.parse(bytes.toString());
+  assert.equal(saved.duty, 'J3-07');
+  assert.equal(saved.kind, 'action-register');
+  assert.equal(saved.predecessor.version, subject.briefReview.version);
+  assert.equal(saved.predecessor.envelopeDigest, digest(subject.accepted));
+  assert.equal(saved.predecessor.decisionId, 'office-hours-accepted');
+  assert.equal(saved.predecessor.revision, '2');
+  assert.equal(saved.predecessor.signer, subject.accepted.signer.fingerprint);
+  assert.equal(saved.body.rows.length, 2);
+  assert.equal(saved.body.rows[0].overdue, true);
+  assert.equal(saved.body.rows[1].owner, null);
+  assert.equal(saved.body.rows[1].dueDate, null);
+  assert.deepEqual(saved.body.rows[1].humanHandoff, { branch: 'J5', dependencyIds: ['staffing-input'] });
+  const gate = result.decisions.find((entry) => entry.api.request.uid === 'action-register');
+  assert.deepEqual(gate?.unmapped.nearAi.capability, { verb: 'workspaceWrite', paths: [`${registerDirectory}/${file}`] });
+  const scope = selectedInstitutionalScope(subject.team);
+  assert.ok(scope);
+  assert.equal((await readInstitutionalDraftReview(scope, resolveInWorkspace, version)).version, version);
+  subject.revoke();
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /current|changed/);
+  assert.deepEqual(await readdir(subject.directory), [file]);
+});
+
+test('the J3 child holds a mere review, invalid or stale chair evidence, and unsupported facts', async () => {
+  for (const change of ['useReviewOnly', 'tamper', 'supersede', 'expire', 'unsupported'] as const) {
+    const subject = await newRegisterFixture();
+    const rows = change === 'unsupported' ? subject.rows.map((row) => ({ ...row, dueDate: '2027-01-01' })) : subject.rows;
+    if (change !== 'unsupported') subject[change]();
+    const result = await runFixture(subject.fixture, subject.team, {
+      steps: [toolCall('invalid-register', saveRegister, { productId: 'office-hours-register', rows })],
+    });
+    assert.ok(!result.posted.some((entry) => entry.type === 'approval-request'));
+    assert.ok(!result.decisions.some((entry) => entry.api.request.uid === 'invalid-register' && entry.action_id === 1), change);
+    assert.deepEqual(await readdir(subject.directory), [], change);
+    assert.ok(!result.results.some((entry) => entry.includes('"state":"draft"')));
+  }
+});
+
+test('late J3 policy, decision and Command Group authority changes hold the exact local write', async (t) => {
+  for (const change of ['changePolicy', 'supersede', 'replaceBrief', 'reviseSources', 'replaceStaged'] as const) {
+    await t.test(change, async () => {
+      const subject = await newRegisterFixture();
+      const predecessor = path.join(subject.drafts, `${subject.briefReview.version}.json`);
+      const predecessorBytes = await readFile(predecessor);
+      const j3Before = digest({ staged: subject.fixture.readStaged(), sources: subject.fixture.currentSources(), authority: subject.fixture.actionAuthority.current() });
+      let reached = false;
+      setCasProbe((point) => {
+        if (point !== 'before-rename') return;
+        reached = true;
+        if (change === 'replaceBrief') writeFileSync(predecessor, 'Changed fictional predecessor');
+        else subject[change]();
+      });
+      try {
+        const result = await runFixture(subject.fixture, subject.team, {
+          steps: [toolCall('changed-register', saveRegister, { productId: 'office-hours-register', rows: subject.rows })],
+        });
+        assert.ok(reached && result.decisions.some((entry) => entry.api.request.uid === 'changed-register' && entry.action_id === 1));
+        if (change === 'reviseSources' || change === 'replaceStaged') {
+          assert.deepEqual(await readFile(predecessor), predecessorBytes, 'the published predecessor bytes are still exact');
+          assert.equal(digest({ staged: subject.fixture.readStaged(), sources: subject.fixture.currentSources(), authority: subject.fixture.actionAuthority.current() }),
+            j3Before, 'the current J3 decision, extracts and staged role are unchanged');
+          assert.equal(subject.fixture.bundleState().hash, subject.fixture.policyHash);
+        }
+        assert.deepEqual(await readdir(subject.directory), [], 'no action register is installed');
+        assert.ok(!result.results.some((entry) => entry.includes('"state":"draft"')));
+        if (change === 'reviseSources' || change === 'replaceStaged') {
+          const attempt = await runFixture(subject.fixture, subject.team, { steps: [toolCall('held-evidence', readRegister, { sourceId: 'office-actions-0' })] });
+          assert.ok(!attempt.results.some((entry) => entry.includes(subject.rows[0].evidence[0].quote)));
+        }
+      } finally { setCasProbe(undefined); }
+    });
+  }
+});
+
+test('a changed Command Group predecessor after J3 tool offer withholds the same-run quote', async () => {
+  const subject = await newRegisterFixture();
+  const predecessor = path.join(subject.drafts, `${subject.briefReview.version}.json`);
+  const previous = await readFile(predecessor);
+  const j3Before = digest({ staged: subject.fixture.readStaged(), sources: subject.fixture.currentSources(), authority: subject.fixture.actionAuthority.current() });
+  const result = await runFixture(subject.fixture, subject.team, {
+    steps: [
+      toolCall('stale-quote', readRegister, { sourceId: 'office-actions-0' }),
+      toolCall('stale-quote-draft', saveRegister, { productId: 'office-hours-register', rows: subject.rows }),
+    ],
+    onChildTurn(turn) {
+      if (turn === 0) writeFileSync(predecessor, 'Changed fictional predecessor before the quote');
+    },
+  });
+  assert.deepEqual(result.offers[0], [readRegister, saveRegister]);
+  assert.notDeepEqual(await readFile(predecessor), previous);
+  assert.equal(digest({ staged: subject.fixture.readStaged(), sources: subject.fixture.currentSources(), authority: subject.fixture.actionAuthority.current() }), j3Before);
+  assert.equal(subject.fixture.bundleState().hash, subject.fixture.policyHash);
+  assert.deepEqual(result.decisions.find((decision) => decision.api.request.uid === 'stale-quote')?.unmapped.nearAi.capability, { verb: 'plan' });
+  assert.ok(!result.results.some((entry) => entry.includes(subject.rows[0].evidence[0].quote)), 'the actual child must receive no quote');
+  assert.ok(!result.results.some((entry) => entry.includes('"state":"draft"')));
+  assert.deepEqual(await readdir(subject.directory), []);
+});

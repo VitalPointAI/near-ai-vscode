@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { canonicalBytes } from '../team/canonical';
+import { verifyPayload, type PayloadSignerRef } from '../team/signedPayload';
 import { STAFF_SLUG } from './parse';
 
 export const institutionalBriefDirectory = '.planning/staff/institutional/command/briefs';
+export const institutionalActionRegisterDirectory = '.planning/staff/institutional/j3/action-registers';
 export const institutionalBriefMaxBytes = 128 * 1024;
 
 export interface InstitutionalBriefSource {
@@ -31,6 +33,13 @@ export interface InstitutionalDraftScope {
   readonly stagedIsCurrent: () => boolean;
   readonly currentSources: () => readonly InstitutionalBriefSource[];
   readonly withStableParents: <T>(operation: () => Promise<T>) => Promise<T>;
+  readonly actionRegister?: {
+    readonly predecessorCurrent: () => Promise<boolean>;
+    readonly predecessorFacts: () => boolean;
+    /** Called with the fixture interlock held immediately before a J3 effect. */
+    readonly predecessorAtEffect: (version: string) => boolean;
+    readonly current: () => InstitutionalActionAcceptance;
+  };
 }
 
 interface InstitutionalCitation {
@@ -55,7 +64,21 @@ export interface InstitutionalBriefReview {
   readonly sources: readonly { readonly id: string; readonly revision: string; readonly date: string; readonly label: 'org/Public'; readonly hash: string }[];
 }
 
-export interface PreparedInstitutionalBrief {
+export interface InstitutionalActionRegisterReview extends Omit<InstitutionalBriefReview, 'duty' | 'kind'> {
+  readonly duty: 'J3-07';
+  readonly kind: 'action-register';
+  readonly predecessor: InstitutionalActionPredecessor;
+}
+
+export type InstitutionalDraftReview = InstitutionalBriefReview | InstitutionalActionRegisterReview;
+
+export interface PreparedInstitutionalDraft {
+  readonly path: string;
+  readonly text: string;
+  readonly review: InstitutionalDraftReview;
+}
+
+export interface PreparedInstitutionalBrief extends PreparedInstitutionalDraft {
   readonly path: string;
   readonly text: string;
   readonly review: InstitutionalBriefReview;
@@ -99,10 +122,7 @@ export function institutionalSourceHash(source: InstitutionalBriefSource): strin
   return institutionalBriefDigest(canonicalBytes(source));
 }
 
-/** Prepare a single canonical payload and the exact gate path derived from it. */
-export function prepareInstitutionalBrief(input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[]): PreparedInstitutionalBrief {
-  const value = record(input, ['productId', 'decisionRequested', 'facts', 'alternatives', 'assumptions', 'dissent', 'dependencies']);
-  if (typeof value.productId !== 'string' || !STAFF_SLUG.test(value.productId)) throw new Error('The decision brief needs a stable product identifier.');
+function admittedCitations(sources: readonly InstitutionalBriefSource[]) {
   const cited = new Map<string, InstitutionalBriefSource>();
   function citation(input: unknown): InstitutionalCitation {
     const { sourceId, revision, start, end, quote } = record(input, ['sourceId', 'revision', 'start', 'end', 'quote']);
@@ -112,6 +132,20 @@ export function prepareInstitutionalBrief(input: unknown, binding: Institutional
     cited.set(source.id, source);
     return { sourceId: source.id, revision: source.revision, start: start as number, end: end as number, quote: quote as string };
   }
+  return { citation, used: (): InstitutionalBriefReview['sources'] => sourceReferences([...cited.values()]) };
+}
+
+function sourceReferences(sources: readonly InstitutionalBriefSource[]): InstitutionalBriefReview['sources'] {
+  return [...sources].sort((a, b) => a.id.localeCompare(b.id)).map((source) => ({
+    id: source.id, revision: source.revision, date: source.date, label: source.label, hash: institutionalSourceHash(source),
+  }));
+}
+
+/** Prepare a single canonical payload and the exact gate path derived from it. */
+export function prepareInstitutionalBrief(input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[]): PreparedInstitutionalBrief {
+  const value = record(input, ['productId', 'decisionRequested', 'facts', 'alternatives', 'assumptions', 'dissent', 'dependencies']);
+  if (typeof value.productId !== 'string' || !STAFF_SLUG.test(value.productId)) throw new Error('The decision brief needs a stable product identifier.');
+  const { citation, used } = admittedCitations(sources);
   const fact = (entry: unknown) => {
     const item = record(entry, ['text', 'evidence']);
     return { text: text(item.text), evidence: list(item.evidence, citation, 1) };
@@ -130,12 +164,189 @@ export function prepareInstitutionalBrief(input: unknown, binding: Institutional
     assumptions: list(value.assumptions, (entry) => text(entry)), dissent,
     dependencies: list(value.dependencies, (entry) => text(entry)),
   };
-  const evidence = [...cited.values()].sort((a, b) => a.id.localeCompare(b.id)).map((source) => ({
-    id: source.id, revision: source.revision, date: source.date, label: source.label, hash: institutionalSourceHash(source),
-  }));
-  const identity = { ...binding, duty: 'CG-07' as const, echelon: 'L3' as const, kind: 'brief' as const, productId: value.productId, sources: evidence };
+  const identity = { ...binding, duty: 'CG-07' as const, echelon: 'L3' as const, kind: 'brief' as const, productId: value.productId, sources: used() };
   const bytes = canonicalBytes({ schema: 1, ...identity, body });
   if (bytes.length > institutionalBriefMaxBytes) throw new Error('The canonical decision brief exceeds the 128 KiB draft limit.');
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalBriefDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
+}
+
+const actionPurpose = 'fictional-office-hours-j3-07';
+const chairMember = 'fictional-office-chair';
+
+export interface InstitutionalActionAuthority {
+  readonly chair: Pick<PayloadSignerRef, 'fingerprint' | 'publicKey'>;
+  readonly readPredecessor: () => Promise<InstitutionalBriefReview>;
+  readonly current: () => {
+    readonly envelope: unknown;
+    readonly decisionId: string;
+    readonly revision: string;
+    readonly state: string;
+    readonly roster: InstitutionalActionRoster;
+    readonly now: number;
+  };
+}
+
+interface InstitutionalActionRoster {
+  readonly revision: string;
+  readonly owners: readonly { readonly actionId: string; readonly owner: string }[];
+}
+
+interface InstitutionalActionPredecessor {
+  readonly version: string;
+  readonly reviewDigest: string;
+  readonly decisionId: string;
+  readonly revision: string;
+  readonly signer: string;
+  readonly envelopeDigest: string;
+  readonly rosterRevision: string;
+}
+
+interface InstitutionalActionRow {
+  readonly decisionId: string;
+  readonly actionId: string;
+  readonly text: string;
+  readonly owner: string | null;
+  readonly dueDate: string | null;
+  readonly acceptanceCriteria: string;
+  readonly dependencies: readonly { readonly id: string; readonly crossProgramme: boolean }[];
+  readonly exceptions: readonly string[];
+  readonly acknowledgments: readonly { readonly owner: string; readonly date: string; readonly evidence: readonly InstitutionalCitation[] }[];
+  readonly evidence: readonly InstitutionalCitation[];
+}
+
+interface InstitutionalActionRegisterBody {
+  readonly asOf: string;
+  readonly rows: readonly (InstitutionalActionRow & {
+    readonly overdue: boolean | null;
+    readonly humanHandoff: { readonly branch: 'J5'; readonly dependencyIds: readonly string[] } | null;
+  })[];
+}
+
+export interface InstitutionalActionAcceptance {
+  readonly predecessor: InstitutionalActionPredecessor;
+  readonly asOf: string;
+  readonly actions: readonly InstitutionalActionRow[];
+}
+
+function requireAction(condition: unknown): asserts condition {
+  if (!condition) throw new Error('The office-hours action register does not have current accepted chair evidence.');
+}
+
+function slug(value: unknown): string {
+  requireAction(typeof value === 'string' && STAFF_SLUG.test(value));
+  return value;
+}
+
+function revision(value: unknown): string {
+  requireAction(typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value));
+  return value;
+}
+
+function day(value: unknown): string {
+  requireAction(typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) &&
+    new Date(value).toISOString().slice(0, 10) === value);
+  return value;
+}
+
+function canonicalDigest(value: unknown): string {
+  return institutionalBriefDigest(canonicalBytes(value));
+}
+
+/** Parse only cited action facts. The verified chair disposition controls the admitted values. */
+function actionRow(value: unknown, citation: (value: unknown) => InstitutionalCitation): InstitutionalActionRow {
+  const row = record(value, ['decisionId', 'actionId', 'text', 'owner', 'dueDate', 'acceptanceCriteria', 'dependencies', 'exceptions', 'acknowledgments', 'evidence']);
+  const owner = row.owner === null ? null : slug(row.owner);
+  const dueDate = row.dueDate === null ? null : day(row.dueDate);
+  const exceptions = list(row.exceptions, (value) => text(value), owner === null || dueDate === null ? 1 : 0);
+  const dependencies = list(row.dependencies, (value) => {
+    const dependency = record(value, ['id', 'crossProgramme']);
+    requireAction(typeof dependency.crossProgramme === 'boolean');
+    return { id: slug(dependency.id), crossProgramme: dependency.crossProgramme };
+  });
+  requireAction(new Set(dependencies.map(({ id }) => id)).size === dependencies.length);
+  const acknowledgments = list(row.acknowledgments, (value) => {
+    const acknowledgment = record(value, ['owner', 'date', 'evidence']);
+    requireAction(owner !== null && acknowledgment.owner === owner);
+    return { owner, date: day(acknowledgment.date), evidence: list(acknowledgment.evidence, citation, 1) };
+  });
+  return {
+    decisionId: slug(row.decisionId), actionId: slug(row.actionId), text: text(row.text), owner, dueDate,
+    acceptanceCriteria: text(row.acceptanceCriteria), dependencies, exceptions, acknowledgments, evidence: list(row.evidence, citation, 1),
+  };
+}
+
+/** Verify the host-owned evidence against the exact reopened predecessor, scope, roster and extracts. */
+export function verifyInstitutionalActionAcceptance(
+  authority: InstitutionalActionAuthority, brief: InstitutionalBriefReview, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[],
+): InstitutionalActionAcceptance {
+  requireAction(brief.kind === 'brief' && brief.duty === 'CG-07' && brief.echelon === 'L3' &&
+    brief.project === binding.project && brief.directory === binding.directory);
+  const live = authority.current();
+  requireAction(live.state === 'active' && Number.isSafeInteger(live.now) && Number.isFinite(new Date(live.now).getTime()));
+  const envelopeBytes = canonicalBytes(live.envelope);
+  requireAction(envelopeBytes.length <= institutionalBriefMaxBytes);
+  const verified = verifyPayload(JSON.parse(envelopeBytes.toString('utf8')), {
+    purpose: 'staff-decision', maxBytes: institutionalBriefMaxBytes,
+    status: (key) => ({ state: key.fingerprint === authority.chair.fingerprint && key.publicKey === authority.chair.publicKey ? 'active' : 'unknown' }),
+  });
+  requireAction(verified.ok && verified.signer.memberId === chairMember);
+  const claim = record(verified.payload, ['schema', 'purpose', 'disposition', 'chair', 'decisionId', 'revision', 'project', 'directory',
+    'echelon', 'briefVersion', 'briefReviewDigest', 'expiresAt', 'asOf', 'rosterRevision', 'rosterDigest', 'sourceDigests', 'actions']);
+  const reviewDigest = canonicalDigest(brief);
+  const decisionId = slug(claim.decisionId);
+  const decisionRevision = revision(claim.revision);
+  const rosterRevision = revision(claim.rosterRevision);
+  const asOf = day(claim.asOf);
+  const expiry = typeof claim.expiresAt === 'string' ? Date.parse(claim.expiresAt) : NaN;
+  const signedAt = Date.parse(verified.signedAt);
+  requireAction(claim.schema === 1 && claim.purpose === actionPurpose && claim.disposition === 'accepted' && claim.chair === chairMember &&
+    claim.project === binding.project && claim.directory === binding.directory && claim.echelon === 'L3' &&
+    claim.briefVersion === brief.version && claim.briefReviewDigest === reviewDigest && decisionId === live.decisionId && decisionRevision === live.revision &&
+    signedAt <= live.now && live.now < expiry && new Date(expiry).toISOString() === claim.expiresAt &&
+    asOf <= new Date(live.now).toISOString().slice(0, 10));
+  requireAction(rosterRevision === live.roster.revision && claim.rosterDigest === canonicalDigest(live.roster));
+  requireAction(canonicalDigest(claim.sourceDigests) === canonicalDigest(sourceReferences(sources).map(({ id, hash }) => ({ id, hash }))));
+  const assignments = list(live.roster.owners, (value) => {
+    const entry = record(value, ['actionId', 'owner']);
+    return { actionId: slug(entry.actionId), owner: slug(entry.owner) };
+  });
+  const ownerByAction = new Map(assignments.map(({ actionId, owner }) => [actionId, owner]));
+  requireAction(ownerByAction.size === assignments.length);
+  const { citation } = admittedCitations(sources);
+  const actions = list(claim.actions, (value) => actionRow(value, citation), 1);
+  requireAction(new Set(actions.map(({ actionId }) => actionId)).size === actions.length &&
+    actions.every((row) => row.decisionId === decisionId && row.owner === (ownerByAction.get(row.actionId) ?? null) &&
+      row.acknowledgments.every(({ date }) => date <= asOf)) && assignments.every(({ actionId }) => actions.some((row) => row.actionId === actionId)));
+  return {
+    asOf, actions,
+    predecessor: { version: brief.version, reviewDigest, decisionId, revision: decisionRevision,
+      signer: verified.signer.fingerprint, envelopeDigest: institutionalBriefDigest(envelopeBytes), rosterRevision },
+  };
+}
+
+export function prepareInstitutionalActionRegister(
+  input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalActionAcceptance,
+): PreparedInstitutionalDraft {
+  const value = record(input, ['productId', 'rows']);
+  const productId = slug(value.productId);
+  const { citation, used } = admittedCitations(sources);
+  const expected = new Map(accepted.actions.map((row) => [row.actionId, canonicalDigest(row)]));
+  const unique = new Map<string, InstitutionalActionRow>();
+  for (const row of list(value.rows, (value) => actionRow(value, citation), 1)) {
+    requireAction(expected.get(row.actionId) === canonicalDigest(row));
+    unique.set(row.actionId, row);
+  }
+  requireAction(unique.size === expected.size);
+  const body: InstitutionalActionRegisterBody = { asOf: accepted.asOf, rows: [...unique.values()].sort((left, right) => left.actionId.localeCompare(right.actionId)).map((row) => {
+    const dependencyIds = row.dependencies.filter(({ crossProgramme }) => crossProgramme).map(({ id }) => id);
+    return { ...row, overdue: row.dueDate === null ? null : row.dueDate < accepted.asOf,
+      humanHandoff: dependencyIds.length ? { branch: 'J5', dependencyIds } : null };
+  }) };
+  const identity = { ...binding, duty: 'J3-07' as const, echelon: 'L3' as const, kind: 'action-register' as const,
+    productId, sources: used(), predecessor: accepted.predecessor };
+  const bytes = canonicalBytes({ schema: 1, ...identity, body });
+  requireAction(bytes.length <= institutionalBriefMaxBytes);
+  const version = institutionalBriefDigest(bytes);
+  return { path: `${institutionalActionRegisterDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }
