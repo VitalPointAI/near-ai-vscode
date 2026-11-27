@@ -153,17 +153,17 @@ async function confirmStaffSetup(plan: StaffSetupPlan | InstitutionalStaffSetupP
   const confirm = { label: `$(check) ${SET_UP_ACTION}`, detail };
   const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], {
     title: `${plan.roster.teamName}: check the roster`,
-    placeHolder: isAccessibility ? `The member drafts the help-sheet review. ${accessibilityHumanDecisions} Choose "Set up the team" to stage this role.`
-      : isServiceMonitoring ? `The member drafts the office help aggregate. ${monitoringHumanDecisions} Choose "Set up the team" to stage this role.`
-      : isBudget ? `The member drafts the office budget evidence reconciliation. ${budgetHumanDecisions} Choose "Set up the team" to stage this role.`
-      : isInventory ? `The member drafts the office inventory reconciliation. ${inventoryCustodianDecision} Choose "Set up the team" to stage this role.`
-      : isLibraryRemits ? `The member drafts the remit comparison. ${remitLiaisonResponsibility} Choose "Set up the team" to stage this role.`
-      : isPlanningEvidence ? `The member drafts the evidence and assumptions register. ${planningOwnerDecision} Choose "Set up the team" to stage this role.`
-      : isBusinessServices ? `The member drafts the business-service catalogue. ${businessServicesOwnerDecision} Choose "Set up the team" to stage this role.`
-      : isCatalogue ? `The member drafts the catalogue. ${catalogueStewardDecision} Choose "Set up the team" to stage this role.`
-      : isLessons ? 'The member drafts for human review. Choose "Set up the team" to stage the local test role.'
+    placeHolder: isAccessibility ? `The member drafts the help-sheet review. ${accessibilityHumanDecisions} Choose the setup action to stage this role.`
+      : isServiceMonitoring ? `The member drafts the office help aggregate. ${monitoringHumanDecisions} Choose the setup action to stage this role.`
+      : isBudget ? `The member drafts the office budget evidence reconciliation. ${budgetHumanDecisions} Choose the setup action to stage this role.`
+      : isInventory ? `The member drafts the office inventory reconciliation. ${inventoryCustodianDecision} Choose the setup action to stage this role.`
+      : isLibraryRemits ? `The member drafts the remit comparison. ${remitLiaisonResponsibility} Choose the setup action to stage this role.`
+      : isPlanningEvidence ? `The member drafts the evidence and assumptions register. ${planningOwnerDecision} Choose the setup action to stage this role.`
+      : isBusinessServices ? `The member drafts the business-service catalogue. ${businessServicesOwnerDecision} Choose the setup action to stage this role.`
+      : isCatalogue ? `The member drafts the catalogue. ${catalogueStewardDecision} Choose the setup action to stage this role.`
+      : isLessons ? 'The member drafts for human review. Choose the setup action to stage the local test role.'
       : isActionRegister
-      ? 'The member drafts for review. The fictional chair owns the decision. Choose "Set up the team" to stage this role.'
+      ? 'The member drafts for review. The fictional chair owns the decision. Choose the setup action to stage this role.'
       : 'Members draft and recommend; the named person decides. Choose "Set up the team" to write it.',
     ignoreFocusOut: true,
   });

@@ -905,8 +905,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);
     } finally {
-      context.verifyFixtureGate = undefined;
       read.settle(undefined);
+      context.verifyFixtureGate = undefined;
     }
   }
 
