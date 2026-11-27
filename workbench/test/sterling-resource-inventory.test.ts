@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type URI from '@theia/core/lib/common/uri.js';
+import { saveResourceCatalogue } from '../extension/src/browser/sterling-resource-catalogue.ts';
 import { parseInventorySnapshot } from '../extension/src/common/sterling-resource-inventory.ts';
 
 const generatedAt = '2026-11-24T00:00:00Z';
@@ -43,4 +45,43 @@ test('only a catalogue may hold archived entries, and stored image digests are S
   for (const digest of ['A'.repeat(64), 'a'.repeat(63), `${'a'.repeat(63)}g`, '../escape']) {
     assert.equal(parseInventorySnapshot(catalogue([{ ...entry, imageDigest: digest }])), undefined, digest);
   }
+});
+
+const originalCatalogue = catalogue([{ ...entry, externalNote: 'unrelated entry data' }], { publisher: 'external source' });
+const replacedCatalogue = originalCatalogue.replace('Example aircraft', 'Changed aircraft');
+const unchangedMetadata = { etag: 'same-etag', mtime: 123, size: Buffer.byteLength(originalCatalogue), isFile: true, isSymbolicLink: false };
+const textFile = (value: string) => ({ ...unchangedMetadata, value, encoding: 'utf8' });
+
+function catalogueFile(value: string, replaceDuringSave = false) {
+  const writes: unknown[] = [];
+  let resolutions = 0;
+  const files = {
+    resolve: async () => {
+      if (++resolutions === 2 && replaceDuringSave) value = replacedCatalogue;
+      return unchangedMetadata;
+    },
+    read: async () => textFile(value),
+    write: async (_file: URI, output: string, options: unknown) => { writes.push({ output: JSON.parse(output), options }); }
+  } as unknown as Parameters<typeof saveResourceCatalogue>[0];
+  return { files, writes };
+}
+
+for (const when of ['after display', 'during save preparation'] as const) {
+  test(`a catalogue edit refuses an equal-size replacement ${when} with the same ETag`, async () => {
+    assert.equal(Buffer.byteLength(replacedCatalogue), unchangedMetadata.size);
+    const { files, writes } = catalogueFile(when === 'after display' ? replacedCatalogue : originalCatalogue, when === 'during save preparation');
+    await assert.rejects(saveResourceCatalogue(files, {} as URI, textFile(originalCatalogue), async () => true,
+      () => true, { ...entry, name: 'Edited aircraft' }, entry), /catalogue changed/i);
+    assert.deepEqual(writes, []);
+  });
+}
+
+test('a catalogue edit preserves unrecognized fields and passes the original file guard', async () => {
+  const { files, writes } = catalogueFile(originalCatalogue);
+  const updated = { ...entry, name: 'Edited aircraft' };
+  await saveResourceCatalogue(files, {} as URI, textFile(originalCatalogue), async () => true, () => true, updated, entry);
+  assert.deepEqual(writes, [{
+    output: JSON.parse(catalogue([{ ...updated, externalNote: 'unrelated entry data' }], { publisher: 'external source' })),
+    options: { etag: unchangedMetadata.etag, mtime: unchangedMetadata.mtime }
+  }]);
 });
