@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectSyntheticInstitutionalJ5Evidence, selectSyntheticInstitutionalJ9Remits, selectSyntheticInstitutionalJ4Inventory, selectSyntheticInstitutionalJ8Budget, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -25,6 +25,10 @@ import { newTestConversation, testBundleState, testGateRuntime } from './helpers
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const budgetTeam = 'institutional-j8-budget-evidence-v1';
+const budgetDirectory = '.planning/staff/institutional/j8/budget-evidence';
+const readBudget = 'ReadInstitutionalBudgetEvidence';
+const saveBudget = 'SaveInstitutionalBudgetEvidenceDraft';
 const inventoryTeam = 'institutional-j4-inventory-counts-v1';
 const inventoryDirectory = '.planning/staff/institutional/j4/inventory-counts';
 const readInventory = 'ReadInstitutionalInventoryCount';
@@ -201,7 +205,7 @@ async function runFixture(
         results.push(message.content);
         toolResults.set(message.tool_call_id, message.content);
       }
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison|Draft a fictional J4-02 office inventory reconciliation/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue|Draft a fictional J5-03 office migration evidence register|Draft a fictional J9-CL02 public-library remit comparison|Draft a fictional J4-02 office inventory reconciliation|Draft a fictional J8-02 office budget evidence reconciliation/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -209,14 +213,14 @@ async function runFixture(
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
-        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam || team.slug === inventoryTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
+        if (team.slug === catalogueTeam || team.slug === businessServicesTeam || team.slug === planningTeam || team.slug === remitTeam || team.slug === inventoryTeam || team.slug === budgetTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === inventoryTeam ? 'inventory-count-drafter' : team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === budgetTeam ? 'budget-evidence-drafter' : team.slug === inventoryTeam ? 'inventory-count-drafter' : team.slug === remitTeam ? 'library-remit-drafter' : team.slug === planningTeam ? 'planning-evidence-drafter' : team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -1644,6 +1648,163 @@ test('registered G4 reconciles only comparable fictional counts and holds a with
     assert.equal(held.toolResults.get('withdrawn-inventory-write'), unavailable);
     assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
     assert.deepEqual(await readdir(directory), [name]);
+  } finally { setCasProbe(undefined); }
+  currentReceipt = receipt;
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });
+});
+
+
+test('registered G8 reconciles the fictional reporting basis and refuses withdrawn source evidence', async () => {
+  const subject = await newFixture();
+  const root = subject.fixture.root;
+  const label = 'Institutional G8 Budget Evidence';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: budgetTeam, keySegment: 'j8BudgetEvidence',
+    checkPrompts(requests) {
+      assert.match(requests[0].items.find((item) => item.label === label)?.detail ?? '', /fictional finance reporting officer/i);
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(check) Set up the team')?.detail ?? '', /office budget evidence reconciliation draft skill/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional finance reporting officer')?.detail ?? '', /validates/i);
+      assert.match(confirmation.items.find((item) => item.label === '$(person) Fictional comptroller')?.detail ?? '', /release/i);
+    },
+  });
+  const directory = path.join(root, budgetDirectory);
+  await mkdir(directory, { recursive: true });
+  const project = String(staged.rootDigest);
+  const sources = ['budget-reporting-officer', 'budget-comptroller', 'budget-status-attestation', 'budget-control-attestation'].map((id): InstitutionalBriefSource => {
+    const text = `Synthetic source text for ${id} that is outside the metadata view.`;
+    return { id, revision: 'r1', date: '2026-11-30', label: 'org/Public', project, text, spans: [{ start: 0, end: text.length }] };
+  });
+  const reference = (index: number, role: string) => ({ sourceId: sources[index].id, revision: sources[index].revision, role });
+  const ids = ['item-8b000001', 'item-8b000002', 'item-8b000003', 'item-8b000004'];
+  const hiddenId = 'item-8b000005';
+  const categories = ['authorized-balance', 'commitment', 'actual', 'accrual'];
+  const period = '2026-11';
+  const asOf = '2026-11-30';
+  const unit = 'fictional-budget-points';
+  const statusEvidence = reference(2, 'fictional-budget-status-attestor');
+  const controlEvidence = reference(3, 'fictional-budget-control-attestor');
+  const rows = ids.map((id, index) => ({
+    id, category: categories[index],
+    status: { category: categories[index], quantity: 37, period, unit, confirmation: 'verified', evidence: statusEvidence },
+    control: { category: categories[index], quantity: [40, 8675309, 6543211, null][index],
+      period: index === 2 ? '2026-10' : period, unit: index === 1 ? 'other-fixture-points' : unit,
+      confirmation: 'verified', evidence: controlEvidence },
+  }));
+  const receipt = {
+    project, directory: staged.directoryDigest, requester: 'fictional-budget-reviewer', purpose: 'fictional-office-budget-j8-02',
+    policyRevision: 'budget-r1', productId: 'office-period-budget-evidence', period, asOf,
+    reportingOfficer: reference(0, 'fictional-finance-reporting-officer'), comptroller: reference(1, 'fictional-comptroller'), recordIds: ids,
+  };
+  let currentReceipt = receipt;
+  let activeSources = sources;
+  let currentRows: readonly unknown[] = rows;
+  const withdrawStatus = () => { activeSources = sources.map((entry) => entry.id === statusEvidence.sourceId ? { ...entry, revision: 'r2' } : entry); };
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => activeSources,
+    currentBudget: () => ({ receipt: currentReceipt, rows: [...currentRows, { ...rows[0], id: hiddenId, category: 'hidden' }] }) };
+  const team = await selectSyntheticInstitutionalJ8Budget(fixture);
+  const args = { productId: receipt.productId, recordIds: ids };
+  const valid = await runFixture(fixture, team, { steps: [
+    ...ids.map((id, index) => toolCall(`budget-${index}`, readBudget, { recordId: id })),
+    toolCall('hidden-budget', readBudget, { recordId: hiddenId }),
+    toolCall('missing-budget', readBudget, { recordId: 'item-8b000006' }),
+    toolCall('refuse-budget-action', saveBudget, { ...args, post: true, release: true }),
+    toolCall('save-budget', saveBudget, args),
+  ] });
+  assert.deepEqual(valid.offers[0], [readBudget, saveBudget].sort());
+  const unavailable = valid.toolResults.get('hidden-budget');
+  assert.ok(unavailable);
+  assert.match(unavailable, /unavailable/i);
+  assert.equal(valid.toolResults.get('missing-budget'), unavailable);
+  assert.equal(valid.toolResults.get('refuse-budget-action'), unavailable);
+  const [name] = await readdir(directory);
+  assert.ok(name);
+  const bytes = await readFile(path.join(directory, name));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(name, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'J8-02');
+  assert.equal(draft.period, period);
+  assert.equal(draft.asOf, asOf);
+  assert.equal(draft.reportingOfficer.role, 'fictional-finance-reporting-officer');
+  assert.equal(draft.comptroller.role, 'fictional-comptroller');
+  assert.notEqual(draft.reportingOfficer.sourceId, draft.comptroller.sourceId);
+  assert.equal(draft.validation, 'pending');
+  assert.equal(draft.release, 'pending');
+  const [known, wrongUnit, wrongPeriod, missingBasis] = draft.body.records;
+  assert.deepEqual(draft.body.records, ids.map((_id, index) => JSON.parse(valid.toolResults.get(`budget-${index}`)!)));
+  assert.deepEqual(draft.body.records.map((row: { category: string }) => row.category), categories);
+  assert.deepEqual(known.comparison, { state: 'comparable', difference: -3, unit, period });
+  assert.equal(known.status.evidence.sourceId, statusEvidence.sourceId);
+  assert.equal(known.control.evidence.sourceId, controlEvidence.sourceId);
+  for (const [row, reason] of [[wrongUnit, 'unit-incompatible'], [wrongPeriod, 'period-incompatible'],
+    [missingBasis, 'comparable-basis-missing']] as const) {
+    assert.deepEqual(row.comparison, { state: 'unresolved', reason });
+  }
+  for (const row of [wrongUnit, wrongPeriod]) {
+    assert.deepEqual(Object.keys(row).sort(), ['category', 'comparison', 'id']);
+  }
+  assert.equal(missingBasis.control.quantity, null);
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+  const exposed = JSON.stringify([valid.catalogueOffers[0], valid.results, draft, review]);
+  for (const hidden of [hiddenId, 'other-fixture-points', '2026-10', '8675309', '6543211', sources[2].text]) {
+    assert.ok(!exposed.includes(hidden), `unexpected budget data ${hidden}`);
+  }
+  assert.deepEqual(valid.decisions.find((entry) => entry.api.request.uid === 'save-budget')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${budgetDirectory}/${name}`] });
+
+  const comparableControl = rows[0].control;
+  for (const [control, reason] of [
+    [{ ...comparableControl, evidence: { ...statusEvidence, role: controlEvidence.role } }, 'duplicate-evidence'],
+    [{ ...comparableControl, confirmation: 'disputed' }, 'disputed-evidence'],
+    [{ ...comparableControl, confirmation: 'unconfirmed', evidence: null }, 'confirmation-missing'],
+  ] as const) {
+    currentRows = [{ ...rows[0], control }, ...rows.slice(1)];
+    const steps = [toolCall('unresolved-budget', readBudget, { recordId: ids[0] })];
+    if (reason === 'disputed-evidence') {
+      steps.push(toolCall('save-disputed-budget', saveBudget, { productId: args.productId, recordIds: [ids[0]] }));
+    }
+    const unresolved = await runFixture(fixture, team, { steps });
+    const actual = JSON.parse(unresolved.toolResults.get('unresolved-budget')!);
+    assert.deepEqual(actual, {
+      id: ids[0], category: categories[0], comparison: { state: 'unresolved', reason },
+      statusEvidence: { ...statusEvidence, hash: institutionalSourceHash(sources[2]) },
+      controlEvidence: control.evidence && { ...control.evidence,
+        hash: institutionalSourceHash(sources[reason === 'duplicate-evidence' ? 2 : 3]) },
+    });
+    if (reason === 'disputed-evidence') {
+      const dispute = JSON.parse(unresolved.toolResults.get('save-disputed-budget')!);
+      const packet = JSON.parse((await readFile(path.join(directory, `${dispute.review.version}.json`))).toString());
+      assert.deepEqual(packet.body.records, [actual]);
+      assert.ok(dispute.review.sources.some(({ id }: { id: string }) => id === controlEvidence.sourceId));
+      assert.deepEqual(await readInstitutionalDraftReview(scope, resolveInWorkspace, dispute.review.version), dispute.review);
+    }
+  }
+  currentRows = rows;
+  const priorDrafts = (await readdir(directory)).sort();
+  assert.equal(priorDrafts.length, 2);
+
+  const heldRead = await runFixture(fixture, team, {
+    steps: [toolCall('withdrawn-budget-read', readBudget, { recordId: ids[0] })],
+    onChildTurn(turn) { if (turn === 0) withdrawStatus(); },
+  });
+  assert.equal(heldRead.toolResults.get('withdrawn-budget-read'), unavailable);
+  assert.ok(!heldRead.results.some((entry) => entry.includes('"quantity":37') || entry.includes(statusEvidence.sourceId)));
+
+  activeSources = sources;
+  currentReceipt = { ...receipt, policyRevision: 'budget-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; withdrawStatus(); } });
+  try {
+    const held = await runFixture(fixture, team, { steps: [toolCall('withdrawn-budget-write', saveBudget, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'withdrawn-budget-write' && entry.action_id === 1));
+    assert.equal(held.toolResults.get('withdrawn-budget-write'), unavailable);
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual((await readdir(directory)).sort(), priorDrafts);
   } finally { setCasProbe(undefined); }
   currentReceipt = receipt;
   await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), { message: 'This catalogue metadata is unavailable.' });

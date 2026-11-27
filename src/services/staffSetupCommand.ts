@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { TeamLibrary } from '../agent/teams';
 import {
-  INSTITUTIONAL_COMMAND_GROUP_PROFILE, INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J4_INVENTORY_TEAM, INSTITUTIONAL_J5_EVIDENCE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J9_REMIT_TEAM,
+  INSTITUTIONAL_COMMAND_GROUP_PROFILE, INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J4_INVENTORY_TEAM, INSTITUTIONAL_J5_EVIDENCE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J8_BUDGET_TEAM, INSTITUTIONAL_J9_REMIT_TEAM,
   institutionalRole, isInstitutionalRole, type InstitutionalRoleId,
 } from '../agent/staff/institutionalCommand';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
@@ -35,7 +35,9 @@ const remitLiaisonResponsibility = 'The fictional liaison lead verifies each org
 
 const inventoryCustodianDecision = 'The fictional property custodian decides how to resolve count differences and custody questions.';
 
-const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J5_EVIDENCE_TEAM, INSTITUTIONAL_J9_REMIT_TEAM, INSTITUTIONAL_J4_INVENTORY_TEAM] as const).map((value) => ({
+const budgetHumanDecisions = 'The fictional finance reporting officer validates the draft. The fictional comptroller decides on release.';
+
+const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J5_EVIDENCE_TEAM, INSTITUTIONAL_J9_REMIT_TEAM, INSTITUTIONAL_J4_INVENTORY_TEAM, INSTITUTIONAL_J8_BUDGET_TEAM] as const).map((value) => ({
   value,
   label: institutionalRole(value).label,
   detail: value === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM
@@ -46,6 +48,7 @@ const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J
     : value === INSTITUTIONAL_J5_EVIDENCE_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional evidence and assumptions register for a local test fixture. ${planningOwnerDecision}`
     : value === INSTITUTIONAL_J9_REMIT_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional library remit comparison for a local test fixture. ${remitLiaisonResponsibility}`
     : value === INSTITUTIONAL_J4_INVENTORY_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office inventory reconciliation for a local test fixture. ${inventoryCustodianDecision}`
+    : value === INSTITUTIONAL_J8_BUDGET_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office budget evidence reconciliation for a local test fixture. ${budgetHumanDecisions}`
     : `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Local draft setup for a test fixture.`,
 }));
 
@@ -74,7 +77,9 @@ export function rosterItems(plan: StaffSetupPlan | InstitutionalStaffSetupPlan):
     const isPlanningEvidence = plan.institutional.binding.team === INSTITUTIONAL_J5_EVIDENCE_TEAM;
     const isLibraryRemits = plan.institutional.binding.team === INSTITUTIONAL_J9_REMIT_TEAM;
     const isInventory = plan.institutional.binding.team === INSTITUTIONAL_J4_INVENTORY_TEAM;
-    const humanDetail = isInventory ? inventoryCustodianDecision
+    const isBudget = plan.institutional.binding.team === INSTITUTIONAL_J8_BUDGET_TEAM;
+    const humanDetail = isBudget ? 'Validates the budget evidence draft.'
+      : isInventory ? inventoryCustodianDecision
       : isLibraryRemits ? remitLiaisonResponsibility
       : isPlanningEvidence ? `Reviews evidence, estimates and open items. ${planningOwnerDecision}`
       : isBusinessServices ? `Reviews the business-service catalogue draft. ${businessServicesOwnerDecision}`
@@ -84,8 +89,9 @@ export function rosterItems(plan: StaffSetupPlan | InstitutionalStaffSetupPlan):
       ? 'Reviews the action register draft. The fictional chair owns the decision, and the assigned person acknowledges any action.'
       : 'Reviews the draft and decides through the authorized process.';
     return [
-      { label: isActionRegister || isLessons || isCatalogue || isBusinessServices || isPlanningEvidence || isLibraryRemits || isInventory ? 'Human review' : 'A person decides', kind: vscode.QuickPickItemKind.Separator },
+      { label: isActionRegister || isLessons || isCatalogue || isBusinessServices || isPlanningEvidence || isLibraryRemits || isInventory || isBudget ? 'Human review' : 'A person decides', kind: vscode.QuickPickItemKind.Separator },
       { label: `$(person) ${roster.humanLead}`, description: 'human lead', detail: humanDetail },
+      ...(isBudget ? [{ label: '$(person) Fictional comptroller', description: 'independent human reviewer', detail: 'Decides on release through separate human review.' }] : []),
       { label: 'Agent drafts', kind: vscode.QuickPickItemKind.Separator },
       ...roster.members.map((member) => ({ label: `$(hubot) ${member.name}`, description: member.role, detail: 'Requires an approved local test fixture.' })),
     ];
@@ -125,14 +131,16 @@ async function confirmStaffSetup(plan: StaffSetupPlan | InstitutionalStaffSetupP
   const isPlanningEvidence = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J5_EVIDENCE_TEAM;
   const isLibraryRemits = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J9_REMIT_TEAM;
   const isInventory = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J4_INVENTORY_TEAM;
-  const skill = isInventory ? 'office inventory reconciliation draft' : isLibraryRemits ? 'library service remit comparison draft' : isPlanningEvidence ? 'evidence and assumptions register draft' : isBusinessServices ? 'business-service catalogue draft' : isCatalogue ? 'office records catalogue draft' : isLessons ? 'office-hours observation draft' : isActionRegister ? 'office-hours action register draft' : 'decision brief';
+  const isBudget = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J8_BUDGET_TEAM;
+  const skill = isBudget ? 'office budget evidence reconciliation draft' : isInventory ? 'office inventory reconciliation draft' : isLibraryRemits ? 'library service remit comparison draft' : isPlanningEvidence ? 'evidence and assumptions register draft' : isBusinessServices ? 'business-service catalogue draft' : isCatalogue ? 'office records catalogue draft' : isLessons ? 'office-hours observation draft' : isActionRegister ? 'office-hours action register draft' : 'decision brief';
   const detail = 'institutional' in plan
     ? `Stages the ${INSTITUTIONAL_COMMAND_GROUP_PROFILE} definition and ${skill} skill in this editor profile.`
     : `Writes ${plan.roster.fileName}.md to your teams, PROFILE.md and the skills under .planning/staff/, the staff settings in project.json and the section's guidance in AGENTS.md.`;
   const confirm = { label: `$(check) ${SET_UP_ACTION}`, detail };
   const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], {
     title: `${plan.roster.teamName}: check the roster`,
-    placeHolder: isInventory ? `The member drafts the office inventory reconciliation. ${inventoryCustodianDecision} Choose "Set up the team" to stage this role.`
+    placeHolder: isBudget ? `The member drafts the office budget evidence reconciliation. ${budgetHumanDecisions} Choose "Set up the team" to stage this role.`
+      : isInventory ? `The member drafts the office inventory reconciliation. ${inventoryCustodianDecision} Choose "Set up the team" to stage this role.`
       : isLibraryRemits ? `The member drafts the remit comparison. ${remitLiaisonResponsibility} Choose "Set up the team" to stage this role.`
       : isPlanningEvidence ? `The member drafts the evidence and assumptions register. ${planningOwnerDecision} Choose "Set up the team" to stage this role.`
       : isBusinessServices ? `The member drafts the business-service catalogue. ${businessServicesOwnerDecision} Choose "Set up the team" to stage this role.`
@@ -161,6 +169,7 @@ async function stageInstitutionalStaffSetup(root: string, team: InstitutionalRol
       : team === INSTITUTIONAL_J5_EVIDENCE_TEAM ? 'The evidence and assumptions register draft requires the approved local test fixture before the member can run.'
       : team === INSTITUTIONAL_J9_REMIT_TEAM ? 'The library service remit comparison draft requires the approved local test fixture before the member can run.'
       : team === INSTITUTIONAL_J4_INVENTORY_TEAM ? 'The office inventory reconciliation draft requires the approved local test fixture before the member can run.'
+      : team === INSTITUTIONAL_J8_BUDGET_TEAM ? 'The office budget evidence reconciliation draft requires the approved local test fixture before the member can run.'
       : 'The draft member requires the approved local test fixture before it can run.';
     void vscode.window.showInformationMessage(`${status} ${readiness}`);
   } catch (error) {

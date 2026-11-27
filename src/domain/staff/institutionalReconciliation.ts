@@ -148,3 +148,173 @@ export function prepareInstitutionalInventory(
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalInventoryDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }
+
+export const institutionalBudgetDirectory = '.planning/staff/institutional/j8/budget-evidence';
+const budgetPurpose = 'fictional-office-budget-j8-02';
+const budgetUnit = 'fictional-budget-points';
+const budgetCategories = ['authorized-balance', 'commitment', 'actual', 'accrual'] as const;
+type BudgetCategory = typeof budgetCategories[number];
+
+interface BudgetAttestation {
+  readonly category: BudgetCategory;
+  readonly quantity: number | null;
+  readonly period: string | null;
+  readonly unit: typeof budgetUnit | 'other-fixture-points' | null;
+  readonly confirmation: 'verified' | 'disputed' | 'unconfirmed';
+  readonly evidence: InstitutionalCatalogueSource | null;
+}
+
+type BudgetComparison =
+  | { readonly state: 'comparable'; readonly difference: number; readonly unit: typeof budgetUnit; readonly period: string }
+  | { readonly state: 'unresolved'; readonly reason: 'category-incompatible' | 'unit-incompatible' | 'period-incompatible' |
+      'comparable-basis-missing' | 'duplicate-evidence' | 'disputed-evidence' | 'confirmation-missing' };
+
+interface BudgetReconciliationRow {
+  readonly id: string;
+  readonly category: BudgetCategory;
+  readonly comparison: BudgetComparison;
+  readonly status?: Omit<BudgetAttestation, 'unit'> & { readonly unit: typeof budgetUnit | null };
+  readonly control?: Omit<BudgetAttestation, 'unit'> & { readonly unit: typeof budgetUnit | null };
+  readonly statusEvidence?: InstitutionalCatalogueSource | null;
+  readonly controlEvidence?: InstitutionalCatalogueSource | null;
+}
+
+interface InstitutionalBudgetReceipt {
+  readonly requester: 'fictional-budget-reviewer';
+  readonly purpose: typeof budgetPurpose;
+  readonly productId: string;
+  readonly policyRevision: string;
+  readonly period: string;
+  readonly asOf: string;
+  readonly unit: typeof budgetUnit;
+  readonly reportingOfficer: InstitutionalCatalogueSource;
+  readonly comptroller: InstitutionalCatalogueSource;
+}
+
+export interface InstitutionalBudgetEvidence extends InstitutionalBudgetReceipt {
+  readonly evidenceDigest: string;
+  readonly records: readonly BudgetReconciliationRow[];
+}
+
+export interface InstitutionalBudgetReview extends Omit<InstitutionalBriefReview, 'duty' | 'kind'> {
+  readonly duty: 'J8-02';
+  readonly kind: 'budget-evidence';
+  readonly policyRevision: string;
+  readonly scopeDigest: string;
+  readonly period: string;
+  readonly asOf: string;
+  readonly reportingOfficer: InstitutionalCatalogueSource;
+  readonly comptroller: InstitutionalCatalogueSource;
+  readonly validation: 'pending';
+  readonly release: 'pending';
+}
+
+function budgetPeriod(input: unknown): string {
+  requireCatalogue(typeof input === 'string' && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(input));
+  return input;
+}
+
+function budgetCategory(input: unknown): BudgetCategory {
+  const category = budgetCategories.find((approved) => approved === input);
+  requireCatalogue(category);
+  return category;
+}
+
+function budgetAttestation(
+  input: unknown, role: 'fictional-budget-status-attestor' | 'fictional-budget-control-attestor',
+  asOf: string, sources: readonly InstitutionalBriefSource[],
+): BudgetAttestation {
+  const entry = record(input, ['category', 'quantity', 'period', 'unit', 'confirmation', 'evidence']);
+  const { quantity, unit, confirmation } = entry;
+  requireCatalogue((quantity === null || (typeof quantity === 'number' && Number.isSafeInteger(quantity) && quantity >= 0)) &&
+    (unit === null || unit === budgetUnit || unit === 'other-fixture-points') &&
+    (confirmation === 'verified' || confirmation === 'disputed' || confirmation === 'unconfirmed'));
+  const evidence = entry.evidence === null ? null : metadataSource(sources, entry.evidence, role);
+  requireCatalogue(!evidence || sources.some(({ id, date }) => id === evidence.sourceId && date <= asOf));
+  return { category: budgetCategory(entry.category), quantity, unit, period: entry.period === null ? null : budgetPeriod(entry.period), confirmation, evidence };
+}
+
+function compareBudget(status: BudgetAttestation, control: BudgetAttestation, category: BudgetCategory, period: string): BudgetComparison {
+  if (status.category !== category || control.category !== category) return { state: 'unresolved', reason: 'category-incompatible' };
+  if ([status, control].some((entry) => entry.unit !== null && entry.unit !== budgetUnit)) return { state: 'unresolved', reason: 'unit-incompatible' };
+  if ([status, control].some((entry) => entry.period !== null && entry.period !== period)) return { state: 'unresolved', reason: 'period-incompatible' };
+  if (status.evidence && status.evidence.sourceId === control.evidence?.sourceId) return { state: 'unresolved', reason: 'duplicate-evidence' };
+  if (status.confirmation === 'disputed' || control.confirmation === 'disputed') return { state: 'unresolved', reason: 'disputed-evidence' };
+  if (!status.evidence || !control.evidence || status.confirmation !== 'verified' || control.confirmation !== 'verified') {
+    return { state: 'unresolved', reason: 'confirmation-missing' };
+  }
+  if (status.quantity === null || control.quantity === null || status.unit === null || control.unit === null ||
+      status.period === null || control.period === null) return { state: 'unresolved', reason: 'comparable-basis-missing' };
+  return { state: 'comparable', difference: status.quantity - control.quantity, unit: budgetUnit, period };
+}
+
+function visibleBudgetAttestation(entry: BudgetAttestation): NonNullable<BudgetReconciliationRow['status']> {
+  const unit = entry.unit === budgetUnit ? budgetUnit : null;
+  return { ...entry, unit, quantity: unit && entry.period ? entry.quantity : null };
+}
+
+export function admittedInstitutionalBudget(
+  raw: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[],
+): InstitutionalBudgetEvidence {
+  const { receipt, rows } = record(raw, ['receipt', 'rows']);
+  const authorization = record(receipt, ['project', 'directory', 'requester', 'purpose', 'policyRevision', 'productId', 'period',
+    'asOf', 'reportingOfficer', 'comptroller', 'recordIds']);
+  const { requester, purpose, policyRevision, productId } = authorization;
+  requireCatalogue(authorization.project === binding.project && authorization.directory === binding.directory &&
+    requester === 'fictional-budget-reviewer' && purpose === budgetPurpose &&
+    typeof policyRevision === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(policyRevision) &&
+    typeof productId === 'string' && STAFF_SLUG.test(productId));
+  const period = budgetPeriod(authorization.period);
+  const asOf = metadataDate(authorization.asOf);
+  requireCatalogue(asOf.slice(0, 7) === period);
+  const reportingOfficer = metadataSource(sources, authorization.reportingOfficer, 'fictional-finance-reporting-officer');
+  const comptroller = metadataSource(sources, authorization.comptroller, 'fictional-comptroller');
+  requireCatalogue(reportingOfficer.sourceId !== comptroller.sourceId);
+  const humanSources = new Set([reportingOfficer.sourceId, comptroller.sourceId]);
+  const recordIds = list(authorization.recordIds, catalogueId);
+  const eligible = new Set(recordIds);
+  requireCatalogue(eligible.size === recordIds.length);
+  const records: BudgetReconciliationRow[] = [];
+  const proofs = new Map<string, readonly (InstitutionalCatalogueSource | null)[]>();
+  for (const candidate of list(rows, (entry) => entry)) {
+    requireCatalogue(candidate && typeof candidate === 'object' && !Array.isArray(candidate));
+    const { id } = candidate as { id?: unknown };
+    if (typeof id !== 'string' || !eligible.has(id)) continue;
+    const row = record(candidate, ['id', 'category', 'status', 'control']);
+    const category = budgetCategory(row.category);
+    const status = budgetAttestation(row.status, 'fictional-budget-status-attestor', asOf, sources);
+    const control = budgetAttestation(row.control, 'fictional-budget-control-attestor', asOf, sources);
+    requireCatalogue([status, control].every(({ evidence }) => !evidence || !humanSources.has(evidence.sourceId)));
+    proofs.set(id, [status.evidence, control.evidence]);
+    const comparison = compareBudget(status, control, category, period);
+    if (comparison.state === 'comparable' || comparison.reason === 'comparable-basis-missing') {
+      records.push({ id, category, comparison, status: visibleBudgetAttestation(status), control: visibleBudgetAttestation(control) });
+    } else if (comparison.reason === 'duplicate-evidence' || comparison.reason === 'disputed-evidence' ||
+        comparison.reason === 'confirmation-missing') {
+      records.push({ id, category, comparison, statusEvidence: status.evidence, controlEvidence: control.evidence });
+    } else {
+      records.push({ id, category, comparison });
+    }
+  }
+  requireCatalogue(proofs.size === records.length && new Set(records.map(({ category }) => category)).size === records.length);
+  return { requester, purpose, productId, policyRevision, period, asOf, unit: budgetUnit, reportingOfficer, comptroller,
+    evidenceDigest: canonicalDigest([...proofs.entries()].sort(([a], [b]) => a.localeCompare(b))),
+    records: records.sort((a, b) => a.id.localeCompare(b.id)) };
+}
+
+export function prepareInstitutionalBudget(
+  input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalBudgetEvidence,
+): PreparedInstitutionalDraft {
+  const records = requestedCatalogueRows(input, accepted);
+  const evidenceIds = new Set([accepted.reportingOfficer.sourceId, accepted.comptroller.sourceId,
+    ...records.flatMap(({ status, control, statusEvidence, controlEvidence }) =>
+      [status?.evidence?.sourceId, control?.evidence?.sourceId, statusEvidence?.sourceId, controlEvidence?.sourceId])]);
+  const identity = { ...binding, duty: 'J8-02' as const, echelon: 'L3' as const, kind: 'budget-evidence' as const,
+    productId: accepted.productId, policyRevision: accepted.policyRevision, scopeDigest: canonicalDigest(accepted),
+    period: accepted.period, asOf: accepted.asOf, reportingOfficer: accepted.reportingOfficer, comptroller: accepted.comptroller,
+    validation: 'pending' as const, release: 'pending' as const, sources: sourceReferences(sources.filter(({ id }) => evidenceIds.has(id))) };
+  const bytes = canonicalBytes({ schema: 1, ...identity, body: { records } });
+  requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
+  const version = institutionalBriefDigest(bytes);
+  return { path: `${institutionalBudgetDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
+}
