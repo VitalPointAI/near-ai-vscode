@@ -37,6 +37,8 @@
   const NO_SAVED_TEAMS = 'You have no saved teams yet. Save a team as one of your teams in Team Studio to reuse it in any project.';
   let savedDraft = null;
   let work = null; // the team being built or edited
+  let staffPreview;
+  let staffPreviewRequest = 0;
   let seq = 0;
   let reviewTimer = null;
   // Improve with AI (0.4.27): its own sequence numbers, so a reply to an older request is dropped.
@@ -560,6 +562,7 @@
       announce('Choose one staff section in the editor’s setup questions.');
       vscode.postMessage({ type: 'staff-setup' });
     }, { id: 'staff-setup' }));
+    actions.append(button('Preview staff setup', openStaffPreview, { id: 'staff-preview-open' }));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
@@ -2302,6 +2305,74 @@
     return null;
   }
 
+  function openStaffPreview() {
+    const request = ++staffPreviewRequest;
+    staffPreview = { request, scope: 'section' };
+    pendingFocus = 'staff-preview-title';
+    vscode.postMessage({ type: 'staff-preview-open', request });
+    render();
+  }
+
+  function leaveStaffPreview() {
+    if (!staffPreview) return;
+    vscode.postMessage({ type: 'staff-preview-leave', request: staffPreview.request });
+    staffPreview = undefined;
+    pendingFocus = 'staff-preview-open';
+    render();
+  }
+
+  function renderStaffPreview(root) {
+    const panel = el('section', 'panel staff-preview');
+    const title = el('h2', '', 'Staff setup preview');
+    title.id = 'staff-preview-title';
+    title.setAttribute('tabindex', '-1');
+    panel.setAttribute('aria-labelledby', title.id);
+    panel.append(title);
+    const { data, scope } = staffPreview;
+    if (data?.error) {
+      panel.append(el('p', '', data.error));
+    } else if (!data) {
+      panel.append(el('p', 'hint', 'Waiting for a project…'));
+    } else {
+      panel.append(el('h3', '', data.project));
+      if (data.profile) panel.append(el('p', '', data.profile + ' · ' + data.level));
+      else panel.append(el('p', '', 'No staff profile is saved for this project.'));
+      panel.append(el('p', 'hint', data.modelLocation));
+      const scopes = el('div', 'actions staff-preview-scopes');
+      scopes.setAttribute('role', 'group');
+      scopes.setAttribute('aria-label', 'Staff setup scope');
+      for (const [value, label] of [['section', 'One section'], ['complete', 'Complete staff']]) {
+        const control = button(label, () => {
+          staffPreview.scope = value;
+          pendingFocus = 'staff-preview-title';
+          render();
+        });
+        control.setAttribute('aria-pressed', String(scope === value));
+        scopes.append(control);
+      }
+      panel.append(scopes);
+      const rows = el('ul', 'choice-grid staff-preview-rows');
+      for (const row of data.rows) {
+        if (scope === 'section' && !row.template) continue;
+        const card = el('li', '', '');
+        card.append(el('h4', '', row.label), el('p', '', row.status));
+        if (row.team) card.append(el('p', '', row.team));
+        if (row.decisionRole) card.append(el('p', 'hint', row.decisionRole));
+        rows.append(card);
+      }
+      if (scope === 'complete') panel.append(el('p', 'hint', 'Review the coverage for this project. Whole-staff setup is unavailable.'));
+      panel.append(rows);
+    }
+    panel.append(button('Leave setup', leaveStaffPreview, { id: 'staff-preview-leave' }));
+    root.append(panel);
+  }
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !staffPreview) return;
+    event.preventDefault();
+    leaveStaffPreview();
+  });
+
   function render() {
     const active = document.activeElement && document.activeElement.id;
     slots.length = 0;
@@ -2309,7 +2380,8 @@
     const main = $('main');
     main.replaceChildren();
     if (!ctx) { main.append(el('p', 'hint', 'Loading…')); return; }
-    if (!work) renderLibrary(main);
+    if (staffPreview) renderStaffPreview(main);
+    else if (!work) renderLibrary(main);
     else if (work.mode === 'wizard') renderWizard(main);
     else renderEditor(main);
     fillReview();
@@ -2339,6 +2411,12 @@
     // Only under the extension-host tests, which load the layout probe: report this page's layout.
     if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (message.type) {
+      case 'staff-preview-state':
+        if (staffPreview?.request !== message.request) break;
+        staffPreview.data = message;
+        announce(message.error || 'Staff setup preview ready.');
+        render();
+        break;
       case 'state':
         ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null; picker = message.picker || null; dash = message.dashboard || null;
         applyView(message.view);

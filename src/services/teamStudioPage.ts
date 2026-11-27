@@ -769,7 +769,7 @@ export interface TeamStudioDeps {
   openSetting(key: string): Promise<unknown>;
   /** Runs Update Team on a team file (preview, choices, and confirmation happen there). */
   updateTeam?(file: string): Promise<unknown>;
-  /** SovAI: Set Up a Staff Team (staffSetupCommand.ts): asks its questions in VS Code, writes the team, and the studio lists it after. */
+  readonly staffSetupPreview?: ReturnType<typeof import('./teamStudioStaffSetup').createStaffSetupPreview>;
   setUpStaffTeam?(): Promise<unknown>;
   /** Opens the Staff Room for this project's staff run. */
   openStaffRoom?(): Promise<unknown>;
@@ -1313,10 +1313,10 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     if (!pageReady) { pendingWizard = target; return; }
     post({ type: 'start-wizard', target: target === 'project' && !deps.root() ? 'user' : target });
   };
-
   const handle = async (message: StudioMessage) => {
     switch (message.type) {
       case 'ready': {
+        deps.staffSetupPreview?.reset();
         await refresh();
         pageReady = true;
         markReady();
@@ -2112,12 +2112,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // Emergency stop cancels an AI review in progress, as it cancels the role tests.
     ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
-    ...(deps.onDidChangeFolder ? [deps.onDidChangeFolder(() => { void refresh(); })] : []),
+    ...(deps.onDidChangeFolder ? [deps.onDidChangeFolder(() => { deps.staffSetupPreview?.invalidate(); void refresh(); })] : []),
     ...(deps.onDidChangeRuns ? [deps.onDidChangeRuns(() => { forgetHistory(); if (pageReady) { dashboardSoon(); liveSoon(); } })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
-      if (!message) return;
-      try { await handle(message); } catch (error) { post({ type: 'error', text: (error as Error).message }); }
+      try { if (message) await handle(message); else await deps.staffSetupPreview?.receive(value); } catch (error) { post({ type: 'error', text: (error as Error).message }); }
     })
   ];
   /** The panel closed: unsaved work is kept (the builder as its draft, an open team's changes as kept changes). */
@@ -2135,6 +2134,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     if (timer) clearTimeout(timer);
     if (dashboardTimer) clearTimeout(dashboardTimer);
     cancelRefine();
+    deps.staffSetupPreview?.dispose();
     for (const subscription of subscriptions) subscription.dispose();
     void keepUnsaved().catch(() => undefined);
   };
