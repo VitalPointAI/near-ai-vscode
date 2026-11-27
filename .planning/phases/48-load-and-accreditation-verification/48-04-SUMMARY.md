@@ -102,6 +102,29 @@ This verifies the locked dependencies. Task 3B still needs a digest-identified
 image built from the exact Workbench context and proof that the service and
 browser share an isolated loopback namespace.
 
+## Task 3B local fixture readiness
+
+The revised plan at `2503f3faf` pins the signed bundled v0.4.41
+linux/amd64 release. The exact published image was already in the local
+Docker store. The isolated archive at
+`.claude/worktrees/codex-phase4804-image-evidence.r5QrF7/workbench.tar`
+has SHA-256 `f662a1c7e8e11dbf653eaaeaf0b9c5867954db5d085dcb755a74f537ab96a599`.
+Its OCI manifest, config and all six layer digests checked. The config
+records source `f755813f7cf1d3f62908a165715e65d304fb16fb`, UID `10001:0`
+and the original Workbench entrypoint. The protected release workflow
+verified the signature and SBOM before publication.
+[Protected build and release](https://github.com/VitalPointAI/near-ai-vscode/actions/runs/45935191405)
+
+A synthetic process in a private rootless Podman user namespace created
+a separate network namespace containing only loopback. The unprivileged
+runner joined that exact namespace and found no default route. The
+probe used an empty private store and did not start an image or
+Chromium. The real fixture still requires recorded authorization for
+the named run and its cleanup, plus the same check using the actual
+Workbench and Chromium process identities before navigation. No ports
+are published, no hosted login is used, and the owner’s Workbench
+instances are outside this test.
+
 ## Self-Check: PASSED
 
 The two measured Task 1 commits and their files are present on the
