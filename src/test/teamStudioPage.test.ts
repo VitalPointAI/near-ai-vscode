@@ -2,7 +2,7 @@ import { stampTeam } from '../agent/teamUpdate';
 import { inspect } from 'node:util';
 import { projectType } from '../agent/projectTypes';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -3916,12 +3916,13 @@ test('page: sort by Most used, Recently run, Rating or Name, filter to Needs att
 test('page: the toolbar: New team opens the builder\'s first screen; Optimise all teams, Import and Refresh ask the host; no project-team button there', async () => {
   const page = await dashboardPage();
   const toolbar = page.doc.body.all().find((node) => node.className === 'toolbar')!;
-  assert.deepEqual(toolbar.all().filter((node) => node.tagName === 'button').map((node) => node.textContent), ['New team', 'Optimise all teams', 'Set up a staff team', 'Preview staff setup', 'Import…', 'Refresh']);
+  assert.deepEqual(toolbar.all().filter((node) => node.tagName === 'button').map((node) => node.textContent), ['New team', 'Optimise all teams', 'Set up staff', 'Import…', 'Refresh']);
   for (const [label, type] of [['Import…', 'import'], ['Refresh', 'refresh']] as const) { page.byLabel(label)!.click(); assert.equal(page.posts.at(-1)!.type, type); }
-  const staffSetup = page.byLabel('Set up a staff team');
+  const staffSetup = page.byLabel('Set up staff');
   assert.ok(staffSetup, 'the staff setup action uses its visible text as its accessible name');
   staffSetup.click();
-  assert.equal(page.posts.at(-1)!.type, 'staff-setup');
+  assert.equal(page.posts.at(-1)!.type, 'staff-preview-open');
+  page.byLabel('Leave setup')!.click();
   page.byLabel('Test every team and set each member model from what the tests found, after asking about the cost')!.click();
   assert.equal(page.posts.at(-1)!.type, 'optimise-all');
   page.byLabel('New team')!.click();
@@ -3931,7 +3932,7 @@ test('page: the toolbar: New team opens the builder\'s first screen; Optimise al
 
 test('page: Staff setup preview shows the chosen project and scope and discards replies after leaving', async () => {
   const page = await dashboardPage();
-  const entry = () => page.byLabel('Preview staff setup')!;
+  const entry = () => page.byLabel('Set up staff')!;
   entry().click();
   const first = page.posts.at(-1)!;
   assert.equal(first.type, 'staff-preview-open');
@@ -3954,6 +3955,11 @@ test('page: Staff setup preview shows the chosen project and scope and discards 
   assert.match(page.text(), /Library project.*NATO\/Canadian.*Tactical/);
   assert.match(page.text(), /Logistics/);
   assert.doesNotMatch(page.text(), /Civil-military cooperation/);
+  page.byLabel('Logistics')!.click();
+  page.byLabel('Continue to section setup')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-continue', request: second.request, session: 'host-session', section: 'j4' });
+  page.dispatch({ type: 'staff-preview-result', request: second.request, session: 'host-session', applied: false });
+  assert.equal(page.doc.activeElement, page.byLabel('Logistics'));
   page.byLabel('Complete staff')!.click();
   assert.match(page.text(), /Library logistics.*Civil-military cooperation.*No team template/);
   assert.equal(page.byLabel('Set up this staff'), undefined);
@@ -4026,6 +4032,43 @@ test('host: Staff setup preview scopes the latest pick and holds a substituted p
   picks[5](first);
   await restored;
   assert.doesNotMatch(JSON.stringify(posted), /First project/);
+});
+
+test('host: Staff setup admits only one current section handoff and invalidates it on a folder change', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'staff-preview-continue-'));
+  const posted: Array<{ request: number; session?: string }> = [];
+  let pending: (() => void) | undefined;
+  const calls: Array<{ section: string; selection: { root: string; isCurrent(): boolean } }> = [];
+  const deps = {
+    folders: () => [{ root, name: 'Selected project' }],
+    pick: async () => undefined,
+    libraryDir: path.join(root, 'library'),
+    post: (message: { request: number; session?: string }) => { posted.push(message); },
+    startSection: async (section: string, selection: { root: string; isCurrent(): boolean }) => {
+      calls.push({ section, selection });
+      await new Promise<void>((resolve) => { pending = resolve; });
+      return false;
+    }
+  };
+  const preview = createStaffSetupPreview(deps);
+  await preview.receive({ type: 'staff-preview-open', request: 1 });
+  const intent = { type: 'staff-preview-continue', request: 1, session: posted[0].session, section: 'j4' };
+  await preview.receive({ ...intent, session: 'stale' });
+  await preview.receive({ ...intent, section: 'j9' });
+  await preview.receive({ ...intent, root });
+  assert.equal(calls.length, 0);
+  const first = preview.receive(intent);
+  await preview.receive(intent);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].section, 'j4');
+  assert.equal(calls[0].selection.root, await realpath(root));
+  assert.equal(calls[0].selection.isCurrent(), true);
+  preview.invalidate();
+  assert.equal(calls[0].selection.isCurrent(), false);
+  pending!();
+  await first;
+  await preview.receive(intent);
+  assert.equal(calls.length, 1);
 });
 
 test('page: the "What should this team be able to produce?" box is not on the main page; it is New team > Create a new team > Describe it, and AI drafts it', async () => {

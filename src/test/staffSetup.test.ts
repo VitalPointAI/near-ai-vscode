@@ -2,15 +2,15 @@ import { persistInstitutionalStaffSetup, planInstitutionalStaffSetup } from './h
 import { createInstitutionalStaffSetupFixture } from './helpers/institutional/institutionalPicker';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, symlink, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, stat, symlink, writeFile } from 'node:fs/promises';
+import { readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, institutionalCommandGroupDefinition, institutionalCommandGroupSkill, institutionalRole, selectedTeamAgents } from './helpers/institutional/institutionalCommand';
 import { staffGuidanceIn, withStaffGuidance } from '../agent/staff/guidance';
-import { J2_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, STAFF_TEMPLATES } from '../agent/staff/templates';
+import { J2_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J4_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, STAFF_TEMPLATES } from '../agent/staff/templates';
 import { builtInStaffServers } from '../agent/staffServers';
 import { applyGuidanceUpdate, applyTeamUpdate, detectTemplate, planStaffGuidanceUpdate, planTeamUpdate } from '../agent/teamUpdate';
 import { parseTeam, TeamLibrary } from '../agent/teams';
@@ -160,7 +160,7 @@ function staffSetupVscode() {
   delete require.cache[commandModule];
   try {
     const command = require(commandModule) as typeof import('../services/staffSetupCommand');
-    return { stub, registerStaffSetup: command.registerStaffSetup, fixture: createInstitutionalStaffSetupFixture(stub.vscode as never, command.SET_UP_ACTION), uninstall };
+    return { stub, setUpStaffTeam: command.setUpStaffTeam, registerStaffSetup: command.registerStaffSetup, fixture: createInstitutionalStaffSetupFixture(stub.vscode as never, command.SET_UP_ACTION), uninstall };
   } catch (error) {
     uninstall();
     throw error;
@@ -185,6 +185,77 @@ function profileState() {
 }
 
 const institutionalStageKey = (project: string) => `nearAi.staff.institutional.commandGroup.v1.${createHash('sha256').update(project).digest('hex')}`;
+
+test('Studio staff setup confirms the selected physical project and holds changes to reviewed files or the shared team', async () => {
+  for (const scenario of ['write', 'edit during questions', 'edit at confirmation', 'replace directory', 'team appeared', 'existing shared team'] as const) {
+    const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'studio-staff-setup-')));
+    const other = path.join(temp, 'other');
+    const root = path.join(temp, 'selected');
+    const projectFile = path.join(root, '.planning', '.near-ai', 'project.json');
+    const agentsFile = path.join(root, 'AGENTS.md');
+    const projectBytes = '{"custom":"preserve"}';
+    const agentBytes = '# Existing project notes\n';
+    await mkdir(other);
+    await mkdir(path.dirname(projectFile), { recursive: true });
+    await writeFile(projectFile, projectBytes);
+    await writeFile(agentsFile, agentBytes);
+    const library = new TeamLibrary(path.join(temp, 'library'));
+    const team = path.join(library.directory, 'j4-us-joint-operational.md');
+    await mkdir(library.directory, { recursive: true });
+    if (scenario === 'existing shared team') await writeFile(team, 'Earlier shared team');
+    const originalDirectory = await stat(root, { bigint: true });
+    const { stub, setUpStaffTeam, uninstall } = staffSetupVscode();
+    try {
+      stub.setWorkspaceFolders([other, root]);
+      const window = (stub.vscode as typeof import('vscode')).window;
+      const quickPick = window.showQuickPick as (items: unknown, options: { title?: string; placeHolder?: string }) => Promise<unknown>;
+      Object.defineProperty(window, 'showQuickPick', { configurable: true, value: async (items: unknown, options: { title?: string; placeHolder?: string }) => {
+        if (scenario === 'edit during questions' && options.placeHolder?.startsWith('Which doctrine profile')) await writeFile(agentsFile, '# Edited while answering\n');
+        if (options.title?.includes('check the roster')) {
+          if (scenario === 'edit at confirmation') await writeFile(agentsFile, '# Edited while confirming\n');
+          if (scenario === 'team appeared') await writeFile(team, 'New shared team');
+          if (scenario === 'replace directory') {
+            await rename(root, path.join(temp, 'original'));
+            await mkdir(path.dirname(projectFile), { recursive: true });
+            await writeFile(projectFile, projectBytes);
+            await writeFile(agentsFile, agentBytes);
+          }
+        }
+        return quickPick(items, options);
+      } });
+      stub.quickPickAnswers.push(profileChoices(J4_STAFF_TEMPLATE).find(({ value }) => value === 'us-joint')!.label,
+        'Operational', 'Campaign', 'Local runtime only', '$(check) Set up the team');
+      const options = { library, section: 'j4' as const, studio: {
+        root, name: 'Selected project', projectJson: projectBytes,
+        isCurrent: () => {
+          try { return statSync(root, { bigint: true }).ino === originalDirectory.ino; } catch { return false; }
+        }
+      } };
+      const result = await setUpStaffTeam(options);
+      assert.deepEqual(await readdir(other), [], scenario);
+      assert.ok(stub.quickPickRequests.every(({ title }) => !title?.includes('which project?')), scenario);
+      const roster = stub.quickPickRequests.find(({ title }) => title?.includes('check the roster'));
+      if (scenario === 'write') {
+        assert.equal(result, team);
+        assert.match(roster?.items[0].detail ?? '', /Selected project/);
+        assert.equal(JSON.parse(await readFile(projectFile, 'utf8')).custom, 'preserve');
+        continue;
+      }
+      assert.equal(result, undefined, scenario);
+      assert.equal(await readFile(projectFile, 'utf8'), projectBytes, scenario);
+      assert.equal(await readFile(agentsFile, 'utf8'), scenario === 'edit during questions' ? '# Edited while answering\n' : scenario === 'edit at confirmation' ? '# Edited while confirming\n' : agentBytes, scenario);
+      assert.deepEqual(await readdir(path.join(root, '.planning')), ['.near-ai'], scenario);
+      assert.deepEqual(await library.archived(), [], scenario);
+      if (scenario === 'team appeared' || scenario === 'existing shared team') {
+        assert.equal(await readFile(team, 'utf8'), scenario === 'team appeared' ? 'New shared team' : 'Earlier shared team');
+      } else {
+        assert.deepEqual(await readdir(library.directory), [], scenario);
+      }
+      assert.ok(stub.notifications.some(({ message }) => /changed|shared/i.test(message)), scenario);
+      if (scenario === 'edit during questions' || scenario === 'existing shared team') assert.equal(roster, undefined, scenario);
+    } finally { uninstall(); }
+  }
+});
 
 test('ordinary Staff Setup only offers shipped templates and refuses an unexpected fixture choice', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'staff-setup-ordinary-')));
@@ -486,12 +557,13 @@ test('concurrent rejected institutional setup writes each require a confirmed re
   assert.deepEqual(profile.writes.slice(roots.length), keys, 'each cached failure requires a newly accepted write');
 });
 
-test('Team Studio accepts the staff setup message and offers the button', () => {
+test('Team Studio keeps the legacy host message and opens its chooser from the button', () => {
   assert.deepEqual(parseStudioMessage({ type: 'staff-setup' }), { type: 'staff-setup' });
   assert.equal(parseStudioMessage({ type: 'staff-setup', extra: 1 }), undefined);
   const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'teams', 'teams.js'), 'utf8');
-  assert.match(page, /'Set up a staff team'/);
-  assert.match(page, /type: 'staff-setup'/);
+  assert.match(page, /button\('Set up staff', openStaffPreview/);
+  assert.match(page, /type: 'staff-preview-open'/);
+  assert.match(page, /type: 'staff-preview-continue'/);
   const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'teams', 'teams.css'), 'utf8');
   assert.match(css, /\.staff-person \{ color: var\(--vscode-charts-yellow\)/);
   assert.match(css, /\.staff-agent \{ color: var\(--vscode-charts-purple\)/);

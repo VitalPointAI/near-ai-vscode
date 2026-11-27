@@ -304,6 +304,49 @@ test('on the release image, the Team Studio and Chat shortcuts show their pages 
     origin, base.origin, (frame) => frame.contentFrame().getByRole('textbox', { name: 'Chat message' }));
 });
 
+test('Team Studio staff setup previews the selected project', async ({ page }) => {
+  test.skip(process.env.STERLING_BUNDLED_EXTENSION !== '1', 'needs the bundled extension');
+  let pluginsStarted = false;
+  page.on('console', (message) => {
+    if (/\] Start of \d+ plugins?:/.test(message.text())) pluginsStarted = true;
+  });
+  await openGetStarted(page);
+  await expect.poll(() => pluginsStarted, { timeout: 90_000 }).toBe(true);
+  await rail(page).getByRole('button', { name: 'Team Studio', exact: true }).click();
+  await expect(currentTab(page)).toHaveText('SovAI Team Studio', { timeout: 60_000 });
+  const frame = page.locator('#theia-main-content-panel [id^="plugin-webview:"]').filter({ visible: true })
+    .locator('iframe').contentFrame().locator('#active-frame').contentFrame();
+  const entry = frame.getByRole('button', { name: 'Set up staff', exact: true });
+  const heading = frame.getByRole('heading', { name: 'Staff setup preview', exact: true });
+  const project = process.env.STERLING_STAFF_PROJECT_NAME ?? 'workspace';
+  await entry.click({ timeout: 60_000 });
+  await expect(heading).toBeFocused();
+  await expect(frame.getByRole('heading', { name: project, exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 510, height: 900 });
+  await frame.getByRole('button', { name: 'Complete staff', exact: true }).click();
+  await expect(frame.getByRole('heading', { name: 'J1 Personnel', exact: true })).toBeVisible();
+  await expect(frame.getByRole('button', { name: 'Set up this staff', exact: true })).toHaveCount(0);
+  const coverage = frame.getByRole('region', { name: 'Staff setup preview' });
+  expect(await coverage.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await heading.press('Escape');
+  await expect(entry).toBeFocused();
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await entry.click();
+  await frame.getByRole('button', { name: 'J4 Logistics', exact: true }).click();
+  await frame.getByRole('button', { name: 'Continue to section setup', exact: true }).click();
+  const questions = page.locator('.quick-input-widget').filter({ visible: true });
+  for (const answer of ['US Joint', 'Operational', 'Campaign', 'Local runtime only']) {
+    await questions.getByText(answer, { exact: true }).click();
+  }
+  await expect(questions).toContainText('check the roster');
+  await expect(questions).toContainText(`Project: ${project}.`);
+  await page.keyboard.press('Escape');
+  await expect(questions).toBeHidden();
+  await expect(frame.getByRole('button', { name: 'J4 Logistics', exact: true })).toBeFocused();
+});
+
 // The work-area pages' Create button runs sterling.workAreas.create, which only the bundled NEAR AI extension (the VSIX in the release
 // image) provides. The container suite sets STERLING_BUNDLED_EXTENSION=1 for an image that bundles it, and checks the folder on disk.
 test('on the release image, Create on a work-area page creates the work area and opens its page', async ({ page }) => {

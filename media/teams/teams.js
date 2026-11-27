@@ -557,12 +557,7 @@
     // 0.4.19 review: it said "This takes a few minutes", and six members on three models can run for hours. The host asks first and states the ceiling
     // worked out from the runs, so the button only says the run is coming, not how long it takes.
     actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost', id: 'optimise-all' }));
-    // The host asks which section to set up, then refreshes the library.
-    actions.append(button('Set up a staff team', () => {
-      announce('Choose one staff section in the editor’s setup questions.');
-      vscode.postMessage({ type: 'staff-setup' });
-    }, { id: 'staff-setup' }));
-    actions.append(button('Preview staff setup', openStaffPreview, { id: 'staff-preview-open' }));
+    actions.append(button('Set up staff', openStaffPreview, { id: 'staff-preview-open' }));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
@@ -2328,7 +2323,7 @@
     title.setAttribute('tabindex', '-1');
     panel.setAttribute('aria-labelledby', title.id);
     panel.append(title);
-    const { data, scope } = staffPreview;
+    const { data, scope, busy, finished, section } = staffPreview;
     if (data?.error) {
       panel.append(el('p', '', data.error));
     } else if (!data) {
@@ -2348,6 +2343,7 @@
           render();
         });
         control.setAttribute('aria-pressed', String(scope === value));
+        control.disabled = Boolean(busy);
         scopes.append(control);
       }
       panel.append(scopes);
@@ -2355,13 +2351,39 @@
       for (const row of data.rows) {
         if (scope === 'section' && !row.template) continue;
         const card = el('li', '', '');
-        card.append(el('h4', '', row.label), el('p', '', row.status));
+        if (scope === 'section') {
+          const pick = button(row.label, () => {
+            staffPreview.section = row.id;
+            pendingFocus = 'staff-section-' + row.id;
+            render();
+          }, { id: 'staff-section-' + row.id });
+          pick.setAttribute('aria-pressed', String(section === row.id));
+          pick.disabled = Boolean(busy);
+          card.append(pick);
+        } else {
+          card.append(el('h4', '', row.label));
+        }
+        card.append(el('p', '', row.status));
         if (row.team) card.append(el('p', '', row.team));
         if (row.decisionRole) card.append(el('p', 'hint', row.decisionRole));
         rows.append(card);
       }
       if (scope === 'complete') panel.append(el('p', 'hint', 'Review the coverage for this project. Whole-staff setup is unavailable.'));
       panel.append(rows);
+      if (busy) panel.append(el('p', 'hint', 'Continue in the editor’s setup questions.'));
+      else if (finished) {
+        panel.append(el('p', '', finished === 'applied' ? 'The section is set up.' : 'Setup did not finish. Review the project to try again.'));
+        if (finished !== 'applied') panel.append(button('Review again', openStaffPreview));
+      } else if (scope === 'section') {
+        const next = button('Continue to section setup', () => {
+          staffPreview.busy = true;
+          vscode.postMessage({ type: 'staff-preview-continue', request: staffPreview.request, session: data.session, section });
+          announce('Continue in the editor’s setup questions.');
+          render();
+        }, { primary: true, id: 'staff-preview-continue' });
+        next.disabled = !section;
+        panel.append(next);
+      }
     }
     panel.append(button('Leave setup', leaveStaffPreview, { id: 'staff-preview-leave' }));
     root.append(panel);
@@ -2414,7 +2436,16 @@
       case 'staff-preview-state':
         if (staffPreview?.request !== message.request) break;
         staffPreview.data = message;
+        staffPreview.busy = false;
         announce(message.error || 'Staff setup preview ready.');
+        render();
+        break;
+      case 'staff-preview-result':
+        if (staffPreview?.request !== message.request || staffPreview.data?.session !== message.session || !staffPreview.busy) break;
+        staffPreview.busy = false;
+        staffPreview.finished = message.applied ? 'applied' : 'held';
+        pendingFocus = message.applied ? 'staff-preview-title' : 'staff-section-' + staffPreview.section;
+        announce(message.applied ? 'The section is set up.' : 'Setup did not finish. Review the project to try again.');
         render();
         break;
       case 'state':

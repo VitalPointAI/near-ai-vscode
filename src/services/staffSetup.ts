@@ -8,8 +8,9 @@
 // - PROFILE.md and the section's skills under .planning/staff/;
 // - the staff settings into .planning/.near-ai/project.json (`staff`), keeping every other field;
 // - the section's guidance into AGENTS.md between its own markers, beside any project-type block and any other section's.
-import { snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
-import { lstat, mkdir, readFile, rename } from 'node:fs/promises';
+import { MAX_STAFF_FILE_BYTES, replaceKeepingEdits, snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readFile, rename } from 'node:fs/promises';
 import * as path from 'node:path';
 import { DOCTRINE_PROFILES, MDO_TERMS, PLANNING_TYPES, RED_TEAM_NOTES, STAFF_LEVELS, STAFF_NATIONS, STAFF_PROFILE_IDS } from '../domain/staff/doctrine';
 import type { PlanningType, StaffLevel, StaffNation, StaffProfileId } from '../domain/staff/doctrine';
@@ -227,6 +228,109 @@ export async function readStaffSetupInputs(root: string): Promise<{ agents?: str
   return { ...(agents !== undefined ? { agents } : {}), ...(projectJson !== undefined ? { projectJson } : {}) };
 }
 
+/** A host-only selection. Team Studio obtains it from the editor and keeps its lifetime bound to one chooser session. */
+export interface StudioStaffSelection {
+  readonly root: string;
+  readonly name: string;
+  readonly projectJson?: string;
+  isCurrent(): boolean;
+  isSameDirectory?(): boolean;
+}
+
+interface StudioStaffInputs {
+  readonly sources: ReadonlyMap<string, Buffer | undefined>;
+  readonly agents?: string;
+  readonly projectJson?: string;
+}
+
+interface StudioStaffReview {
+  readonly selection: StudioStaffSelection;
+  readonly files: ReadonlyMap<string, Buffer | undefined>;
+}
+
+export const STUDIO_STAFF_CHANGED = 'The project changed. Review the staff setup again.';
+export function studioSharedTeamMessage(file: string): string {
+  return `${path.basename(file)} already exists in the shared team library. Team Studio left it and the project unchanged.`;
+}
+
+function ensureStudioCurrent(selection: StudioStaffSelection): void {
+  if (!selection.isCurrent()) throw new Error(STUDIO_STAFF_CHANGED);
+}
+
+/** Walk the known staff paths without following links. An unreadable path cannot be treated as a blank one. */
+async function setupFile(root: string, relative: string): Promise<string> {
+  const parts = relative.split('/');
+  for (let index = 1; index <= parts.length; index += 1) {
+    try {
+      const info = await lstat(path.join(root, ...parts.slice(0, index)));
+      if (info.isSymbolicLink()) throw new Error(`${parts.slice(0, index).join('/')} is a symbolic link, so nothing was written.`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      break;
+    }
+  }
+  return path.join(root, ...parts);
+}
+
+async function studioFile(root: string, relative: string): Promise<Buffer | undefined> {
+  const file = await setupFile(root, relative);
+  const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (!handle) return undefined;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_STAFF_FILE_BYTES) throw new Error(`${relative} could not be reviewed.`);
+    const bytes = await handle.readFile();
+    if (bytes.length > MAX_STAFF_FILE_BYTES) throw new Error(`${relative} could not be reviewed.`);
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+function setupText(bytes: Buffer | undefined): string | undefined {
+  if (bytes === undefined) return undefined;
+  const text = bytes.toString('utf8');
+  if (!bytes.equals(Buffer.from(text))) throw new Error('A project file is not valid UTF-8 and could not be reviewed.');
+  return text;
+}
+
+export async function readStudioStaffInputs(selection: StudioStaffSelection): Promise<StudioStaffInputs> {
+  ensureStudioCurrent(selection);
+  const files = ['AGENTS.md', PROJECT_JSON, '.planning/staff/PROFILE.md'];
+  const sources = new Map(await Promise.all(files.map(async (relative) => [relative, await studioFile(selection.root, relative)] as const)));
+  ensureStudioCurrent(selection);
+  const projectJson = setupText(sources.get(PROJECT_JSON));
+  if (projectJson !== selection.projectJson) throw new Error(STUDIO_STAFF_CHANGED);
+  const agents = setupText(sources.get('AGENTS.md'));
+  setupText(sources.get('.planning/staff/PROFILE.md'));
+  return { sources, ...(agents === undefined ? {} : { agents }), ...(projectJson === undefined ? {} : { projectJson }) };
+}
+
+async function verifyStudioFiles(selection: StudioStaffSelection, files: ReadonlyMap<string, Buffer | undefined>): Promise<void> {
+  ensureStudioCurrent(selection);
+  for (const [relative, expected] of files) {
+    const actual = await studioFile(selection.root, relative);
+    if (actual === undefined ? expected !== undefined : !expected?.equals(actual)) throw new Error(STUDIO_STAFF_CHANGED);
+  }
+  ensureStudioCurrent(selection);
+}
+
+export async function reviewStudioStaffSetup(selection: StudioStaffSelection, original: StudioStaffInputs, plan: StaffSetupPlan): Promise<StudioStaffReview> {
+  await verifyStudioFiles(selection, original.sources);
+  const files = new Map(original.sources);
+  for (const write of plan.writes) {
+    if (files.has(write.path)) continue;
+    const bytes = await studioFile(selection.root, write.path);
+    setupText(bytes);
+    files.set(write.path, bytes);
+  }
+  await verifyStudioFiles(selection, files);
+  return { selection, files };
+}
+
 /** The library file the plan's team goes to, and whether one is already there. */
 export async function staffTeamTarget(library: TeamLibrary, plan: StaffSetupPlan): Promise<{ file: string; exists: boolean }> {
   const file = path.join(library.directory, `${plan.roster.fileName}.md`);
@@ -242,15 +346,16 @@ export interface StaffSetupResult { readonly teamFile: string; readonly archived
  * what the setup wrote, and an archived team is put back. A path on the way that is a symbolic link is refused before anything is written, so a link
  * cannot send a write outside the project.
  */
-export async function applyStaffSetup(root: string, library: TeamLibrary, plan: StaffSetupPlan, options: { replace?: boolean } = {}): Promise<StaffSetupResult> {
-  for (const write of plan.writes) {
-    const parts = write.path.split('/');
-    for (let index = 1; index <= parts.length; index += 1) {
-      const info = await lstat(path.join(root, ...parts.slice(0, index))).catch(() => undefined);
-      if (info?.isSymbolicLink()) throw new Error(`${parts.slice(0, index).join('/')} is a symbolic link, so nothing was written.`);
-    }
+export async function applyStaffSetup(root: string, library: TeamLibrary, plan: StaffSetupPlan, options: { replace?: boolean; studioReview?: StudioStaffReview } = {}): Promise<StaffSetupResult> {
+  const review = options.studioReview;
+  if (review) {
+    if (root !== review.selection.root || !plan.writes.every(({ path: file }) => review.files.has(file))) throw new Error(STUDIO_STAFF_CHANGED);
+    await verifyStudioFiles(review.selection, review.files);
+  } else {
+    for (const write of plan.writes) await setupFile(root, write.path);
   }
   const target = await staffTeamTarget(library, plan);
+  if (review && target.exists) throw new Error(studioSharedTeamMessage(target.file));
   if (target.exists && !options.replace) throw new Error(`${path.basename(target.file)} is already in your teams. Nothing was written.`);
   const done: Array<{ file: string; before: Buffer | undefined; wrote: string }> = [];
   let archived: string | undefined;
@@ -258,14 +363,22 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
   try {
     for (const write of plan.writes) {
       const file = path.join(root, ...write.path.split('/'));
-      const before = await readFile(file).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
+      const before = review ? review.files.get(write.path) : await readFile(file).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
+      if (review) ensureStudioCurrent(review.selection);
       await mkdir(path.dirname(file), { recursive: true });
+      if (review) ensureStudioCurrent(review.selection);
       if (!(await writeIfUnchanged(file, snapshotOfBytes(before), write.content))) throw new Error(`${write.path} changed while the staff team was being set up.`);
       done.push({ file, before, wrote: write.content });
     }
     await mkdir(library.directory, { recursive: true });
-    archived = target.exists ? await library.archive(target.file) : undefined;
-    if (!(await writeIfUnchanged(target.file, { exists: false }, plan.team))) throw new Error(`${path.basename(target.file)} appeared in your teams while the staff team was being set up.`);
+    if (review) {
+      ensureStudioCurrent(review.selection);
+      const created = await replaceKeepingEdits(target.file, { exists: false }, plan.team, () => review.selection.isCurrent());
+      if (created.status !== 'written') throw new Error(review.selection.isCurrent() ? studioSharedTeamMessage(target.file) : STUDIO_STAFF_CHANGED);
+    } else {
+      archived = target.exists ? await library.archive(target.file) : undefined;
+      if (!(await writeIfUnchanged(target.file, { exists: false }, plan.team))) throw new Error(`${path.basename(target.file)} appeared in your teams while the staff team was being set up.`);
+    }
     teamWritten = true;
     await library.snapshot(target.file);
   } catch (error) {
@@ -274,6 +387,9 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
       await (path.basename(archived) === path.basename(target.file) ? library.restore(archived) : rename(archived, target.file)).catch(() => undefined);
     }
     for (const entry of done.reverse()) {
+      if (review && !(review.selection.isSameDirectory?.() ?? review.selection.isCurrent())) {
+        throw new Error('The project folder moved during setup. Review the original folder for any setup files.');
+      }
       await writeIfUnchanged(entry.file, snapshotOfBytes(Buffer.from(entry.wrote, 'utf8')), entry.before === undefined ? undefined : entry.before.toString('utf8')).catch(() => undefined);
     }
     throw new Error(`The staff team was not set up, and what was written is rolled back: ${error instanceof Error ? error.message : String(error)}`);

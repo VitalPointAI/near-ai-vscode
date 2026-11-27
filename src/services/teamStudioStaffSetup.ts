@@ -1,4 +1,4 @@
-// The Team Studio preview reads the selected workspace and the existing team links. The preview has no write or setup command.
+// The Team Studio chooser binds one section handoff to a project selected by the editor host.
 import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
@@ -6,9 +6,9 @@ import * as path from 'node:path';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
 import { STAFF_SECTION_IDS, STAFF_SECTIONS } from '../domain/staff/doctrine';
 import type { StaffSectionId } from '../domain/staff/doctrine';
-import { isStaffTeamSection, profileOf, sectionCode } from '../domain/staff/profiles';
+import { isStaffTeamSection, profileOf, sectionCode, type StaffTeamSection } from '../domain/staff/profiles';
 import { readWhole } from '../staff/staffFiles';
-import { existingStaffSettings, PROJECT_JSON, templateOffers } from './staffSetup';
+import { existingStaffSettings, PROJECT_JSON, templateOffers, type StudioStaffSelection } from './staffSetup';
 import { projectStaffTeams } from './staffTeams';
 
 interface PreviewFolder { readonly root: string; readonly name: string }
@@ -34,11 +34,19 @@ interface PreviewContent {
 type PreviewState = { readonly type: 'staff-preview-state'; readonly request: number } &
   ({ readonly session: string } & PreviewContent | { readonly error: string });
 
+interface HandoffResult {
+  readonly type: 'staff-preview-result';
+  readonly request: number;
+  readonly session: string;
+  readonly applied: boolean;
+}
+
 interface PreviewDeps {
   folders(): readonly PreviewFolder[];
   pick(folders: readonly PreviewFolder[]): Promise<PreviewFolder | undefined>;
   readonly libraryDir: string;
-  post(message: PreviewState): void;
+  post(message: PreviewState | HandoffResult): void;
+  startSection?(section: StaffTeamSection, project: StudioStaffSelection): Promise<boolean>;
 }
 
 const changed = 'The project changed. Review the new plan before setting up staff.';
@@ -72,7 +80,7 @@ async function projectSettings(root: string): Promise<string | undefined> {
   return read.kind === 'text' ? read.text : undefined;
 }
 
-async function previewFor(project: PreviewFolder, root: string, libraryDir: string): Promise<PreviewContent> {
+async function previewFor(project: PreviewFolder, root: string, libraryDir: string): Promise<{ content: PreviewContent; bytes: string | undefined }> {
   const bytes = await projectSettings(root);
   const settings = existingStaffSettings(bytes);
   const links = settings?.teams ? await projectStaffTeams(root, libraryDir) : undefined;
@@ -95,19 +103,34 @@ async function previewFor(project: PreviewFolder, root: string, libraryDir: stri
       : compatible ? 'Section template available. Whole-staff changes require review.' : 'Setup unavailable for this staff profile and level.';
     return { id, label, template: compatible, status, decisionRole };
   });
-  return {
+  const content: PreviewContent = {
     project: project.name,
     ...(settings ? { profile: profileOf(settings.profile).name, level: settings.level[0].toUpperCase() + settings.level.slice(1) } : {}),
     modelLocation: 'Model location unavailable until project setup records a policy.',
     rows
   };
+  return { content, bytes };
 }
 
-function previewMessage(value: unknown): { readonly type: 'staff-preview-open' | 'staff-preview-leave'; readonly request: number } | undefined {
-  if (value === null || typeof value !== 'object' || Object.keys(value).length !== 2) return undefined;
-  const { type, request } = value as Record<string, unknown>;
-  return (type === 'staff-preview-open' || type === 'staff-preview-leave') && typeof request === 'number' && Number.isSafeInteger(request) && request > 0
-    && Object.hasOwn(value, 'type') && Object.hasOwn(value, 'request') ? { type, request } : undefined;
+type PreviewMessage =
+  | { readonly type: 'staff-preview-open' | 'staff-preview-leave'; readonly request: number }
+  | { readonly type: 'staff-preview-continue'; readonly request: number; readonly session: string; readonly section: StaffTeamSection };
+
+function previewMessage(value: unknown): PreviewMessage | undefined {
+  if (value === null || typeof value !== 'object') return undefined;
+  const keys = Object.keys(value);
+  const { type, request, session, section } = value as Record<string, unknown>;
+  if (!keys.includes('type') || !keys.includes('request') || typeof request !== 'number' || !Number.isSafeInteger(request) || request <= 0) return undefined;
+  if ((type === 'staff-preview-open' || type === 'staff-preview-leave') && keys.length === 2) return { type, request };
+  if (type !== 'staff-preview-continue' || keys.length !== 4 || !keys.includes('session') || !keys.includes('section')) return undefined;
+  if (typeof session !== 'string' || !isStaffTeamSection(section)) return undefined;
+  return { type, request, session, section };
+}
+
+interface ChooserSession {
+  readonly request: number;
+  readonly id: string;
+  preview?: { readonly project: StudioStaffSelection; readonly offered: readonly StaffSectionId[] };
 }
 
 export function createStaffSetupPreview(deps: PreviewDeps): {
@@ -116,7 +139,8 @@ export function createStaffSetupPreview(deps: PreviewDeps): {
   reset(): void;
   dispose(): void;
 } {
-  let current: { readonly request: number; readonly id: string } | undefined;
+  let current: ChooserSession | undefined;
+  let inFlight: ChooserSession | undefined;
   let latest = 0;
   let disposed = false;
   const publishError = (request: number, error: string) => deps.post({ type: 'staff-preview-state', request, error });
@@ -138,9 +162,29 @@ export function createStaffSetupPreview(deps: PreviewDeps): {
         if (current?.request === request) current = undefined;
         return;
       }
+      if (message.type === 'staff-preview-continue') {
+        const session = current;
+        const start = deps.startSection;
+        if (!session?.preview || !start || session.request !== request || session.id !== message.session || !session.preview.offered.includes(message.section)) return;
+        const project = session.preview.project;
+        delete session.preview;
+        if (inFlight || !project.isCurrent()) { invalidate(); return; }
+        inFlight = session;
+        let applied = false;
+        try {
+          applied = await start(message.section, project);
+        } finally {
+          inFlight = undefined;
+          if (current === session) {
+            current = undefined;
+            deps.post({ type: 'staff-preview-result', request, session: session.id, applied });
+          }
+        }
+        return;
+      }
       if (request <= latest) return;
       latest = request;
-      const session = { request, id: randomUUID() };
+      const session: ChooserSession = { request, id: randomUUID() };
       current = session;
       const fail = (error: string) => {
         if (current !== session) return;
@@ -155,10 +199,17 @@ export function createStaffSetupPreview(deps: PreviewDeps): {
         if (current !== session) return;
         if (!selected) return fail('Choose a project to see its staff setup.');
         const choice = offered.get(selected.root);
-        if (!choice?.identity || !sameProject(choice.identity, choice.folder.root)) return fail(changed);
-        const content = await previewFor(choice.folder, choice.identity.resolved, deps.libraryDir);
-        if (current !== session) return;
-        if (!sameProject(choice.identity, choice.folder.root) || !deps.folders().some(({ root }) => root === choice.folder.root)) return fail(changed);
+        if (!choice?.identity) return fail(changed);
+        const { folder, identity } = choice;
+        const isSameDirectory = () => sameProject(identity, folder.root);
+        const isCurrent = () => current === session && isSameDirectory() && deps.folders().some(({ root }) => root === folder.root);
+        if (!isCurrent()) return fail(changed);
+        const { content, bytes } = await previewFor(folder, identity.resolved, deps.libraryDir);
+        if (!isCurrent()) return fail(changed);
+        session.preview = {
+          project: { root: identity.resolved, name: folder.name, ...(bytes === undefined ? {} : { projectJson: bytes }), isCurrent, isSameDirectory },
+          offered: content.rows.filter((row) => row.template).map((row) => row.id)
+        };
         deps.post({ type: 'staff-preview-state', request, session: session.id, ...content });
       } catch {
         fail('Staff setup did not finish. Review the project and try again.');
