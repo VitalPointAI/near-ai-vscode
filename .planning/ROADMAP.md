@@ -125,11 +125,17 @@ Plans:
   3. Nothing outside the repository is changed by an agent and no token is asked for or stored: branch protection, environments and secrets are written as exact commands for the person to approve and run, and the step checks afterwards and says what is still missing. (DEVF-03)
   4. Re-running the step on a project that already has part of the kit adds only what is missing and never overwrites the person's own workflow files without showing the difference first. (DEVF-04)
 **Research flags**: Which parts of this repository's kit (`scripts/merge-pr.mjs`, the agent review workflow, `prepare-release`) generalise to other project types; the kit is also the pull-request mode of Team Mode's merge train later (L2).
-**Plans:** 0 plans
+**Plans:** 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 28 to break down)
+- [ ] 28-01-PLAN.md — Software Project Setup tracer, exact preview and safe local file application (wave 1)
+- [ ] 28-02-PLAN.md — Exported CI review, merge, release and human bootstrap workflow (wave 2, depends on 28-01)
+- [ ] 28-03-PLAN.md — Owner setup, effective GitHub evidence and disposable repository acceptance (wave 3, depends on 28-02)
+
+The first profile is a GitHub.com project with an npm lockfile and declared build and test
+commands. Implementation proves local behavior with fixtures. Live protection and publication
+acceptance require the owner-approved disposable target and a distinct reviewer.
 
 ### Phase 29: A cleanup member with a safe CleanUp tool
 **Goal**: The software team tidies what agents leave behind (test output, screenshot folders, temporary mirrors) so it stops filling disk and memory, without ever deleting something important or in use: safety lives in a CleanUp tool and in the gate, not in a prompt.
