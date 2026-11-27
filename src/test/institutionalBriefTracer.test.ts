@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_TURN_CEILING_MS } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
+import { INSTITUTIONAL_COMMAND_GROUP_MEMBER, INSTITUTIONAL_COMMAND_GROUP_TEAM, selectSyntheticInstitutionalCommandGroup, selectSyntheticInstitutionalJ2Catalogue, selectSyntheticInstitutionalJ3ActionRegister, selectSyntheticInstitutionalJ7Observation, selectSyntheticInstitutionalJ7Findings, selectSyntheticInstitutionalJ6BusinessServices, selectedInstitutionalScope } from '../agent/staff/institutionalCommand';
 import { TeamLibrary, type TeamDefinition } from '../agent/teams';
 import { resolveInWorkspace } from '../agent/workspace';
 import { bundleHash } from '../domain/gate/bundle';
@@ -25,6 +25,10 @@ import { newTestConversation, testBundleState, testGateRuntime } from './helpers
 import { testSigner } from './helpers/staffFixtures';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
+const businessServicesTeam = 'institutional-j6-business-services-v1';
+const businessServicesDirectory = '.planning/staff/institutional/j6/business-services';
+const readBusinessService = 'ReadInstitutionalBusinessService';
+const saveBusinessServices = 'SaveInstitutionalBusinessServicesDraft';
 const catalogueTeam = 'institutional-j2-records-catalogue-v1';
 const catalogueDirectory = '.planning/staff/institutional/j2/catalogue';
 const readCatalogue = 'ReadInstitutionalRecordMetadata';
@@ -185,7 +189,7 @@ async function runFixture(
         results.push(message.content);
         toolResults.set(message.tool_call_id, message.content);
       }
-      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue/.test(String(messages[0].content));
+      const child = /Prepare a CG-07 decision brief using only evidence|Draft the fictional J3-07 office-hours action register|Draft a fictional J7-09 office-hours observation|Draft fictional J7-10 office-hours findings|Draft a fictional J2-IS01 office records catalogue|Draft a fictional J6-IT01 business-service catalogue/.test(String(messages[0].content));
       let call: ToolCall | undefined;
       if (child) {
         const admitted = messages.some((message) => message.role === 'tool' && String(message.content).includes(publicExtracts[0].text));
@@ -193,14 +197,14 @@ async function runFixture(
         options.onChildTurn?.(childTurn);
         offers.push(tools.map((item) => item.function.name).sort());
         readOffers.push(tools.find((item) => item.function.name === readObservation)?.function.parameters);
-        if (team.slug === catalogueTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
+        if (team.slug === catalogueTeam || team.slug === businessServicesTeam) catalogueOffers.push(tools.map(({ function: tool }) => tool.parameters));
         if (!options.modelInterruption || childTurn === 0) call = (options.steps ?? acceptedSteps)[childTurn++];
         else if (selectedModel === model) {
           if (options.modelInterruption === 'silent') await delay(deadlines.idleTimeoutMs ?? 100, undefined, { signal });
           throw new StreamInterruptedError('The fictional model stopped responding.', true, undefined, { kind: 'stalled', idleMs: deadlines.idleTimeoutMs ?? idleDeadline });
         }
       } else if (parentTurn++ === 0) {
-        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
+        call = toolCall('spawn-drafter', 'Agent', { subagent_type: team.slug === businessServicesTeam ? 'business-services-drafter' : team.slug === catalogueTeam ? 'records-catalogue-drafter' : team.slug === observationTeam ? 'lessons-drafter'
           : team.slug === registerTeam ? 'action-register-drafter' : INSTITUTIONAL_COMMAND_GROUP_MEMBER, prompt: 'Prepare the local administrative draft.' });
       }
       yield { type: 'done', message: { role: 'assistant', content: call ? null : 'Done', ...(call ? { tool_calls: [call] } : {}) }, finishReason: call ? 'tool_calls' : 'stop', usage };
@@ -1131,6 +1135,126 @@ test('registered G2 catalogue projects exact fictional metadata and gives the sa
   try {
     const held = await runFixture(fixture, team, { steps: [toolCall('late-catalogue', saveCatalogue, args)] });
     assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'late-catalogue' && entry.action_id === 1));
+    assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
+    assert.deepEqual(await readdir(directory), [file]);
+  } finally { setCasProbe(undefined); }
+});
+
+test('registered G6 drafts the authorized office service and leaves missing ownership for its portfolio owner', async () => {
+  const subject = await newFixture();
+  const root = subject.fixture.root;
+  const label = 'Institutional G6 Business Services';
+  const staged = await stageInstitutionalSetup(root, {
+    label, team: businessServicesTeam, keySegment: 'j6BusinessServices',
+    checkPrompts(requests) {
+      const confirmation = requests.find((request) => request.title === `${label}: check the roster`);
+      assert.ok(confirmation);
+      assert.match(confirmation.items.find((item) => item.label === '$(check) Set up the team')?.detail ?? '', /business-service catalogue draft skill/);
+      const owner = confirmation.items.find((item) => item.label === '$(person) Fictional service portfolio owner');
+      assert.match(owner?.detail ?? '', /approves service entries/i);
+    },
+  });
+  const directory = path.join(root, businessServicesDirectory);
+  await mkdir(directory, { recursive: true });
+  const source = (id: string, text: string): InstitutionalBriefSource => ({
+    id, revision: 'r1', date: '2026-11-02', label: 'org/Public', project: String(staged.rootDigest), text,
+    spans: [{ start: 0, end: text.length }],
+  });
+  const sources = [
+    source('portfolio-scope-receipt', 'The fictional portfolio owner recorded which service documentation is available for this draft.'),
+    source('office-induction-document', 'Fictional service documentation supports the office induction schedule.'),
+    source('office-owner-record', 'The fictional induction coordinator is accountable for the scheduling service.'),
+    source('office-welcome-desk-note', 'The fictional welcome desk has reviewed how staff ask about scheduling.'),
+  ];
+  const evidence = ({ id: sourceId, revision }: InstitutionalBriefSource, role: string) => ({ sourceId, revision, role });
+  const serviceId = 'item-4d37a902';
+  const missingOwnerId = 'item-4d37a903';
+  const hiddenId = 'item-4d37a904';
+  const hiddenTitle = 'Unshared Office Reservation';
+  const supportInstruction = 'Ask the office welcome desk about induction scheduling.';
+  const service = {
+    id: serviceId, title: 'Office Induction Scheduling',
+    document: evidence(sources[1], 'fictional-service-documenter'),
+    owner: evidence(sources[2], 'fictional-induction-coordinator'),
+    reviewDate: '2026-12-10', supportHours: '08:00-16:00 weekdays',
+    userGroups: ['new-office-starters'], dependencies: ['office-room-calendar'], freshness: 'current',
+    supportRoute: { desk: 'office-welcome-desk', instruction: 'ask-for-induction-scheduling',
+      source: evidence(sources[3], 'fictional-office-welcome-desk') },
+  };
+  const services = [service, { ...service, id: missingOwnerId, title: 'Office Orientation Sign-In', owner: undefined, supportRoute: undefined },
+    { ...service, id: hiddenId, title: hiddenTitle }];
+  const fields = ['title', 'owner', 'review-date', 'support-hours', 'user-groups', 'dependencies', 'support-route'];
+  const receipt = {
+    project: staged.rootDigest, directory: staged.directoryDigest, requester: 'fictional-service-reviewer',
+    purpose: 'fictional-office-services-j6-it01', policyRevision: 'service-r1', productId: 'office-business-services',
+    portfolioOwner: evidence(sources[0], 'fictional-service-portfolio-owner'),
+    grants: [{ id: serviceId, fields }, { id: missingOwnerId, fields }],
+  };
+  let current = receipt;
+  const withdrawRoute = () => { current = { ...current, grants: [{ id: serviceId, fields: fields.filter((field) => field !== 'support-route') }, receipt.grants[1]] }; };
+  const fixture = { ...subject.fixture, readStaged: () => staged, currentSources: () => sources,
+    currentBusinessServices: () => ({ receipt: current, services }) };
+  const team = await selectSyntheticInstitutionalJ6BusinessServices(fixture);
+  const args = { productId: receipt.productId, recordIds: [serviceId, missingOwnerId] };
+  const run = await runFixture(fixture, team, { steps: [
+    toolCall('office-service', readBusinessService, { recordId: serviceId }),
+    toolCall('hidden-service', readBusinessService, { recordId: hiddenId }),
+    toolCall('missing-service', readBusinessService, { recordId: 'item-4d37a905' }),
+    toolCall('business-services', saveBusinessServices, args),
+  ] });
+  assert.deepEqual(run.offers[0], [readBusinessService, saveBusinessServices].sort());
+  const unavailable = run.toolResults.get('hidden-service');
+  assert.ok(unavailable);
+  assert.match(unavailable, /unavailable/i);
+  assert.equal(unavailable, run.toolResults.get('missing-service'));
+  const [file] = await readdir(directory);
+  assert.ok(file);
+  const bytes = await readFile(path.join(directory, file));
+  const version = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(file, `${version}.json`);
+  const draft = JSON.parse(bytes.toString());
+  assert.equal(draft.duty, 'J6-IT01');
+  assert.equal(draft.portfolioOwner.role, 'fictional-service-portfolio-owner');
+  assert.equal(draft.portfolioDecision, 'pending');
+  const [entry, exception] = draft.body.records;
+  assert.deepEqual(entry, JSON.parse(run.toolResults.get('office-service')!));
+  assert.equal(entry.title, service.title);
+  assert.equal(entry.owner.role, service.owner.role);
+  assert.equal(entry.reviewDate, service.reviewDate);
+  assert.equal(entry.supportHours, service.supportHours);
+  assert.deepEqual(entry.userGroups, service.userGroups);
+  assert.deepEqual(entry.dependencies, service.dependencies);
+  assert.equal(entry.document.revision, sources[1].revision);
+  assert.equal(entry.supportRoute.instruction, supportInstruction);
+  assert.equal(entry.supportRoute.desk, 'Office welcome desk');
+  assert.equal(entry.state, 'proposed');
+  assert.equal(exception.state, 'exception');
+  assert.ok(!Object.hasOwn(exception, 'owner'));
+  assert.ok(exception.openIssues.includes('owner-unresolved'));
+  assert.deepEqual(run.decisions.find((entry) => entry.api.request.uid === 'business-services')?.unmapped.nearAi.capability,
+    { verb: 'workspaceWrite', paths: [`${businessServicesDirectory}/${file}`] });
+  const scope = selectedInstitutionalScope(team);
+  assert.ok(scope);
+  const review = await readInstitutionalDraftReview(scope, resolveInWorkspace, version);
+  assert.equal(review.version, version);
+  for (const value of [hiddenId, hiddenTitle, sources[3].text]) {
+    assert.ok(!JSON.stringify([run.catalogueOffers[0], draft, review, run.results]).includes(value));
+  }
+
+  const heldRead = await runFixture(fixture, team, {
+    steps: [toolCall('withdrawn-route', readBusinessService, { recordId: serviceId })],
+    onChildTurn(turn) { if (turn === 0) withdrawRoute(); },
+  });
+  assert.equal(heldRead.toolResults.get('withdrawn-route'), unavailable);
+  assert.ok(!heldRead.results.some((entry) => entry.includes(supportInstruction)));
+  await assert.rejects(readInstitutionalDraftReview(scope, resolveInWorkspace, version), /changed|unavailable|current/);
+
+  current = { ...receipt, policyRevision: 'service-r2' };
+  let entered = false;
+  setCasProbe((point) => { if (point === 'before-rename') { entered = true; withdrawRoute(); } });
+  try {
+    const held = await runFixture(fixture, team, { steps: [toolCall('late-business-services', saveBusinessServices, args)] });
+    assert.ok(entered && held.decisions.some((entry) => entry.api.request.uid === 'late-business-services' && entry.action_id === 1));
     assert.ok(!held.results.some((entry) => entry.includes('"state":"draft"')));
     assert.deepEqual(await readdir(directory), [file]);
   } finally { setCasProbe(undefined); }

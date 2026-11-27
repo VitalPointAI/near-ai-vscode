@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { TeamLibrary } from '../agent/teams';
 import {
-  INSTITUTIONAL_COMMAND_GROUP_PROFILE, INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM,
+  INSTITUTIONAL_COMMAND_GROUP_PROFILE, INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM,
   institutionalRole, isInstitutionalRole, type InstitutionalRoleId,
 } from '../agent/staff/institutionalCommand';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
@@ -27,13 +27,16 @@ export const REPLACE_TEAM_ACTION = 'Replace';
 
 const catalogueStewardDecision = 'The fictional domain steward decides what the metadata means and which fields people can see.';
 
-const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM] as const).map((value) => ({
+const businessServicesOwnerDecision = 'The fictional service portfolio owner approves service entries.';
+
+const institutionalChoices = ([INSTITUTIONAL_COMMAND_GROUP_TEAM, INSTITUTIONAL_J3_ACTION_REGISTER_TEAM, INSTITUTIONAL_J7_LESSONS_TEAM, INSTITUTIONAL_J2_CATALOGUE_TEAM, INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM] as const).map((value) => ({
   value,
   label: institutionalRole(value).label,
   detail: value === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM
     ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office-hours action register draft for a local test fixture.`
     : value === INSTITUTIONAL_J7_LESSONS_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office-hours observation draft for a local test fixture.`
     : value === INSTITUTIONAL_J2_CATALOGUE_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional office records catalogue draft for a local test fixture. ${catalogueStewardDecision}`
+    : value === INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM ? `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Fictional business-service catalogue for a local test fixture. ${businessServicesOwnerDecision}`
     : `${INSTITUTIONAL_COMMAND_GROUP_PROFILE}. Local draft setup for a test fixture.`,
 }));
 
@@ -58,13 +61,15 @@ export function rosterItems(plan: StaffSetupPlan | InstitutionalStaffSetupPlan):
     const isActionRegister = plan.institutional.binding.team === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
     const isLessons = plan.institutional.binding.team === INSTITUTIONAL_J7_LESSONS_TEAM;
     const isCatalogue = plan.institutional.binding.team === INSTITUTIONAL_J2_CATALOGUE_TEAM;
-    const humanDetail = isCatalogue ? `Reviews the catalogue draft. ${catalogueStewardDecision}`
+    const isBusinessServices = plan.institutional.binding.team === INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM;
+    const humanDetail = isBusinessServices ? `Reviews the business-service catalogue draft. ${businessServicesOwnerDecision}`
+      : isCatalogue ? `Reviews the catalogue draft. ${catalogueStewardDecision}`
       : isLessons ? 'Reviews the observation draft. The observer or lessons lead confirms facts and decides any merge or access changes.'
       : isActionRegister
       ? 'Reviews the action register draft. The fictional chair owns the decision, and the assigned person acknowledges any action.'
       : 'Reviews the draft and decides through the authorized process.';
     return [
-      { label: isActionRegister || isLessons || isCatalogue ? 'Human review' : 'A person decides', kind: vscode.QuickPickItemKind.Separator },
+      { label: isActionRegister || isLessons || isCatalogue || isBusinessServices ? 'Human review' : 'A person decides', kind: vscode.QuickPickItemKind.Separator },
       { label: `$(person) ${roster.humanLead}`, description: 'human lead', detail: humanDetail },
       { label: 'Agent drafts', kind: vscode.QuickPickItemKind.Separator },
       ...roster.members.map((member) => ({ label: `$(hubot) ${member.name}`, description: member.role, detail: 'Requires an approved local test fixture.' })),
@@ -101,14 +106,16 @@ async function confirmStaffSetup(plan: StaffSetupPlan | InstitutionalStaffSetupP
   const isActionRegister = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J3_ACTION_REGISTER_TEAM;
   const isLessons = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J7_LESSONS_TEAM;
   const isCatalogue = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J2_CATALOGUE_TEAM;
-  const skill = isCatalogue ? 'office records catalogue draft' : isLessons ? 'office-hours observation draft' : isActionRegister ? 'office-hours action register draft' : 'decision brief';
+  const isBusinessServices = 'institutional' in plan && plan.institutional.binding.team === INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM;
+  const skill = isBusinessServices ? 'business-service catalogue draft' : isCatalogue ? 'office records catalogue draft' : isLessons ? 'office-hours observation draft' : isActionRegister ? 'office-hours action register draft' : 'decision brief';
   const detail = 'institutional' in plan
     ? `Stages the ${INSTITUTIONAL_COMMAND_GROUP_PROFILE} definition and ${skill} skill in this editor profile.`
     : `Writes ${plan.roster.fileName}.md to your teams, PROFILE.md and the skills under .planning/staff/, the staff settings in project.json and the section's guidance in AGENTS.md.`;
   const confirm = { label: `$(check) ${SET_UP_ACTION}`, detail };
   const answer = await vscode.window.showQuickPick([confirm, ...rosterItems(plan)], {
     title: `${plan.roster.teamName}: check the roster`,
-    placeHolder: isCatalogue ? `The member drafts the catalogue. ${catalogueStewardDecision} Choose "Set up the team" to stage this role.`
+    placeHolder: isBusinessServices ? `The member drafts the business-service catalogue. ${businessServicesOwnerDecision} Choose "Set up the team" to stage this role.`
+      : isCatalogue ? `The member drafts the catalogue. ${catalogueStewardDecision} Choose "Set up the team" to stage this role.`
       : isLessons ? 'The member drafts for human review. Choose "Set up the team" to stage the local test role.'
       : isActionRegister
       ? 'The member drafts for review. The fictional chair owns the decision. Choose "Set up the team" to stage this role.'
@@ -129,6 +136,7 @@ async function stageInstitutionalStaffSetup(root: string, team: InstitutionalRol
       ? 'The office-hours action register draft requires the approved local test fixture before the member can run.'
       : team === INSTITUTIONAL_J7_LESSONS_TEAM ? 'The office-hours observation draft requires the approved local test fixture before the member can run.'
       : team === INSTITUTIONAL_J2_CATALOGUE_TEAM ? 'The office records catalogue draft requires the approved local test fixture before the member can run.'
+      : team === INSTITUTIONAL_J6_BUSINESS_SERVICES_TEAM ? 'The business-service catalogue draft requires the approved local test fixture before the member can run.'
       : 'The draft member requires the approved local test fixture before it can run.';
     void vscode.window.showInformationMessage(`${status} ${readiness}`);
   } catch (error) {

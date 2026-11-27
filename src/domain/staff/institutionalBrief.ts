@@ -6,6 +6,7 @@ import { STAFF_SLUG } from './parse';
 export const institutionalBriefDirectory = '.planning/staff/institutional/command/briefs';
 export const institutionalActionRegisterDirectory = '.planning/staff/institutional/j3/action-registers';
 export const institutionalObservationDirectory = '.planning/staff/institutional/j7/observations';
+export const institutionalBusinessServicesDirectory = '.planning/staff/institutional/j6/business-services';
 export const institutionalCatalogueDirectory = '.planning/staff/institutional/j2/catalogue';
 export const institutionalCatalogueUnavailable = 'This catalogue metadata is unavailable.';
 export const institutionalFindingsDirectory = '.planning/staff/institutional/j7/after-action';
@@ -50,6 +51,7 @@ export interface InstitutionalDraftScope {
     readonly correctionAtEffect: (correction: InstitutionalObservationCorrection | null) => boolean;
   };
   readonly catalogue?: () => InstitutionalCatalogueEvidence;
+  readonly businessServices?: () => InstitutionalBusinessServicesEvidence;
   readonly findings?: {
     readonly current: () => InstitutionalFindingsEvidence;
     readonly predecessorCurrent: () => Promise<boolean>;
@@ -115,7 +117,16 @@ interface InstitutionalCatalogueReview extends Omit<InstitutionalBriefReview, 'd
   readonly stewardship: 'pending';
 }
 
-export type InstitutionalDraftReview = InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
+interface InstitutionalBusinessServicesReview extends Omit<InstitutionalBriefReview, 'duty' | 'kind'> {
+  readonly duty: 'J6-IT01';
+  readonly kind: 'business-services';
+  readonly policyRevision: string;
+  readonly scopeDigest: string;
+  readonly portfolioOwner: InstitutionalCatalogueSource;
+  readonly portfolioDecision: 'pending';
+}
+
+export type InstitutionalDraftReview = InstitutionalBusinessServicesReview | InstitutionalCatalogueReview | InstitutionalBriefReview | InstitutionalActionRegisterReview | InstitutionalObservationReview | InstitutionalFindingsReview;
 
 export interface PreparedInstitutionalDraft {
   readonly path: string;
@@ -708,6 +719,43 @@ function catalogueId(value: unknown): string {
   return value;
 }
 
+function metadataSource(sources: readonly InstitutionalBriefSource[], entry: unknown, role: string): InstitutionalCatalogueSource {
+  const evidence = record(entry, ['sourceId', 'revision', 'role']);
+  const source = sources.find(({ id, revision }) => id === evidence.sourceId && revision === evidence.revision);
+  requireCatalogue(source && evidence.role === role);
+  return { role, sourceId: source.id, revision: source.revision, hash: institutionalSourceHash(source) };
+}
+
+function metadataGrants<Field extends string>(input: unknown, allowedFields: readonly Field[]): ReadonlyMap<string, readonly Field[]> {
+  const grants = list(input, (entry) => {
+    const grant = record(entry, ['id', 'fields']);
+    const fields = list(grant.fields, (field) => {
+      const allowed = allowedFields.find((candidate) => candidate === field);
+      requireCatalogue(allowed !== undefined);
+      return allowed;
+    });
+    requireCatalogue(new Set(fields).size === fields.length);
+    return [catalogueId(grant.id), fields] as const;
+  });
+  const grantsById = new Map(grants);
+  requireCatalogue(grantsById.size === grants.length);
+  return grantsById;
+}
+
+function requestedCatalogueRows<Row extends { id: string }>(
+  input: unknown, accepted: { readonly productId: string; readonly records: readonly Row[] },
+): Row[] {
+  const request = record(input, ['productId', 'recordIds']);
+  requireCatalogue(request.productId === accepted.productId);
+  const ids = list(request.recordIds, catalogueId, 1);
+  requireCatalogue(new Set(ids).size === ids.length);
+  return ids.sort().map((id) => {
+    const row = accepted.records.find((entry) => entry.id === id);
+    requireCatalogue(row);
+    return row;
+  });
+}
+
 export function admittedInstitutionalCatalogue(
   raw: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[],
 ): InstitutionalCatalogueEvidence {
@@ -716,24 +764,8 @@ export function admittedInstitutionalCatalogue(
   const { requester, purpose } = authorization;
   requireCatalogue(authorization.project === binding.project && authorization.directory === binding.directory &&
     requester === 'fictional-catalogue-reviewer' && purpose === 'fictional-office-records-j2-is01');
-  const sourceEvidence = (entry: unknown, role: string): InstitutionalCatalogueSource => {
-    const evidence = record(entry, ['sourceId', 'revision', 'role']);
-    const source = sources.find(({ id, revision }) => id === evidence.sourceId && revision === evidence.revision);
-    requireCatalogue(source && evidence.role === role);
-    return { role, sourceId: source.id, revision: source.revision, hash: institutionalSourceHash(source) };
-  };
-  const steward = sourceEvidence(authorization.steward, 'fictional-domain-steward');
-  const grants = list(authorization.grants, (entry) => {
-    const grant = record(entry, ['id', 'fields']);
-    const fields = list(grant.fields, (field) => {
-      requireCatalogue(catalogueFields.some((allowed) => allowed === field));
-      return field as CatalogueField;
-    });
-    requireCatalogue(new Set(fields).size === fields.length);
-    return { id: catalogueId(grant.id), fields };
-  });
-  requireCatalogue(new Set(grants.map(({ id }) => id)).size === grants.length);
-  const eligible = new Map(grants.map(({ id, fields }) => [id, fields]));
+  const steward = metadataSource(sources, authorization.steward, 'fictional-domain-steward');
+  const eligible = metadataGrants(authorization.grants, catalogueFields);
   const rows = list(inventory, (entry) => {
     requireCatalogue(entry && typeof entry === 'object' && !Array.isArray(entry));
     return entry as Record<string, unknown>;
@@ -753,13 +785,13 @@ export function admittedInstitutionalCatalogue(
     for (const field of fields) {
       if (field !== 'platform-status' && Object.hasOwn(descriptive, field)) projected[field] = text(descriptive[field], 240);
     }
-    const custodian = sourceEvidence(row.custodian, 'fictional-records-custodian');
+    const custodian = metadataSource(sources, row.custodian, 'fictional-records-custodian');
     requireCatalogue(custodian.sourceId !== steward.sourceId);
     let platformStatus: InstitutionalCatalogueRow['platformStatus'];
     if (fields.includes('platform-status') && row.platformStatus !== undefined) {
       const status = record(row.platformStatus, ['state', 'source']);
       requireCatalogue(status.state === 'documented' || status.state === 'unknown');
-      platformStatus = { state: status.state, source: sourceEvidence(status.source, 'fictional-platform-steward') };
+      platformStatus = { state: status.state, source: metadataSource(sources, status.source, 'fictional-platform-steward') };
     }
     records.push({ id, fields: projected, scope, availability, freshness, handling, custodian, steward, ...(platformStatus && { platformStatus }) });
   }
@@ -771,15 +803,7 @@ export function admittedInstitutionalCatalogue(
 export function prepareInstitutionalCatalogue(
   input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalCatalogueEvidence,
 ): PreparedInstitutionalDraft {
-  const request = record(input, ['productId', 'recordIds']);
-  requireCatalogue(request.productId === accepted.productId);
-  const ids = list(request.recordIds, catalogueId, 1);
-  requireCatalogue(new Set(ids).size === ids.length);
-  const records = ids.sort().map((id) => {
-    const row = accepted.records.find((entry) => entry.id === id);
-    requireCatalogue(row);
-    return row;
-  });
+  const records = requestedCatalogueRows(input, accepted);
   const evidenceIds = new Set([accepted.steward.sourceId, ...records.flatMap(({ custodian, platformStatus }) =>
     platformStatus ? [custodian.sourceId, platformStatus.source.sourceId] : [custodian.sourceId])]);
   const identity = { ...binding, duty: 'J2-IS01' as const, echelon: 'L3' as const, kind: 'records-catalogue' as const,
@@ -789,4 +813,105 @@ export function prepareInstitutionalCatalogue(
   requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
   const version = institutionalBriefDigest(bytes);
   return { path: `${institutionalCatalogueDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
+}
+
+
+const businessServiceFields = ['title', 'owner', 'review-date', 'support-hours', 'user-groups', 'dependencies', 'support-route'] as const;
+
+interface InstitutionalServiceRecord {
+  readonly id: string;
+  readonly title?: string;
+  readonly owner?: InstitutionalCatalogueSource;
+  readonly reviewDate?: string;
+  readonly supportHours?: string;
+  readonly userGroups?: readonly string[];
+  readonly dependencies?: readonly string[];
+  readonly supportRoute?: { readonly desk: string; readonly instruction: string; readonly source: InstitutionalCatalogueSource };
+  readonly document: InstitutionalCatalogueSource;
+  readonly freshness: 'current' | 'stale' | 'unknown';
+  readonly state: 'proposed' | 'exception';
+  readonly openIssues: readonly ('owner-unresolved' | 'review-date-unresolved' | 'freshness-unresolved' | 'possible-duplicate')[];
+}
+
+export interface InstitutionalBusinessServicesEvidence {
+  readonly requester: 'fictional-service-reviewer';
+  readonly purpose: 'fictional-office-services-j6-it01';
+  readonly productId: string;
+  readonly policyRevision: string;
+  readonly portfolioOwner: InstitutionalCatalogueSource;
+  readonly records: readonly InstitutionalServiceRecord[];
+}
+
+function serviceDate(value: unknown): string {
+  const date = text(value, 10);
+  requireCatalogue(/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date);
+  return date;
+}
+
+export function admittedInstitutionalBusinessServices(
+  raw: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[],
+): InstitutionalBusinessServicesEvidence {
+  const { receipt, services } = record(raw, ['receipt', 'services']);
+  const authorization = record(receipt, ['project', 'directory', 'requester', 'purpose', 'policyRevision', 'productId', 'portfolioOwner', 'grants']);
+  const { requester, purpose } = authorization;
+  requireCatalogue(authorization.project === binding.project && authorization.directory === binding.directory &&
+    requester === 'fictional-service-reviewer' && purpose === 'fictional-office-services-j6-it01');
+  const portfolioOwner = metadataSource(sources, authorization.portfolioOwner, 'fictional-service-portfolio-owner');
+  const grants = metadataGrants(authorization.grants, businessServiceFields);
+  const records: InstitutionalServiceRecord[] = [];
+  for (const entry of list(services, (value) => value)) {
+    requireCatalogue(entry && typeof entry === 'object' && !Array.isArray(entry));
+    const row = entry as Record<string, unknown>;
+    if (typeof row.id !== 'string') continue;
+    const fields = grants.get(row.id);
+    if (!fields) continue;
+    const { id, freshness } = row;
+    requireCatalogue(freshness === 'current' || freshness === 'stale' || freshness === 'unknown');
+    requireCatalogue(row.duplicate === undefined || typeof row.duplicate === 'boolean');
+    const document = metadataSource(sources, row.document, 'fictional-service-documenter');
+    requireCatalogue(document.sourceId !== portfolioOwner.sourceId);
+    const title = fields.includes('title') && row.title !== undefined ? text(row.title, 80) : undefined;
+    requireCatalogue(title === undefined || /^[a-z0-9][a-z0-9 '-]*$/i.test(title));
+    const owner = fields.includes('owner') && row.owner !== undefined
+      ? metadataSource(sources, row.owner, 'fictional-induction-coordinator') : undefined;
+    requireCatalogue(!owner || (owner.sourceId !== document.sourceId && owner.sourceId !== portfolioOwner.sourceId));
+    const reviewDate = fields.includes('review-date') && row.reviewDate !== undefined ? serviceDate(row.reviewDate) : undefined;
+    const supportHours = fields.includes('support-hours') && row.supportHours !== undefined ? text(row.supportHours, 32) : undefined;
+    requireCatalogue(supportHours === undefined || /^(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d weekdays$/.test(supportHours));
+    const userGroups = fields.includes('user-groups') && row.userGroups !== undefined ? list(row.userGroups, slug) : undefined;
+    const dependencies = fields.includes('dependencies') && row.dependencies !== undefined ? list(row.dependencies, slug) : undefined;
+    let supportRoute: InstitutionalServiceRecord['supportRoute'];
+    if (fields.includes('support-route') && row.supportRoute !== undefined) {
+      const route = record(row.supportRoute, ['desk', 'instruction', 'source']);
+      requireCatalogue(route.desk === 'office-welcome-desk' && route.instruction === 'ask-for-induction-scheduling');
+      supportRoute = { desk: 'Office welcome desk', instruction: 'Ask the office welcome desk about induction scheduling.',
+        source: metadataSource(sources, route.source, 'fictional-office-welcome-desk') };
+    }
+    const openIssues: Array<InstitutionalServiceRecord['openIssues'][number]> = [];
+    if (!owner) openIssues.push('owner-unresolved');
+    if (!reviewDate) openIssues.push('review-date-unresolved');
+    if (freshness !== 'current') openIssues.push('freshness-unresolved');
+    if (row.duplicate) openIssues.push('possible-duplicate');
+    records.push({ id, document, freshness, state: openIssues.length ? 'exception' : 'proposed', openIssues,
+      ...(title && { title }), ...(owner && { owner }), ...(reviewDate && { reviewDate }), ...(supportHours && { supportHours }),
+      ...(userGroups && { userGroups }), ...(dependencies && { dependencies }), ...(supportRoute && { supportRoute }) });
+  }
+  requireCatalogue(new Set(records.map(({ id }) => id)).size === records.length);
+  return { requester, purpose, productId: slug(authorization.productId), policyRevision: revision(authorization.policyRevision),
+    portfolioOwner, records: records.sort((a, b) => a.id.localeCompare(b.id)) };
+}
+
+export function prepareInstitutionalBusinessServices(
+  input: unknown, binding: InstitutionalBriefBinding, sources: readonly InstitutionalBriefSource[], accepted: InstitutionalBusinessServicesEvidence,
+): PreparedInstitutionalDraft {
+  const records = requestedCatalogueRows(input, accepted);
+  const evidenceIds = new Set([accepted.portfolioOwner.sourceId, ...records.flatMap(({ document, owner, supportRoute }) =>
+    [document.sourceId, owner?.sourceId, supportRoute?.source.sourceId])]);
+  const identity = { ...binding, duty: 'J6-IT01' as const, echelon: 'L3' as const, kind: 'business-services' as const,
+    productId: accepted.productId, policyRevision: accepted.policyRevision, scopeDigest: canonicalDigest(accepted),
+    portfolioOwner: accepted.portfolioOwner, portfolioDecision: 'pending' as const, sources: sourceReferences(sources.filter(({ id }) => evidenceIds.has(id))) };
+  const bytes = canonicalBytes({ schema: 1, ...identity, body: { records } });
+  requireCatalogue(bytes.length <= institutionalBriefMaxBytes);
+  const version = institutionalBriefDigest(bytes);
+  return { path: `${institutionalBusinessServicesDirectory}/${version}.json`, text: bytes.toString('utf8'), review: { ...identity, version } };
 }
