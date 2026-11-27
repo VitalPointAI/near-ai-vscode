@@ -20,6 +20,7 @@ import type { StaffSettings } from '../domain/staff/profiles';
 import { applyStaffSetup, levelChoices, nationChoices, planStaffSetup, profileChoices, settingsFrom, staffTeamFileName, staffTeamTarget, templateQuestions } from '../services/staffSetup';
 import { buildStudioContext, parseStudioMessage } from '../services/teamStudioPage';
 import { TeamUpdater } from '../services/teamUpdates';
+import { setCasProbe } from '../staff/staffFiles';
 import { buildToolsDirectory, type DirectoryInput } from '../services/toolsDirectory';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -187,24 +188,35 @@ function profileState() {
 const institutionalStageKey = (project: string) => `nearAi.staff.institutional.commandGroup.v1.${createHash('sha256').update(project).digest('hex')}`;
 
 test('Studio staff setup confirms the selected physical project and holds changes to reviewed files or the shared team', async () => {
-  for (const scenario of ['write', 'edit during questions', 'edit at confirmation', 'replace directory', 'team appeared', 'existing shared team'] as const) {
+  for (const scenario of ['write', 'edit during questions', 'edit at confirmation', 'replace directory', 'switch during apply', 'team appeared', 'existing shared team'] as const) {
     const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'studio-staff-setup-')));
     const other = path.join(temp, 'other');
     const root = path.join(temp, 'selected');
     const projectFile = path.join(root, '.planning', '.near-ai', 'project.json');
     const agentsFile = path.join(root, 'AGENTS.md');
+    const profileFile = path.join(root, '.planning', 'staff', 'PROFILE.md');
+    const profileBytes = '# Existing staff profile\n';
     const projectBytes = '{"custom":"preserve"}';
     const agentBytes = '# Existing project notes\n';
     await mkdir(other);
     await mkdir(path.dirname(projectFile), { recursive: true });
     await writeFile(projectFile, projectBytes);
     await writeFile(agentsFile, agentBytes);
+    if (scenario === 'switch during apply') {
+      await mkdir(path.dirname(profileFile), { recursive: true });
+      await writeFile(profileFile, profileBytes);
+    }
     const library = new TeamLibrary(path.join(temp, 'library'));
     const team = path.join(library.directory, 'j4-us-joint-operational.md');
     await mkdir(library.directory, { recursive: true });
     if (scenario === 'existing shared team') await writeFile(team, 'Earlier shared team');
     const originalDirectory = await stat(root, { bigint: true });
     const { stub, setUpStaffTeam, uninstall } = staffSetupVscode();
+    let selected = true;
+    let wroteAfterSwitch = false;
+    const sameDirectory = () => {
+      try { return statSync(root, { bigint: true }).ino === originalDirectory.ino; } catch { return false; }
+    };
     try {
       stub.setWorkspaceFolders([other, root]);
       const window = (stub.vscode as typeof import('vscode')).window;
@@ -227,10 +239,13 @@ test('Studio staff setup confirms the selected physical project and holds change
         'Operational', 'Campaign', 'Local runtime only', '$(check) Set up the team');
       const options = { library, section: 'j4' as const, studio: {
         root, name: 'Selected project', projectJson: projectBytes,
-        isCurrent: () => {
-          try { return statSync(root, { bigint: true }).ino === originalDirectory.ino; } catch { return false; }
-        }
+        isCurrent: () => selected && sameDirectory(), isSameDirectory: sameDirectory
       } };
+      if (scenario === 'switch during apply') setCasProbe(async (point, file) => {
+        if (file !== profileFile) return;
+        if (point === 'before-rename') selected = false;
+        if (point === 'before-temp' && !selected) wroteAfterSwitch = await readFile(profileFile, 'utf8') !== profileBytes;
+      });
       const result = await setUpStaffTeam(options);
       assert.deepEqual(await readdir(other), [], scenario);
       assert.ok(stub.quickPickRequests.every(({ title }) => !title?.includes('which project?')), scenario);
@@ -244,7 +259,15 @@ test('Studio staff setup confirms the selected physical project and holds change
       assert.equal(result, undefined, scenario);
       assert.equal(await readFile(projectFile, 'utf8'), projectBytes, scenario);
       assert.equal(await readFile(agentsFile, 'utf8'), scenario === 'edit during questions' ? '# Edited while answering\n' : scenario === 'edit at confirmation' ? '# Edited while confirming\n' : agentBytes, scenario);
-      assert.deepEqual(await readdir(path.join(root, '.planning')), ['.near-ai'], scenario);
+      const planning = await readdir(path.join(root, '.planning'));
+      if (scenario === 'switch during apply') {
+        assert.equal(wroteAfterSwitch, false, 'no changed bytes may become visible after the workspace switch');
+        assert.equal(await readFile(profileFile, 'utf8'), profileBytes);
+        assert.deepEqual(await readdir(path.dirname(profileFile)), ['PROFILE.md']);
+        assert.deepEqual(planning.sort(), ['.near-ai', 'staff']);
+      } else {
+        assert.deepEqual(planning, ['.near-ai'], scenario);
+      }
       assert.deepEqual(await library.archived(), [], scenario);
       if (scenario === 'team appeared' || scenario === 'existing shared team') {
         assert.equal(await readFile(team, 'utf8'), scenario === 'team appeared' ? 'New shared team' : 'Earlier shared team');
@@ -253,7 +276,10 @@ test('Studio staff setup confirms the selected physical project and holds change
       }
       assert.ok(stub.notifications.some(({ message }) => /changed|shared/i.test(message)), scenario);
       if (scenario === 'edit during questions' || scenario === 'existing shared team') assert.equal(roster, undefined, scenario);
-    } finally { uninstall(); }
+    } finally {
+      setCasProbe(undefined);
+      uninstall();
+    }
   }
 });
 

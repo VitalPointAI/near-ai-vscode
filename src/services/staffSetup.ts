@@ -348,6 +348,8 @@ export interface StaffSetupResult { readonly teamFile: string; readonly archived
  */
 export async function applyStaffSetup(root: string, library: TeamLibrary, plan: StaffSetupPlan, options: { replace?: boolean; studioReview?: StudioStaffReview } = {}): Promise<StaffSetupResult> {
   const review = options.studioReview;
+  const guard = review ? () => review.selection.isCurrent() : undefined;
+  const mayRestore = review ? () => review.selection.isSameDirectory?.() ?? review.selection.isCurrent() : undefined;
   if (review) {
     if (root !== review.selection.root || !plan.writes.every(({ path: file }) => review.files.has(file))) throw new Error(STUDIO_STAFF_CHANGED);
     await verifyStudioFiles(review.selection, review.files);
@@ -365,9 +367,11 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
       const file = path.join(root, ...write.path.split('/'));
       const before = review ? review.files.get(write.path) : await readFile(file).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
       if (review) ensureStudioCurrent(review.selection);
-      await mkdir(path.dirname(file), { recursive: true });
-      if (review) ensureStudioCurrent(review.selection);
-      if (!(await writeIfUnchanged(file, snapshotOfBytes(before), write.content))) throw new Error(`${write.path} changed while the staff team was being set up.`);
+      else await mkdir(path.dirname(file), { recursive: true });
+      if (!(await writeIfUnchanged(file, snapshotOfBytes(before), write.content, guard))) {
+        if (review) ensureStudioCurrent(review.selection);
+        throw new Error(`${write.path} changed while the staff team was being set up.`);
+      }
       done.push({ file, before, wrote: write.content });
     }
     await mkdir(library.directory, { recursive: true });
@@ -387,10 +391,10 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
       await (path.basename(archived) === path.basename(target.file) ? library.restore(archived) : rename(archived, target.file)).catch(() => undefined);
     }
     for (const entry of done.reverse()) {
-      if (review && !(review.selection.isSameDirectory?.() ?? review.selection.isCurrent())) {
+      if (mayRestore && !mayRestore()) {
         throw new Error('The project folder moved during setup. Review the original folder for any setup files.');
       }
-      await writeIfUnchanged(entry.file, snapshotOfBytes(Buffer.from(entry.wrote, 'utf8')), entry.before === undefined ? undefined : entry.before.toString('utf8')).catch(() => undefined);
+      await writeIfUnchanged(entry.file, snapshotOfBytes(Buffer.from(entry.wrote, 'utf8')), entry.before === undefined ? undefined : entry.before.toString('utf8'), mayRestore).catch(() => undefined);
     }
     throw new Error(`The staff team was not set up, and what was written is rolled back: ${error instanceof Error ? error.message : String(error)}`);
   }
