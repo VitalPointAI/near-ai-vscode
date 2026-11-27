@@ -82,15 +82,32 @@ does not create or bind the required volumes. [Lab VM settings](https://github.c
 ### Example pilot storage configuration
 
 For a three-node pilot using Zot, start the sizing exercise with three OpenBao servers, two
-Keycloak replicas, three OpenSearch data nodes, and one hub. Set the hub volume to 10 GiB and
-reserve a 100 GiB pool for retained workspaces in this example. The example volumes above
-then total 1,235 GiB of logical capacity, before any other configured volumes, backups outside
-the cluster or restore headroom. With three Longhorn copies of every volume in that subtotal,
-allow 3,705 GiB of physical capacity for those copies alone. An initial hardware candidate is
-an additional 2 TiB usable SSD per node for application storage, separate from the OS disk.
-Use the actual StorageClass replica policy and the complete rendered volume inventory to
-recalculate. The three-node topology gives you a place to test failure and recovery, including
-the behavior of single-replica services.
+Keycloak replicas, three OpenSearch data nodes, and one hub. The storage budget uses the site
+example values and two pilot sizing assumptions for the hub and retained workspaces.
+
+| Storage contributor | Calculation | Logical capacity |
+| --- | --- | ---: |
+| Zot registry | One 200 GiB volume | 200 GiB |
+| PostgreSQL | One 20 GiB data volume and one 20 GiB dump volume for Keycloak's database | 40 GiB |
+| OpenBao | Three 10 GiB data volumes and one shared 5 GiB Raft snapshot volume | 35 GiB |
+| OpenSearch | Three 200 GiB data volumes and one shared 200 GiB snapshot volume | 800 GiB |
+| Prometheus and Alertmanager | One 50 GiB server volume and one 2 GiB Alertmanager volume | 52 GiB |
+| Hub state | One 10 GiB volume assumed for this pilot | 10 GiB |
+| Retained workspaces | 100 GiB reserved for the workspaces you expect to retain | 100 GiB |
+| **Total** | **Requested volumes and workspace reserve** | **1,237 GiB** |
+
+The [base Prometheus values](https://github.com/VitalPointAI/near-ai-vscode/blob/main/deploy/values/prometheus.yaml)
+enable Alertmanager's 2 GiB claim. This pilot assumes a site HSM. A lab using SoftHSM2
+needs a separately provisioned token volume. Budget any site-specific key custody volumes
+separately. The total includes the listed snapshot volumes. Add space for other configured
+volumes, storage overhead, external backups and restore headroom.
+
+If each volume uses three Longhorn replicas, budget 3,711 GiB of backing SSD capacity across
+the cluster for those copies alone. An initial hardware candidate is an additional 2 TiB of
+usable SSD capacity per node for application storage, separate from the OS disk. Recalculate
+using the actual StorageClass replica policy and complete rendered volume inventory.
+The three-node topology gives you a place to test failure and recovery, including the
+behavior of single-replica services.
 
 ### Storage and site acceptance
 
