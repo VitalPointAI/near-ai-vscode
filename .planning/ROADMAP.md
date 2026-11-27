@@ -1894,11 +1894,12 @@ Plans:
   6. The right-side Context Graph action opens the same native landing in English and French. With a governed workspace data source, people can explore the authorized graph by strategic, operational or tactical detail, then narrow it by area of interest, activity, responsibility and time. Citations reopen the source version and span the reader can access.
   7. Visible new graph evidence animates into place. Existing nodes stay anchored, affected entities and links briefly highlight, and people can keep panning, filtering and inspecting sources during updates. Pause and reduced-motion modes preserve the same visible information. (KB-05, KB-07, KB-08)
 **Research flags**: Mosaic and Splink licences and dependency trees; pgvector recall at low clearance.
-**Plans:** 1 local synthetic preparation plan. Production plans follow Phase 93.
+**Plans:** Two verified local synthetic preparation plans. Production plans follow Phase 93.
 **UI hint**: yes
 
 Plans:
 - [x] 96-01-PLAN.md — Fictional graph and exact citation acceptance fixture
+- [x] 96-02-PLAN.md — Interactive Chromium graph motion, evidence and accessibility fixture
 - [ ] Governed store, search, [animated entity exploration](phases/96-search-context-graph-entity-pages-and-ask/96-UI-SPEC.md) and answer acceptance
 
 ### Phase 97: Analytics, reports, insights and views
@@ -2418,7 +2419,7 @@ Plans:
 | 93. Classification, labels, privacy assessment and exceptions | 0/TBD | Not started | - |
 | 94. Lifecycle, erasure and the personal mark | 0/TBD | Not started | - |
 | 95. Legal holds and access requests | 0/TBD | Not started | - |
-| 96. Search, context graph, entity pages and ask | 0/TBD | Not started | - |
+| 96. Search, context graph, entity pages and ask | 2 local | Synthetic corpus and browser prototype verified; production follows Phase 93 | - |
 | 97. Analytics, reports, insights and views | 0/TBD | Not started | - |
 | 98. Model factory v1, first specialist from chat and run logs | 0/TBD | Not started | - |
 | 99. Opportunity agent, data-gap planning and specialists from organization data | 0/TBD | Not started | - |
