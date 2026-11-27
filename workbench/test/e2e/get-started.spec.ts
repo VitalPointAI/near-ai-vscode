@@ -384,6 +384,11 @@ test('Team Studio staff setup previews the selected project in the User language
 
     const reset = await openLanguageSetting(workbench);
     await pickLanguage(reset, 'ArrowUp', 'English (Canada)');
+    // The next release-image test shares this User profile. Wait for the host
+    // to apply the reset before closing the context that changed it.
+    await studioTab.click();
+    await expect(frame.getByRole('heading', { name: 'Staff setup preview', exact: true })).toBeVisible();
+    await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
   } finally {
     await reopenedContext.close();
   }
@@ -395,7 +400,9 @@ test('on the release image, Create on a work-area page creates the work area and
   test.skip(process.env.STERLING_BUNDLED_EXTENSION !== '1', 'needs the release image, which bundles the NEAR AI extension');
   const title = process.env.STERLING_WORK_AREA_TITLE ?? 'Winter exercise';
   await openGetStarted(page);
-  await page.locator('.sterling-welcome .sterling-destination', { hasText: 'Exercises & Training' }).click();
+  const welcome = page.locator('.sterling-welcome');
+  await expect(welcome, 'the release profile is in English before creating the training work area').toHaveAttribute('lang', 'en-CA');
+  await welcome.locator('.sterling-destination', { hasText: 'Exercises & Training' }).click();
   const landing = page.locator('#sterling-area-training');
   await expect(landing.locator('h1')).toHaveText('Exercises & Training');
   await landing.getByRole('button', { name: 'Create training work area' }).click();
