@@ -12,6 +12,7 @@ import type { PolicySectionId } from '../domain/gate/proposal';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, STALE_DRAFT_TEXT, gateDir, parsePolicyDraft } from '../gate/bundleStore';
 import type { GateHost } from '../gate/host';
+import { NO_SECRET_STORAGE_TEXT } from '../gate/organizationStore';
 import { loadDeviceIdentity } from '../team/identity';
 import type { SecretStorageLike } from './auth';
 import { openPolicyEditor, openPolicyProposal, registerPolicyEditor } from './policyEditor';
@@ -78,6 +79,13 @@ export function policyEditorDeps(host: GateHost, hooks: PolicyEditorHooks): { re
   const stop = host.onDidChange(load);
   const deps: PolicyEditorDeps = {
     state: () => editorStateOf(host, identity?.publicKey),
+    unavailableNotice: () => {
+      const state = host.bundleState();
+      if (state.state === 'valid') return undefined;
+      return state.sentence === NO_SECRET_STORAGE_TEXT
+        ? `${NO_SECRET_STORAGE_TEXT} Ask your administrator to set up a secret store, then reopen the workbench.`
+        : state.sentence || undefined;
+    },
     // One key path for the narrowing table: the section, then the key, any [id] read as [] (41-02).
     directionOf: (section, key, before, after) => narrowingOf(`${section}.${key}`.replace(/\[[^\]]*\]/g, '[]'), before, after, host.policyLayers().effective?.labels.scales),
     applyPersonal: async (next, baseHash) => {

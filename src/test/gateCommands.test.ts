@@ -14,6 +14,8 @@ import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, INSTALL_LOG_KEY, projectLogKey } from '../gate/decisionLog';
 import { SessionMark } from '../domain/gate/dominance';
 import { GateHost } from '../gate/host';
+import { NO_SECRET_STORAGE_TEXT } from '../gate/organizationStore';
+import type { SecretStorageLike } from '../services/auth';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -109,6 +111,75 @@ test('a policy file that was changed shows "Policy: reading only" with the bundl
   assert.equal(item.text, 'Policy: reading only');
   assert.ok(item.tooltip.includes(BUNDLE_FAILURES['bad-signature']));
   assert.equal((item.backgroundColor as { id: string }).id, 'statusBarItem.warningBackground');
+});
+
+test('Governance shows the failed trust check when rules are unavailable', async (t) => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-no-secrets-'));
+  const { Uri, window } = stub.vscode as typeof import('vscode');
+  type PanelState = { notice?: string; sections: unknown[]; actions: unknown[]; pageActions: unknown[] };
+  const posted: PanelState[] = [];
+  let close: (() => void) | undefined;
+  let closeWindow = async (): Promise<void> => undefined;
+  Object.assign(Uri, { joinPath: (base: { fsPath: string }, ...parts: string[]) => Uri.file(path.join(base.fsPath, ...parts)) });
+  Object.assign(window, { createWebviewPanel: (_type: string, title: string) => ({
+    title,
+    webview: {
+      cspSource: 'vscode-resource:',
+      asWebviewUri: (uri: unknown) => uri,
+      postMessage: async (message: PanelState) => { posted.push(message); return true; },
+      onDidReceiveMessage: () => undefined
+    },
+    onDidChangeViewState: () => undefined,
+    onDidDispose: (listener: () => void) => { close = listener; },
+    dispose: () => { close?.(); }
+  }) });
+  t.after(async () => {
+    await closeWindow();
+    Reflect.deleteProperty(Uri, 'joinPath');
+    Reflect.deleteProperty(window, 'createWebviewPanel');
+  });
+  const open = async (secrets: SecretStorageLike) => {
+    await closeWindow();
+    posted.length = 0;
+    const context = { ...createFakeContext(storage, secrets), extensionUri: Uri.file(storage) };
+    const host = gateCommands.registerGate(context as never, { notify: () => undefined });
+    closeWindow = async () => {
+      for (const item of context.subscriptions) item.dispose();
+      await host.flush();
+    };
+    await stub.commands.get(gateCommands.OPEN_POLICY_COMMAND)?.();
+    const panel = posted.at(-1);
+    assert.ok(panel, 'the installed Governance command posted to the real Policy Editor');
+    return { host, panel };
+  };
+
+  const bundle = path.join(gateDir(storage), POLICY_BUNDLE_FILE);
+  const refused = () => Promise.reject(new Error('This workbench has no secret store.'));
+  let storeAttempts = 0;
+  const unavailable = await open({ get: refused, store: () => { storeAttempts += 1; return refused(); }, delete: refused });
+  const state = unavailable.host.bundleState();
+  assert.equal(state.state, 'failed-closed');
+  assert.equal(state.state === 'failed-closed' && state.sentence, NO_SECRET_STORAGE_TEXT);
+  assert.equal(unavailable.host.policyLayers().effective, undefined);
+  assert.deepEqual([unavailable.panel.sections, unavailable.panel.actions, unavailable.panel.pageActions], [[], [], []]);
+  await assert.rejects(unavailable.host.reset(), /could not use its signing key/);
+  assert.equal(storeAttempts, 0);
+  assert.equal(existsSync(bundle), false);
+
+  const secrets = new MemorySecrets();
+  const ready = await open(secrets);
+  assert.equal(ready.host.bundleState().state, 'valid');
+  assert.ok(ready.panel.sections.length > 0);
+  assert.equal(ready.panel.notice, undefined);
+
+  const tampered = (await readFile(bundle, 'utf8')).replace('"Restricted"', '"Restricteb"');
+  await writeFile(bundle, tampered);
+  const invalid = await open(secrets);
+  assert.equal(invalid.host.bundleState().state, 'failed-closed');
+  assert.deepEqual([invalid.panel.sections, invalid.panel.actions, invalid.panel.pageActions], [[], [], []]);
+  assert.equal(await readFile(bundle, 'utf8'), tampered);
+  assert.equal(unavailable.panel.notice, `${NO_SECRET_STORAGE_TEXT} Ask your administrator to set up a secret store, then reopen the workbench.`);
+  assert.equal(invalid.panel.notice, BUNDLE_FAILURES['bad-signature']);
 });
 
 test('Show Policy opens a read-only document with the hash, the self-declared clearance text, the scales caveat and the "what is live" line above the scales, clearances and routing', async () => {
