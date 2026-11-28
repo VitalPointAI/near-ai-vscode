@@ -125,11 +125,17 @@ Plans:
   3. Nothing outside the repository is changed by an agent and no token is asked for or stored: branch protection, environments and secrets are written as exact commands for the person to approve and run, and the step checks afterwards and says what is still missing. (DEVF-03)
   4. Re-running the step on a project that already has part of the kit adds only what is missing and never overwrites the person's own workflow files without showing the difference first. (DEVF-04)
 **Research flags**: Which parts of this repository's kit (`scripts/merge-pr.mjs`, the agent review workflow, `prepare-release`) generalise to other project types; the kit is also the pull-request mode of Team Mode's merge train later (L2).
-**Plans:** 0 plans
+**Plans:** 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 28 to break down)
+- [ ] 28-01-PLAN.md — Software Project Setup tracer, exact preview and safe local file application (wave 1)
+- [ ] 28-02-PLAN.md — Exported CI review, merge, release and human bootstrap workflow (wave 2, depends on 28-01)
+- [ ] 28-03-PLAN.md — Owner setup, effective GitHub evidence and disposable repository acceptance (wave 3, depends on 28-02)
+
+The first profile is a GitHub.com project with an npm lockfile and declared build and test
+commands. Implementation proves local behavior with fixtures. Live protection and publication
+acceptance require the owner-approved disposable target and a distinct reviewer.
 
 ### Phase 29: A cleanup member with a safe CleanUp tool
 **Goal**: The software team tidies what agents leave behind (test output, screenshot folders, temporary mirrors) so it stops filling disk and memory, without ever deleting something important or in use: safety lives in a CleanUp tool and in the gate, not in a prompt.
@@ -141,10 +147,13 @@ Plans:
   3. Nothing is deleted at once: items move to a recoverable quarantine with a manifest, a Restore command brings them back, and a purge happens only after a retention window of about 7 days. (CLEAN-03)
   4. A dry-run list comes first, and the person confirms anything not on the known-disposable list, anything large or of unknown origin, and every permanent purge. (CLEAN-04)
   5. The cleanup member gets only CleanUp and read-only tools (no Bash, no Write), and a disaster test proves each never-touch rule. (CLEAN-05)
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 29 to break down)
+- [ ] 29-01-PLAN.md — Register the cleanup member and preview artifacts with verified provenance.
+- [ ] 29-02-PLAN.md — Enforce never-touch rules and record recoverable quarantine.
+- [ ] 29-03-PLAN.md — Restore artifacts and require separate human approval for permanent purge.
+- [ ] 29-04-PLAN.md — Verify a managed artifact producer and cleanup lifecycle in the built Workbench.
 
 ### Staff collaboration: multi-user staff workspaces (Phases 30 to 35, added 2026-11-19)
 
@@ -1597,6 +1606,10 @@ The knowledge base of the paused former v0.5.0 knowledge-base plan returns here 
 | 23 Forecasting | Deferred, intelligence projects only | none |
 | 24 Hardening and release | Carries, extended to the database, caches and model server logs | 101 |
 
+### Canadian English and French
+
+Canadian deployments require a user-switchable English and French experience across the Workbench, setup and administration, plus both language renditions of approved shared products. Add source-linked translation and professional review to published outputs. Evaluate approved local or private translation options through Model Factory and extend the same controls to authorized multilingual document intake. Track the cross-cutting requirements LANG-01 to LANG-03 across Workbench localization, Phase 96 and Phase 98. See [Canadian official-language requirements and sequencing](research/canadian-official-languages.md).
+
 ### Stage A: host and spikes (Phases 85-87)
 
 ### Phase 85: Host and local inference on Strix Halo (L1a), measured
@@ -1818,7 +1831,7 @@ Plans:
 ### Stage E: the model factory (Phases 98-99)
 
 ### Phase 98: Model factory v1, first specialist from chat and run logs
-**Goal**: One specialist goes from proposal card to live for one role, trained on your organization's own machine, matching or beating the incumbent, with rollback tested.
+**Goal**: One specialist goes from proposal card to live for one role, trained on suitable approved hardware from your organization's network, matching or beating the incumbent, with rollback tested. The Model Factory also owns the planned classification and protection adviser's training and fine-tuning.
 **Depends on**: Phase 85 (the host trainer); Phase 74 (contracts). It needs none of Phases 88 to 97, so it runs beside them. Owner decisions 11, 12 and 13.
 **Requirements**: FAC-01, FAC-02, FAC-03, FAC-04, FAC-05, FAC-06, FAC-07, FAC-08, FAC-09
 **Success Criteria** (what must be TRUE):
@@ -1826,8 +1839,8 @@ Plans:
   2. A session below the model's label cannot route to it, and requests fall back to the incumbent while the host is down. (FAC-08)
   3. One click takes a specialist to shadow and a second to canary (auto-promotion off by default), and a rollback restores the previous model in one click with a recorded reason. (FAC-06)
   4. No training job calls any network destination outside the machine it runs on. (FAC-01)
-  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts, and teacher calls follow the label's routing. (FAC-02, FAC-09)
-**Research flags**: The pinned ROCm and PyTorch pairing from Phase 85.
+  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts. If no approved target fits the workload, the proposal shows why it is infeasible. Teacher calls follow the label's routing. (FAC-02, FAC-09)
+**Research flags**: Phase 85 measures the reference ROCm and PyTorch pairing. Check the chosen target's backend, capacity and approval for each workload.
 **Plans:** 0 plans
 **UI hint**: yes
 
@@ -2223,6 +2236,39 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 **Depends on**: L1b, L3.
 **Research flags**: Theia AI's agent, skill and MCP formats (they already read `agent.md`, `SKILL.md` and MCP); which of today's webviews to rebuild first.
 **Phases**: TBD.
+
+## Institutional staff support
+
+### Phase 102: Institutional joint staff teams
+
+**Goal**: Provision the institutional joint staff teams in Workbench with
+branch-specific skills, constrained tools and clear human ownership for all
+149 duties in the reviewed blueprint. Support unit L4, brigade L3, division
+L2 and joint L1/L0 profiles for the US, NATO and Canada.
+
+**Depends on**: The staff product and Team Studio foundations, plus publication
+of the reviewed institutional blueprint. Local synthetic development can use
+the exact reviewed blueprint commit while the merge queue is held. Live source,
+delegation and delivery acceptance retain their own prerequisites.
+
+**Success criteria**:
+
+1. A person can provision the institutional Command Group, J3 and J7 teams and
+   run the first fictional decision, action and lessons handoffs through the
+   ordinary Workbench staff experience.
+2. Every J1–J9, Command Group and Special Staff duty has a tested agent
+   contribution, accountable human, draft output and scoped tool contract.
+3. Changes to source authority or review version hold the relevant handoff.
+   Human decision and release remain distinct and verifiable.
+
+See [Phase 102 planning record](https://github.com/VitalPointAI/near-ai-vscode/blob/main/.planning/phases/102-institutional-joint-staff-teams/102-CONTEXT.md)
+for the duty inventory and build order.
+
+Plans:
+- [ ] First synthetic Command Group, J3 and J7 handoffs
+- [ ] J2/J6 stewardship and J5/J9 institutional drafts
+- [ ] J4/J8 ordinary resource and reconciliation workflows
+- [ ] J1/Special Staff administrative support and full profile acceptance
 
 ## Progress
 

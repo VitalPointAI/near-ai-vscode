@@ -7,7 +7,8 @@
 //   nothing is written: the member's write stands, and it shows as the next edit. Members' Write and Edit take no lock, so a lock cannot give this; an
 //   invariant on the host's side does.
 import { createHash, randomBytes } from 'node:crypto';
-import { link, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { linkSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { link, lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 /** The most a staff file may hold to be read at all. */
@@ -59,28 +60,44 @@ export function setCasProbe(next: CasProbe | undefined): void { probe = next; }
 
 /**
  * Writes `text` to `file` only if the file is still exactly what the host read (`expected`). Returns false, writing nothing, when it changed: the caller
- * leaves its change pending. `text` undefined removes the file, under the same check.
+ * leaves its change pending. `text` undefined removes the file, under the same check. When a scope guard is passed, check it immediately before
+ * staging and again in the same turn as the final mutation, after the last awaited check.
  */
-export async function writeIfUnchanged(file: string, expected: FileSnapshot, text: string | undefined): Promise<boolean> {
+export async function writeIfUnchanged(file: string, expected: FileSnapshot, text: string | undefined, verifyBeforeEffect?: () => boolean): Promise<boolean> {
   await probe?.('before-temp', file);
   if (text === undefined) {
     await probe?.('before-check', file);
     if (!same(await snapshotOf(file), expected)) return false;
     await probe?.('before-rename', file);
     if (!same(await snapshotOf(file), expected)) return false;
-    await rm(file, { force: true });
+    if (verifyBeforeEffect) {
+      if (!verifyBeforeEffect()) return false;
+      rmSync(file, { force: true });
+    } else {
+      await rm(file, { force: true });
+    }
     return true;
   }
-  await mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  await writeFile(temporary, text, { encoding: 'utf8', flag: 'wx' });
+  if (verifyBeforeEffect) {
+    if (!verifyBeforeEffect()) return false;
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(temporary, text, { encoding: 'utf8', flag: 'wx' });
+  } else {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(temporary, text, { encoding: 'utf8', flag: 'wx' });
+  }
   try {
     await probe?.('before-check', file);
     if (!same(await snapshotOf(file), expected)) { await rm(temporary, { force: true }); return false; }
     await probe?.('before-rename', file);
     // Checked again immediately before the rename: the window left is the rename itself.
-    if (!same(await snapshotOf(file), expected)) { await rm(temporary, { force: true }); return false; }
-    await rename(temporary, file);
+    if (!same(await snapshotOf(file), expected) || (verifyBeforeEffect && !verifyBeforeEffect())) {
+      await rm(temporary, { force: true });
+      return false;
+    }
+    if (verifyBeforeEffect) renameSync(temporary, file);
+    else await rename(temporary, file);
     return true;
   } catch (error) {
     await rm(temporary, { force: true });
@@ -100,14 +117,18 @@ const errnoOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoEx
  * that changed (written through a handle opened before the move) is put back over the new text, or kept beside it and named when the new text changed
  * too. A missing file is created only where none is. The path is briefly absent while the old file is aside.
  */
-export async function replaceKeepingEdits(file: string, expected: FileSnapshot, text: string): Promise<KeptReplace> {
+export async function replaceKeepingEdits(file: string, expected: FileSnapshot, text: string, verifyBeforeAbsentLink?: () => boolean): Promise<KeptReplace> {
   await mkdir(path.dirname(file), { recursive: true });
   const suffix = `${process.pid}.${randomBytes(6).toString('hex')}`;
   const temporary = `${file}.${suffix}.tmp`;
   await writeFile(temporary, text, { encoding: 'utf8', flag: 'wx' });
   try {
     await probe?.('before-check', file);
-    if (!same(await snapshotOf(file), expected)) return { status: 'changed' };
+    // An object at an expected-absent target is a conflict even if it is a dangling link.
+    const unchanged = expected.exists
+      ? same(await snapshotOf(file), expected)
+      : await lstat(file).then(() => false, (error: unknown) => errnoOf(error) === 'ENOENT');
+    if (!unchanged) return { status: 'changed' };
     await probe?.('before-rename', file);
     let aside: string | undefined;
     if (expected.exists) {
@@ -127,7 +148,14 @@ export async function replaceKeepingEdits(file: string, expected: FileSnapshot, 
         return { status: 'raced' };
       }
     }
-    try { await link(temporary, file); } catch (error) {
+    try {
+      if (!expected.exists && verifyBeforeAbsentLink) {
+        // The isolated fixture holds its parent directories. Its current
+        // authority check and the no-replacement effect share this turn.
+        if (!verifyBeforeAbsentLink()) return { status: 'changed' };
+        linkSync(temporary, file);
+      } else await link(temporary, file);
+    } catch (error) {
       if (errnoOf(error) !== 'EEXIST') throw error;
       // A new file appeared where the old one was: it stands, and the held copy is the text the caller read.
       if (aside !== undefined) await rm(aside, { force: true });

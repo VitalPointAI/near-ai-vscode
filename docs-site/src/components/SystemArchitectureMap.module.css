@@ -1,0 +1,178 @@
+.map {
+  margin: 1.5rem 0 2rem;
+}
+
+.map figcaption {
+  margin-bottom: 0.75rem;
+}
+
+.blueprint,
+.navigation {
+  margin: 0;
+}
+
+.blueprint {
+  margin-bottom: 1.3rem;
+}
+
+.blueprint img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.8rem;
+}
+
+.blueprint figcaption {
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.blueprint a {
+  display: block;
+}
+
+.areas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.areas > li,
+.areas > li + li {
+  margin: 0;
+}
+
+.area {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 0.8rem;
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-font-color-base);
+  box-shadow: 0 5px 12px rgb(8 21 43 / 12%);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.area:hover,
+.area:focus-visible {
+  text-decoration: none;
+  color: var(--ifm-font-color-base);
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 8px 18px rgb(8 21 43 / 20%);
+}
+
+.area:focus-visible {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: 3px;
+}
+
+.illustration {
+  display: block;
+  aspect-ratio: 1;
+  background-color: #0e192e;
+  background-repeat: no-repeat;
+  /* A small inset trims the seams between the six artwork tiles. */
+  background-size: 318% 212%;
+}
+
+.copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.78rem 0.84rem 0.9rem;
+}
+
+.copy strong {
+  line-height: 1.25;
+}
+
+.copy > span {
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 620px) {
+  .areas {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+}
+
+@media (max-width: 310px) {
+  .areas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .area {
+    transition: none;
+  }
+}
+
+.flowMap {
+  margin: 1.5rem 0 2rem;
+  padding: 1.05rem;
+  overflow-x: auto;
+  color: #f1f6ff;
+  background: #101e32;
+  border-radius: 0.9rem;
+}
+
+.flowMap figcaption {
+  margin: 0 0.45rem 0.7rem;
+  color: #f1f6ff;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.flowMap table {
+  display: table;
+  width: 100%;
+  min-width: 43rem;
+  margin: 0;
+  color: #f1f6ff;
+  border-collapse: separate;
+  border-spacing: 0.42rem 0.5rem;
+}
+
+.flowMap tr {
+  background: transparent;
+  border: 0;
+}
+
+.flowMap :is(th, td) {
+  border: 0;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.flowMap th {
+  color: #cbd9ee;
+}
+
+.flowMap td:first-child {
+  font-weight: 700;
+}
+
+.flowMap td:is(:nth-child(2), :nth-child(4), :nth-child(6)) {
+  border-radius: 0.36rem;
+  background: #253853;
+}
+
+.flowMap td:nth-child(4) {
+  border-inline-start: 2px solid #80dcee;
+}
+
+.flowMap td:is(:nth-child(3), :nth-child(5)) {
+  color: #aee6f1;
+  font-weight: 600;
+}

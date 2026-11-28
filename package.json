@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "Sterling Sovereign AI",
   "description": "AI agents for coding, research, presales, writing, and data work with configurable model providers, Open-GSD workflows, and project controls.",
-  "version": "0.4.39",
+  "version": "0.4.43",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
   "galleryBanner": {
@@ -56,11 +56,16 @@
   "activationEvents": [
     "workspaceContains:.planning/.near-ai/**",
     "onCommand:nearAi.openCyber",
+    "onCommand:nearAi.getSovAiVersion",
     "onCommand:sterling.workAreas.create"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "nearAi.getSovAiVersion",
+        "title": "SovAI version lookup"
+      },
       {
         "command": "nearAi.newChat",
         "title": "New Chat",
@@ -1078,6 +1083,10 @@
     },
     "menus": {
       "commandPalette": [
+        {
+          "command": "nearAi.getSovAiVersion",
+          "when": "false"
+        },
         {
           "command": "sterling.workAreas.create",
           "when": "false"

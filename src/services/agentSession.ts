@@ -21,7 +21,7 @@ import { isDefaultMark } from '../gate/sessionMark';
 import { chatLabelOf } from './threadStore';
 import { noteChatProjectMark } from '../domain/gate/lowerings';
 import type { GateRuntime } from '../domain/gate/decide';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult, type AgentRunOptions } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
@@ -94,6 +94,14 @@ export interface GsdContext {
 }
 
 export interface ModelTiers { deep: string; standard: string; fast: string }
+
+/** Optional in-process test host. No turn request or project file can provide it. */
+export interface AgentConversationFixtureHost {
+  teamAgents(team: TeamDefinition | undefined): GsdAgent[] | undefined;
+  child(team: TeamDefinition | undefined, input: {
+    root: string; runId: string; label: string; model: string; local: boolean; onTeam: boolean; detached: boolean; modelStallMs: number | undefined;
+  }): Promise<{ tools: AgentTool<any>[]; timing: Pick<AgentRunOptions, 'stallRetries' | 'idleTimeoutMs' | 'turnCeilingMs'> } | undefined>;
+}
 
 export interface AgentTurnRequest {
   /** What the user typed, shown in the transcript. */
@@ -575,8 +583,9 @@ export class AgentConversation {
   /** The policy's default label as this chat last read it. */
   public get chatDefaultLabel(): Label { return this.defaultLabel; }
 
-  /** The one gate (GATE-04): the chat sets it, and every tool call of a run, a sub-agent's included, is decided through it. Without one a run is failed closed: only reading and planning run, and no policy is guessed. */
+  /** The gate host decides calls from the lead and its children. Without a host the gate fails closed (GATE-04). */
   public gateHost: Pick<GateHost, 'runtimeFor'> | undefined;
+  public fixtureHost: AgentConversationFixtureHost | undefined;
   /** The folder for sub-agents' git worktrees. The chat sets it to the editor's own storage: a worktree is a full checkout and never belongs in the project. */
   public worktreeRoot: string | undefined;
   /** Awaited before each checkpoint save; the chat sets it to the state home's ensure(), so the inner .gitignore exists before any checkpoint file. */
@@ -1344,20 +1353,15 @@ export class AgentConversation {
     this.reset();
   }
 
-  /** The agent definitions a run can start; without any, the run has no Agent tool. */
-  private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
-    // One definition per name, the first one wins. The agents a workflow step adds for this run (the red-team stage) come first, with or without a team
-    // (#46 review), so neither a team file in the repository nor an Open-GSD agent of the same name can replace them; then the team's members, which win
-    // over Open-GSD's agents of the same name; then Open-GSD's.
-    const members = this.teamMembersOf(request);
-    const all = [...(request.projectAgents ?? []), ...members, ...(request.gsd?.agents ?? [])];
-    return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
-  }
-
-  /** The members of the team this run leads or works with. */
   private teamMembersOf(request: AgentTurnRequest): GsdAgent[] {
     const team = request.team ?? request.memberTeam;
-    return team ? teamAgents(team) : [];
+    return this.fixtureHost?.teamAgents(team) ?? (team ? teamAgents(team) : []);
+  }
+
+  private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
+    // The first definition wins: project workflow agents, then team members, then Open-GSD.
+    const all = [...(request.projectAgents ?? []), ...this.teamMembersOf(request), ...(request.gsd?.agents ?? [])];
+    return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
   }
 
   /**
@@ -1457,10 +1461,7 @@ export class AgentConversation {
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
-    // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the built-in local staff servers listed once in
-    // staffServers.ts: the intel-workbench, observations, cop-map and logistics. Each of those is given only to members whose own tools line grants it,
-    // never to the run's lead: each is offered only to those members (offeredTools, below and in the run) and refuses any other caller at call time
-    // (staffServerToolsForRun). None of them can approve, reject or release anything, and none reaches the network.
+    // Built-in staff servers offer local tools only to members granted them, with a separate check at call time.
     const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
     const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
     const servers = staffTeam && request.team?.staff ? staffServerToolsForRun(request.team, { host: () => staffHostFor(this.root), store: () => observationStoreFor(this.root), team: staffTeam, run: runId }) : [];
@@ -1468,7 +1469,6 @@ export class AgentConversation {
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;
-    // The team's members, and those offered as members: a member whose name a project agent took is not offered, since that name runs the project agent.
     const memberNames = this.teamMembersOf(request).map((agent) => agent.name);
     const offeredMembers = memberNames.filter((name) => !(request.projectAgents ?? []).some((agent) => agent.name === name));
     let all: AgentTool<any>[] = [];
@@ -1543,14 +1543,14 @@ export class AgentConversation {
         const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
         // A listed tool, Task for Agent, and MCP tools by name, mcp:<server>, or a trailing-* pattern.
         const listed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
-        // An agent with a write limit (a staff team's red team or guard) keeps only Write and Edit among the tools that change files, since those two
-        // refuse every path outside the limit; a shell, an MCP tool or a document maker could write anywhere, and starting other agents could too. The
-        // built-in staff tools it is granted stay (WRITE_LIMITED_STAFF_TOOLS): they write only the ledger, headers and gate reports, through the host.
-        // The observations server's tools stay too: they only read the observation store (the J3 watch officer watches the feeds with them).
+        // Write-limited members keep path-checked edits, scoped staff writes and local observation reads.
         const writeOnly = spawn.agent?.writeOnly;
         const limited = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (OBSERVATIONS_TOOL_NAMES.includes(tool.name) && tool.capability === 'read') || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
-        // Offered only what it may call: a staff server's tools only when this member's own tools line grants them (the call-time gate stays).
-        const allowed = offeredTools(limited, label);
+        const fixture = this.fixtureHost ? await this.fixtureHost.child(request.team ?? request.memberTeam, {
+          root: this.root, runId, label, model, local: request.local === true && request.route?.kind === 'local', onTeam,
+          detached: Boolean(spawn.isolation || spawn.background || spawn.parentId !== context.agentId), modelStallMs: request.modelStallMs,
+        }) : undefined;
+        const allowed = fixture?.tools ?? offeredTools(limited, label);
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
@@ -1648,9 +1648,9 @@ export class AgentConversation {
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(childGate ? { gate: childGate } : {}),
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
-              // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
-              ...(request.modelStallMs ? { stallMs: request.modelStallMs, ...(stallBackup ? { backupModel: stallBackup } : {}) } : {}),
-              ...(fallbacks.length ? { fallbackModels: fallbacks, modelAnswering: (candidate: string) => this.modelTrouble.answering(candidate), modelTrouble: (left: string) => this.modelTrouble.mark(left) } : {}),
+              ...(fixture?.timing ?? {}),
+              ...(!fixture && request.modelStallMs ? { stallMs: request.modelStallMs, ...(stallBackup ? { backupModel: stallBackup } : {}) } : {}),
+              ...(!fixture && fallbacks.length ? { fallbackModels: fallbacks, modelAnswering: (candidate: string) => this.modelTrouble.answering(candidate), modelTrouble: (left: string) => this.modelTrouble.mark(left) } : {}),
               beforeTool: (signal) => this.whileRunPaused(signal),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
