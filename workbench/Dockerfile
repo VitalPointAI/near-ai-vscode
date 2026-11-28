@@ -46,16 +46,34 @@ COPY compliance/src /repo/compliance/src
 COPY compliance/hosted/exchanges.json /repo/compliance/hosted/exchanges.json
 COPY scripts/crdt-vendor.json /repo/scripts/crdt-vendor.json
 COPY vendor/yjs/yjs.cjs vendor/yjs/LICENSES.txt /repo/vendor/yjs/
-COPY README.md SECURITY.md CHANGELOG.md CONTRIBUTING.md /repo/
+COPY README.md SECURITY.md CHANGELOG.md CONTRIBUTING.md LICENSE /repo/
 COPY docs/development-workflow.md docs/testing.md docs/staff-env-packs.md /repo/docs/
 # The screenshots README.md shows: bundled as same-origin images by the documentation tool, never loaded from GitHub.
 COPY docs/marketplace/near-ai-approval.png docs/marketplace/near-ai-chat.png docs/marketplace/near-ai-commands.png docs/marketplace/near-ai-workflow.png /repo/docs/marketplace/
 COPY docs-site/content/index.md /repo/docs-site/content/
-COPY docs-site/content/architecture/overview.md /repo/docs-site/content/architecture/
+COPY docs-site/content/architecture/overview.mdx /repo/docs-site/content/architecture/
+COPY docs-site/static/img/sovai-data-flows.webp docs-site/static/img/sovai-physical-layout.webp /repo/docs-site/static/img/
 COPY docs-site/content/releases/versions.md /repo/docs-site/content/releases/
-COPY docs-site/content/security/trust-model.md /repo/docs-site/content/security/
-COPY docs-site/content/using/getting-started.md /repo/docs-site/content/using/
+COPY docs-site/content/security/trust-model.md docs-site/content/security/road-to-production.md /repo/docs-site/content/security/
+COPY docs-site/content/using/getting-started.md docs-site/content/using/deployment-hardware.md /repo/docs-site/content/using/
 COPY docs-site/content/using/roles/administration.md docs-site/content/using/roles/data-and-connections.md docs-site/content/using/roles/software-projects.md docs-site/content/using/roles/staff-teams.md /repo/docs-site/content/using/roles/
+COPY .planning/ROADMAP.md /repo/.planning/
+COPY .planning/codebase/ARCHITECTURE.md .planning/codebase/INTEGRATIONS.md .planning/codebase/STRUCTURE.md /repo/.planning/codebase/
+COPY .planning/research/canadian-official-languages.md /repo/.planning/research/
+COPY .planning/research/data-platform/00-DESIGN.md .planning/research/data-platform/01-connectors-extraction-etl.md .planning/research/data-platform/02-classification-tagging-data-centric-security.md .planning/research/data-platform/03-context-graph-analytics-knowledge-layer.md .planning/research/data-platform/04-model-factory-and-opportunity-agent.md .planning/research/data-platform/05-defence-digital-twin.md /repo/.planning/research/data-platform/
+COPY .planning/research/guided-onboarding/DESIGN.md /repo/.planning/research/guided-onboarding/
+COPY .planning/research/model-provenance/DESIGN.md /repo/.planning/research/model-provenance/
+COPY .planning/research/multiuser-hosting/DESIGN.md /repo/.planning/research/multiuser-hosting/
+COPY .planning/research/multiuser-sync/DESIGN.md /repo/.planning/research/multiuser-sync/
+COPY .planning/research/platform-direction/README.md .planning/research/platform-direction/agent-authz-prior-art.md .planning/research/platform-direction/calimero-evaluation.md .planning/research/platform-direction/hermes-analysis.md .planning/research/platform-direction/identity-research.md .planning/research/platform-direction/ironclaw-analysis.md .planning/research/platform-direction/openshell-analysis.md .planning/research/platform-direction/openshell-spike.md /repo/.planning/research/platform-direction/
+COPY .planning/research/portfolio-and-assignment/DESIGN.md /repo/.planning/research/portfolio-and-assignment/
+COPY .planning/research/staff-teams/00-bastion-staff-teams.md .planning/research/staff-teams/01-agent-exchange.md .planning/research/staff-teams/02-J2-intelligence.md .planning/research/staff-teams/03-J3-operations-J4-logistics.md .planning/research/staff-teams/05-J5-plans.md .planning/research/staff-teams/06-full-joint-staff.md .planning/research/staff-teams/07-J1-personnel-J8-resources.md .planning/research/staff-teams/09-J7-J9-command-special-staff.md .planning/research/staff-teams/10-STAFF-TEAMS-DESIGN.md .planning/research/staff-teams/13-staff-personnel-resources-and-special-advice.md .planning/research/staff-teams/TERMS-REGISTER.md /repo/.planning/research/staff-teams/
+COPY deploy/runbooks/site-install.md /repo/deploy/runbooks/
+COPY docs-site/README.md /repo/docs-site/
+COPY docs-site/content/architecture/components/build-and-test.md docs-site/content/architecture/components/compliance-tooling.md docs-site/content/architecture/components/documentation-site.md docs-site/content/architecture/components/identity.md docs-site/content/architecture/components/index.md docs-site/content/architecture/components/release-and-supply-chain.md docs-site/content/architecture/components/secrets-and-keys.md docs-site/content/architecture/components/site-platform.md docs-site/content/architecture/components/storage-logging-monitoring.md docs-site/content/architecture/components/sync-and-relay.md docs-site/content/architecture/components/workbench.md /repo/docs-site/content/architecture/components/
+COPY docs/hosting/capacity.md /repo/docs/hosting/
+COPY docs/security/controlled-goods-and-itar.md docs/security/hosted-incident-playbooks.md docs/security/hosted-observers.md docs/security/incident-response.md /repo/docs/security/
+COPY relay/README.md /repo/relay/
 COPY workbench/bin ./bin
 COPY workbench/tools ./tools
 COPY workbench/extension/tsconfig.json ./extension/tsconfig.json

@@ -1,19 +1,16 @@
-import { ContainerModule, injectable, postConstruct } from '@theia/core/shared/inversify';
+import { ContainerModule, inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import DOMPurify from '@theia/core/shared/dompurify';
 import { isDocumentationPages, type DocumentationPage } from '../common/sterling-evidence.js';
+import { documentationAssetPath, resolveDocumentationLink } from '../common/documentation-links.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { CommandRegistry } from '@theia/core/lib/common/command.js';
+import { MessageService } from '@theia/core/lib/common/message-service.js';
 import './sterling-documentation.css';
 
 const widgetId = 'sterling-documentation';
 export const sterlingDocumentationCommand = { id: 'sterling.documentation.open', category: 'SovAI', label: 'Documentation' };
-const documentRoot = new URL('https://documents.invalid/');
-const repository = 'https://github.com/VitalPointAI/near-ai-vscode/blob/main';
-// Bundled images live beside sterling-documentation.json (workbench/tools/documentation-render.mjs); nothing else may be loaded.
-const assetPath = /^sterling-documentation\/[0-9a-f]{16}\.(png|jpe?g|gif|webp|svg)$/;
-
 /**
  * The pages are HTML made at build time from the repository's own guides. Sanitize it again anyway, with a private DOMPurify instance
  * (its hooks never touch Theia's shared one): no scripts, styles, forms or embedded content, and nothing that would load from anywhere but
@@ -24,7 +21,7 @@ function createSanitizer(): (html: string) => DocumentFragment {
   purify.addHook('uponSanitizeAttribute', (node, data) => {
     const name = data.attrName;
     const value = data.attrValue.trim();
-    if (name === 'src') data.keepAttr = node.nodeName === 'IMG' && assetPath.test(value);
+    if (name === 'src') data.keepAttr = node.nodeName === 'IMG' && documentationAssetPath.test(value);
     else if (name === 'href' || name === 'xlink:href') data.keepAttr = node.nodeName === 'A' || value.startsWith('#');
     else if (name === 'srcset' || name === 'poster' || name === 'background' || /url\(\s*(?!['"]?#)/i.test(value)) data.keepAttr = false;
   });
@@ -42,6 +39,8 @@ function createSanitizer(): (html: string) => DocumentFragment {
 
 @injectable()
 class SterlingDocumentationWidget extends BaseWidget {
+  @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
+  @inject(MessageService) protected readonly messages!: MessageService;
   private readonly sanitize = createSanitizer();
   private readonly search = document.createElement('input');
   private readonly navigation = document.createElement('nav');
@@ -128,13 +127,6 @@ class SterlingDocumentationWidget extends BaseWidget {
     this.active = page;
     const body = document.createElement('div');
     body.append(this.sanitize(page.html));
-    const headingIds = new Map<string, number>();
-    body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(heading => {
-      const base = (heading.textContent ?? '').toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-');
-      const count = headingIds.get(base) ?? 0;
-      heading.id = count ? `${base}-${count}` : base;
-      headingIds.set(base, count + 1);
-    });
     body.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(link => this.configureLink(link, page));
     this.content.replaceChildren(body);
     this.content.scrollTop = 0;
@@ -147,39 +139,40 @@ class SterlingDocumentationWidget extends BaseWidget {
   }
 
   private configureLink(link: HTMLAnchorElement, current: DocumentationPage): void {
-    const href = link.getAttribute('href')!;
-    let route: URL;
-    let source: URL;
-    try {
-      route = new URL(href, new URL(current.route, documentRoot));
-      source = new URL(href, new URL(current.source, documentRoot));
-    } catch {
-      link.removeAttribute('href');
+    const resolved = resolveDocumentationLink(link.getAttribute('href') ?? '', current, this.pages);
+    if (!resolved) {
+      const text = document.createElement('span');
+      text.title = 'This page is not included in the Workbench documentation.';
+      text.append(...Array.from(link.childNodes));
+      link.replaceWith(text);
       return;
     }
-    if (route.origin === documentRoot.origin) {
-      const target = href.startsWith('#') ? current : this.pages.find(page =>
-        [`/${page.route}`, `/${page.route.replace(/\.md$/, '')}`].includes(route.pathname) ||
-        `/${page.source}` === source.pathname
-      );
-      if (target) {
-        link.href = route.hash || '#';
-        link.addEventListener('click', event => {
-          event.preventDefault();
-          this.openPage(target, route.hash);
-          this.content.focus({ preventScroll: true });
+    if (resolved.kind === 'compliance') {
+      link.href = '#';
+      link.removeAttribute('target');
+      link.removeAttribute('rel');
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        void this.commands.executeCommand('sterling.compliance.open').catch(() => {
+          void this.messages.error('Compliance could not be opened. Try again.');
         });
-        return;
-      }
-      route = new URL(`${repository}${source.pathname}${source.hash}`);
+      });
+      return;
     }
-    if (route.protocol === 'https:' || route.protocol === 'http:' || route.protocol === 'mailto:') {
-      link.href = route.href;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-    } else {
-      link.removeAttribute('href');
+    if (resolved.kind === 'page') {
+      link.href = resolved.hash || '#';
+      link.removeAttribute('target');
+      link.removeAttribute('rel');
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        this.openPage(resolved.page, resolved.hash);
+        this.content.focus({ preventScroll: true });
+      });
+      return;
     }
+    link.href = resolved.kind === 'asset' ? new URL(resolved.href, document.baseURI).href : resolved.href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
   }
 }
 

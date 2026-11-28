@@ -17,8 +17,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 453);
-  assert.equal(poam.length, 370);
+  assert.equal(gaps.length, 454);
+  assert.equal(poam.length, 371);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 // Every gap names the lowest level where it matters and whether it blocks production (the road to production page groups by both).

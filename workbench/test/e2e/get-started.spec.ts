@@ -14,6 +14,10 @@ const cards = [['Capability Development', 'capability-development'], ['Exercises
 async function openGetStarted(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+  await declineWorkspaceTrust(page);
+}
+
+async function declineWorkspaceTrust(page: Page): Promise<void> {
   // Theia asks whether to trust the workspace and makes the page inert until answered; answer it as a person would (restricted mode).
   const decline = page.getByRole('button', { name: 'No, I don\'t trust the authors' });
   await decline.waitFor({ timeout: 30_000 }).then(() => decline.click(), () => undefined);
@@ -21,6 +25,133 @@ async function openGetStarted(page: Page): Promise<void> {
 
 const currentTab = (page: Page) => page.locator('#theia-main-content-panel .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabLabel');
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Sterling shortcuts' });
+
+async function openLanguageSetting(page: Page): Promise<Locator> {
+  await page.keyboard.press('F1');
+  const palette = page.locator('.quick-input-widget input');
+  await expect(palette).toBeVisible();
+  await palette.fill('>Open User Settings');
+  await page.locator('.quick-input-list .monaco-list-row').filter({ hasText: 'Open User Settings' }).click();
+  const search = page.getByPlaceholder('Search settings');
+  await expect(search).toBeVisible();
+  await search.fill('sterling.displayLanguage');
+  const selection = page.locator('[data-pref-id="sterling.displayLanguage"] .theia-select-component');
+  await expect(selection, 'the Canadian language enum is offered in User Settings').toBeVisible({ timeout: 10_000 });
+  return selection;
+}
+
+async function pickLanguage(selection: Locator, direction: 'ArrowDown' | 'ArrowUp', name: string): Promise<void> {
+  await selection.press('Enter');
+  await selection.press(direction);
+  await selection.press('Enter');
+  await expect(selection).toContainText(name);
+  await expect(selection).toBeFocused();
+}
+
+test('About SovAI opens from Manage and the palette with the running extension version', async ({ page, context }) => {
+  test.setTimeout(180_000);
+  await openGetStarted(page);
+  const bundled = process.env.STERLING_BUNDLED_EXTENSION === '1';
+  const expectedVersion = process.env.STERLING_BUNDLED_VERSION;
+  if (bundled) expect(expectedVersion).toBeTruthy();
+  const versionText = bundled ? `Version ${expectedVersion}` : 'Version unavailable';
+
+  const palette = page.locator('.quick-input-widget input');
+  const commandResults = page.locator('.quick-input-list .monaco-list-row');
+  const openPalette = async (): Promise<void> => {
+    await page.keyboard.press('F1');
+    await expect(palette).toBeVisible();
+  };
+  if (bundled) {
+    // Listing a manifest contribution establishes hosted registration without executing it.
+    await openPalette();
+    await palette.fill('>SovAI: Show Status');
+    await expect(commandResults.filter({ hasText: 'Show Status' })).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+  }
+
+  const start = rail(page).getByRole('button', { name: 'Get Started', exact: true });
+  const manage = page.locator('.theia-sidebar-menu-item').filter({ has: page.locator('.codicon-settings-gear') });
+  const dialog = page.getByRole('dialog', { name: 'About SovAI', exact: true });
+  const close = dialog.getByRole('button', { name: 'Close', exact: true });
+
+  await start.focus();
+  await manage.click();
+  const englishMenuItem = page.getByRole('menuitem', { name: 'About SovAI', exact: true });
+  await expect(englishMenuItem).toHaveCount(1);
+  await englishMenuItem.click();
+  await expect(dialog.getByText(versionText, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(start).toBeFocused();
+
+  await openPalette();
+  await palette.fill('>About SovAI');
+  const englishResult = commandResults.filter({ hasText: 'About SovAI' });
+  await expect(englishResult).toHaveCount(1);
+  await englishResult.click();
+  await expect(dialog.getByText(versionText, { exact: true })).toBeVisible();
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(start).toBeFocused();
+
+  const settings = await openLanguageSetting(page);
+  const settingsPage = await context.newPage();
+  try {
+    await settingsPage.goto('/');
+    await expect(settingsPage.locator('.sterling-welcome')).toBeVisible({ timeout: 90_000 });
+    await declineWorkspaceTrust(settingsPage);
+    const otherSettings = await openLanguageSetting(settingsPage);
+    try {
+      await pickLanguage(settings, 'ArrowDown', 'Français (Canada)');
+      await expect(page.locator('.sterling-welcome')).toHaveAttribute('lang', 'fr-CA');
+      const frenchTitle = 'À propos de SovAI';
+      const frenchDialog = page.getByRole('dialog', { name: frenchTitle, exact: true });
+      const frenchClose = frenchDialog.getByRole('button', { name: 'Fermer', exact: true });
+      const frenchVersion = bundled ? versionText : 'Version indisponible';
+      const frenchStart = page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas', exact: true });
+
+      await frenchStart.focus();
+      await manage.click();
+      const frenchMenuItem = page.getByRole('menuitem', { name: frenchTitle, exact: true });
+      await expect(frenchMenuItem).toHaveCount(1, { timeout: 5_000 });
+      await frenchMenuItem.click();
+      await expect(frenchDialog).toHaveAttribute('lang', 'fr-CA');
+      await expect(frenchDialog.getByText(frenchVersion, { exact: true })).toBeVisible();
+      await expect(frenchClose).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(frenchDialog).toBeHidden();
+      await expect(frenchStart).toBeFocused();
+
+      await openPalette();
+      await palette.fill(`>${frenchTitle}`);
+      const frenchResult = commandResults.filter({ hasText: frenchTitle });
+      await expect(frenchResult).toHaveCount(1);
+      await frenchResult.click();
+      await expect(frenchClose).toBeFocused();
+      const originalDialog = await frenchDialog.elementHandle();
+
+      await expect(otherSettings).toContainText('Français (Canada)');
+      await pickLanguage(otherSettings, 'ArrowUp', 'English (Canada)');
+      await expect(dialog).toHaveAttribute('lang', 'en-CA');
+      expect(await dialog.evaluate((node, original) => node === original, originalDialog)).toBe(true);
+      await expect(dialog.getByText(versionText, { exact: true })).toBeVisible();
+      await expect(close).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(dialog).toBeHidden();
+      await expect(start).toBeFocused();
+    } finally {
+      if ((await otherSettings.innerText()).includes('Français (Canada)')) {
+        await pickLanguage(otherSettings, 'ArrowUp', 'English (Canada)');
+      }
+    }
+  } finally {
+    await settingsPage.close();
+  }
+});
 
 test('the rail carries every shortcut, the planned ones disabled, and the native ones open their page', async ({ page }) => {
   await openGetStarted(page);
@@ -71,6 +202,63 @@ test('Get Started shows the setup actions, and each work-area card opens its own
   }
 });
 
+test('Get Started switches Canadian language live through User Settings and keeps it on reopen', async ({ page, browser, baseURL }) => {
+  test.setTimeout(180_000);
+  await openGetStarted(page);
+  const welcome = page.locator('.sterling-welcome');
+  const shellUrl = page.url();
+  const original = await welcome.elementHandle();
+  await welcome.getByRole('button', { name: 'Pause hero animation' }).click();
+
+  const selection = await openLanguageSetting(page);
+  await expect(selection).toContainText('English (Canada)');
+  await pickLanguage(selection, 'ArrowDown', 'Français (Canada)');
+  await expect(welcome).toHaveAttribute('lang', 'fr-CA');
+  await expect(selection).toBeFocused();
+  expect(page.url()).toBe(shellUrl);
+  expect(await welcome.evaluate((node, before) => node === before, original)).toBe(true);
+  await expect(page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas' })).toBeVisible();
+  await page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas' }).click();
+  await expect(currentTab(page).filter({ hasText: /^Premiers pas$/ })).toBeVisible();
+  await expect(welcome.getByRole('heading', { name: 'Espaces de travail de la défense' })).toBeVisible();
+  await expect(welcome.getByRole('button', { name: 'Configurer Sterling' })).toBeVisible();
+  await expect(welcome.getByRole('button', { name: 'Reprendre l’animation' })).toBeVisible();
+
+  const otherContext = await browser.newContext({ baseURL, viewport: { width: 670, height: 760 }, reducedMotion: 'reduce' });
+  try {
+    const reopened = await otherContext.newPage();
+    await reopened.goto('/');
+    await expect(reopened.locator('.sterling-welcome')).toHaveAttribute('lang', 'fr-CA', { timeout: 90_000 });
+    await declineWorkspaceTrust(reopened);
+    const reopenedWelcome = reopened.locator('.sterling-welcome');
+    const expectActionsFit = async (): Promise<void> => {
+      const actions = reopenedWelcome.locator('.sterling-actions');
+      await expect(actions).toBeVisible();
+      expect(await actions.evaluate((node) => {
+        const bounds = node.getBoundingClientRect();
+        return Array.from(node.querySelectorAll('button')).every((button) => {
+          const control = button.getBoundingClientRect();
+          return control.left >= bounds.left - 1 && control.right <= bounds.right + 1 &&
+            button.scrollWidth <= button.clientWidth + 1;
+        });
+      })).toBe(true);
+    };
+    await expect(reopenedWelcome.getByRole('button', { name: 'Configurer Sterling' })).toBeVisible();
+    await expectActionsFit();
+    const reopenedSelection = await openLanguageSetting(reopened);
+    await expect(reopenedSelection).toContainText('Français (Canada)');
+    await pickLanguage(reopenedSelection, 'ArrowUp', 'English (Canada)');
+    await expect(reopenedWelcome).toHaveAttribute('lang', 'en-CA');
+    await expect(reopenedSelection).toBeFocused();
+    await rail(reopened).getByRole('button', { name: 'Get Started', exact: true }).click();
+    await expect(currentTab(reopened).filter({ hasText: /^Get Started$/ })).toBeVisible();
+    await expect(reopenedWelcome.getByRole('button', { name: 'Set up Sterling' })).toBeVisible();
+    await expectActionsFit();
+  } finally {
+    await otherContext.close();
+  }
+});
+
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 /** The URL the webview's outer frame actually shows: about:blank#blocked when the browser refused its address. */
@@ -116,13 +304,105 @@ test('on the release image, the Team Studio and Chat shortcuts show their pages 
     origin, base.origin, (frame) => frame.contentFrame().getByRole('textbox', { name: 'Chat message' }));
 });
 
+test('Team Studio staff setup previews the selected project in the User language', async ({ page, browser, baseURL }) => {
+  test.skip(process.env.STERLING_BUNDLED_EXTENSION !== '1', 'needs the bundled extension');
+  test.setTimeout(180_000);
+  await openGetStarted(page);
+  const selection = await openLanguageSetting(page);
+  await expect(selection).toContainText('English (Canada)');
+  await pickLanguage(selection, 'ArrowDown', 'Français (Canada)');
+  await expect(page.locator('.sterling-welcome')).toHaveAttribute('lang', 'fr-CA');
+  await page.close();
+
+  const reopenedContext = await browser.newContext({ baseURL });
+  try {
+    const workbench = await reopenedContext.newPage();
+    let pluginsStarted = false;
+    workbench.on('console', (message) => {
+      if (/\] Start of \d+ plugins?:/.test(message.text())) pluginsStarted = true;
+    });
+    await workbench.goto('/');
+    await expect(workbench.getByRole('menubar')).toBeVisible({ timeout: 90_000 });
+    // The hosted plug-in waits for the workspace trust choice before it reports startup.
+    await declineWorkspaceTrust(workbench);
+    await expect.poll(() => pluginsStarted, { timeout: 90_000 }).toBe(true);
+    await workbench.keyboard.press('F1');
+    const palette = workbench.locator('.quick-input-widget input');
+    await expect(palette).toBeVisible();
+    await palette.fill('>SovAI: Team Studio');
+    await workbench.getByRole('option', { name: 'SovAI: Team Studio', exact: true }).click({ timeout: 60_000 });
+    const studioTab = workbench.locator('#theia-main-content-panel .lm-TabBar-tab').filter({ hasText: 'SovAI Team Studio' });
+    await expect(currentTab(workbench)).toHaveText('SovAI Team Studio', { timeout: 60_000 });
+    const frame = workbench.locator('#theia-main-content-panel [id^="plugin-webview:"]').filter({ visible: true })
+      .locator('iframe').contentFrame().locator('#active-frame').contentFrame();
+    const frenchEntry = frame.getByRole('button', { name: 'Configurer l’état-major', exact: true });
+    const frenchHeading = frame.getByRole('heading', { name: 'Aperçu de la configuration de l’état-major', exact: true });
+    const project = process.env.STERLING_STAFF_PROJECT_NAME ?? 'workspace';
+    await frenchEntry.click({ timeout: 60_000 });
+    await expect(frenchHeading).toBeFocused();
+    await expect(frame.getByRole('heading', { name: project, exact: true })).toBeVisible();
+
+    await workbench.setViewportSize({ width: 510, height: 900 });
+    await frame.getByRole('button', { name: 'État-major complet', exact: true }).click();
+    await expect(frame.getByRole('heading', { name: 'J1 Personnel', exact: true })).toBeVisible();
+    await expect(frame.getByRole('button', { name: 'Poursuivre la configuration de la section', exact: true })).toHaveCount(0);
+    const coverage = frame.getByRole('region', { name: 'Aperçu de la configuration de l’état-major' });
+    expect(await coverage.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await frenchHeading.press('Escape');
+    await expect(frenchEntry).toBeFocused();
+
+    await workbench.setViewportSize({ width: 1280, height: 900 });
+    await frenchEntry.click();
+    const frenchSection = frame.getByRole('button', { name: 'J4 Logistique', exact: true });
+    await frenchSection.click();
+    const liveSelection = await openLanguageSetting(workbench);
+    await expect(liveSelection).toContainText('Français (Canada)');
+    await pickLanguage(liveSelection, 'ArrowUp', 'English (Canada)');
+    await studioTab.click();
+    await expect(frame.getByRole('heading', { name: 'Staff setup preview', exact: true })).toBeVisible();
+    await expect(frame.getByRole('heading', { name: project, exact: true })).toBeVisible();
+    const englishSection = frame.getByRole('button', { name: 'J4 Logistics', exact: true });
+    await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
+
+    const switchBack = await openLanguageSetting(workbench);
+    await pickLanguage(switchBack, 'ArrowDown', 'Français (Canada)');
+    await studioTab.click();
+    await expect(frenchSection).toHaveAttribute('aria-pressed', 'true');
+    await frame.getByRole('button', { name: 'Poursuivre la configuration de la section', exact: true }).click();
+    const questions = workbench.locator('.quick-input-widget').filter({ visible: true });
+    await expect(questions).toContainText('Niveaux : stratégique, opérationnel.');
+    await questions.getByText('Forces interarmées des États-Unis', { exact: true }).click();
+    await expect(questions).toContainText('JPP au niveau de la JTF (05 T2).');
+    for (const answer of ['Opérationnel', 'Campagne', 'Exécution locale seulement']) {
+      await questions.getByText(answer, { exact: true }).click();
+    }
+    await expect(questions).toContainText('vérifier la composition');
+    await expect(questions).toContainText(`Projet : ${project}.`);
+    await workbench.keyboard.press('Escape');
+    await expect(questions).toBeHidden();
+    await expect(frenchSection).toBeFocused();
+
+    const reset = await openLanguageSetting(workbench);
+    await pickLanguage(reset, 'ArrowUp', 'English (Canada)');
+    // The next release-image test shares this User profile. Wait for the host
+    // to apply the reset before closing the context that changed it.
+    await studioTab.click();
+    await expect(frame.getByRole('heading', { name: 'Staff setup preview', exact: true })).toBeVisible();
+    await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
+  } finally {
+    await reopenedContext.close();
+  }
+});
+
 // The work-area pages' Create button runs sterling.workAreas.create, which only the bundled NEAR AI extension (the VSIX in the release
 // image) provides. The container suite sets STERLING_BUNDLED_EXTENSION=1 for an image that bundles it, and checks the folder on disk.
 test('on the release image, Create on a work-area page creates the work area and opens its page', async ({ page }) => {
   test.skip(process.env.STERLING_BUNDLED_EXTENSION !== '1', 'needs the release image, which bundles the NEAR AI extension');
   const title = process.env.STERLING_WORK_AREA_TITLE ?? 'Winter exercise';
   await openGetStarted(page);
-  await page.locator('.sterling-welcome .sterling-destination', { hasText: 'Exercises & Training' }).click();
+  const welcome = page.locator('.sterling-welcome');
+  await expect(welcome, 'the release profile is in English before creating the training work area').toHaveAttribute('lang', 'en-CA');
+  await welcome.locator('.sterling-destination', { hasText: 'Exercises & Training' }).click();
   const landing = page.locator('#sterling-area-training');
   await expect(landing.locator('h1')).toHaveText('Exercises & Training');
   await landing.getByRole('button', { name: 'Create training work area' }).click();

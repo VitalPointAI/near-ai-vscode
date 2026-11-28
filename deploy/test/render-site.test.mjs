@@ -2,10 +2,15 @@
 // rest, Fluent Bit ships to the site's own OpenSearch only, Prometheus writes nowhere else, and Harbor is behind site TLS with no internet
 // scanner. Renders every release with the CI site (all releases, whatever enabledWhen says). Needs helm ($HELM or PATH).
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, test } from 'node:test';
-import { listReleases, loadSite, renderRelease, renderSite, splitDocs } from '../bundle/lib/render.mjs';
+import { chronyConf } from '../bundle/lib/clock.mjs';
+import { readImagesLock, resolveImage } from '../bundle/lib/locks.mjs';
+import { expandInstances, isEnabled, listReleases, loadSite, releaseInputs, renderRelease, renderSite, splitDocs } from '../bundle/lib/render.mjs';
+import { NOTICE_MESSAGE, prepareRealm } from '../keycloak/apply.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
@@ -135,4 +140,63 @@ test('Harbor is behind HTTPS on the HAProxy ingress, with no Trivy scanner and n
   for (const sample of ['Harbor12345', 'not-a-secure-key', 'harbor_registry_password', 'changeit']) {
     assert.ok(!text.includes(sample) && !text.includes(Buffer.from(sample).toString('base64')), `the public default ${sample} is rendered`);
   }
+});
+
+test('the lab template requires its own public key and renders the offline lab configuration', (t) => {
+  const template = path.join(ROOT, 'deploy/lab/site.lab.yaml');
+  const siteDir = path.join(ROOT, 'deploy/lab/site.lab');
+  const rawSite = JSON.parse(readFileSync(template, 'utf8'));
+  assert.throws(() => loadSite(template), /organizationPublicKey is missing or empty/);
+  const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-lab-site-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const siteFile = path.join(scratch, 'site.lab.yaml');
+  writeFileSync(siteFile, JSON.stringify({ ...rawSite, organizationPublicKey: SITE.organizationPublicKey }));
+  const site = loadSite(siteFile);
+  const options = { site, siteDir, helm: HELM };
+
+  const chrony = chronyConf(site);
+  assert.match(chrony, /^refclock PHC \/dev\/ptp0 poll 2$/m);
+  assert.doesNotMatch(chrony, /^(server|pool)\s/m);
+  assert.deepEqual(site.egressAllow, []);
+  assert.equal(site.storageProvider, 'lab-static');
+  assert.equal(site.storageEncryptionAtRest, 'LUKS-encrypted VM disk');
+  const releases = new Map(listReleases(ROOT).map((release) => [release.name, release]));
+  assert.equal(isEnabled(releases.get('zot'), site), true);
+  assert.equal(isEnabled(releases.get('harbor'), site), false);
+  assert.equal(isEnabled(releases.get('longhorn'), site), false);
+  assert.equal(expandInstances(releases.get('sterling-hub'), site).length, 1);
+
+  const sessions = releaseInputs(ROOT, 'sterling-sessions', options).texts.map(({ text }) => text).join('\n');
+  const warning = Number(/^  notifyAfterMinutes: (\d+)$/m.exec(sessions)?.[1]);
+  assert.ok(warning > 0 && warning < site.sessionTimeoutMinutes, 'idle warning precedes the configured stop');
+  const app = splitDocs(renderRelease(ROOT, 'sterling-sessions', options)).find((doc) => kindOf(doc) === 'AppDefinition');
+  const placeholder = resolveImage(readImagesLock(ROOT), 'registry.access.redhat.com/ubi9/nginx-126', site.registry);
+  assert.ok(app.includes(`image: "${placeholder.ref}"`));
+  assert.doesNotMatch(app, /^  monitor:/m, 'the placeholder does not expose a Workbench activity tracker');
+
+  const openbao = splitDocs(renderRelease(ROOT, 'openbao', options));
+  const bao = openbao.find((doc) => kindOf(doc) === 'StatefulSet');
+  assert.match(bao, /^  replicas: 1$/m);
+  assert.match(bao, /claimName: openbao-lab-tokens/);
+  assert.match(bao, /mountPath: \/var\/lib\/softhsm\/tokens/);
+  assert.match(bao, /secretName: openbao-tls/, 'the lab retains the TLS secret volume');
+  assert.match(openbao.join('\n'), /lib\s*= "\/usr\/lib64\/softhsm\/libsofthsm2\.so"/);
+
+  const realmSite = JSON.parse(readFileSync(path.join(siteDir, 'sterling-keycloak-realm.yaml'), 'utf8'));
+  const { realm, problems } = prepareRealm({ site, realmSite });
+  assert.deepEqual(problems, []);
+  assert.equal(realm.webAuthnPolicyPasswordlessRpId, site.domain);
+  assert.equal(realm.webAuthnPolicyPasswordlessAttestationConveyancePreference, 'none');
+  assert.deepEqual(realm.clients.find(({ clientId }) => clientId === 'sterling-sessions').redirectUris, [
+    `https://*.ws.${site.domain}/oauth2/callback`,
+    `https://sessions.${site.domain}/*`,
+  ]);
+  for (const locale of ['en', 'fr']) assert.ok(realm.localizationTexts[locale][NOTICE_MESSAGE]);
+  assert.match(realm.smtpServer.host, /\.invalid$/);
+  const realmJob = splitDocs(renderRelease(ROOT, 'sterling-keycloak-realm', options)).find((doc) => kindOf(doc) === 'Job');
+  assert.ok(realmJob, 'the lab values render the normal realm apply job');
+
+  const theia = renderRelease(ROOT, 'theia-cloud', options);
+  for (const prefix of ['sessions', 'sessions-api', 'ws']) assert.ok(theia.includes(`${prefix}.${site.domain}`), prefix);
+  assert.ok(theia.includes(site.storageClass), 'Theia requests the lab static storage class');
 });

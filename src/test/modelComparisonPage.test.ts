@@ -374,3 +374,40 @@ test('D-12: nearAi.compareModels returns undefined and reports once when its tab
     delete uriTable.joinPath;
   }
 });
+
+test('Compare Models ignores a second start during preparation and accepts a later retry', async () => {
+  const uriTable = (handlerStub.vscode as {
+    Uri: { file(fsPath: string): { fsPath: string; toString(): string }; joinPath?: unknown };
+  }).Uri;
+  uriTable.joinPath = (base: { fsPath: string }, ...parts: string[]) => uriTable.file(path.join(base.fsPath, ...parts));
+  const messages: Array<{ type: string; text: string }> = [];
+  let receive: ((message: unknown) => Promise<void>) | undefined;
+  let dispose: (() => void) | undefined;
+  stubWindow.createWebviewPanel = () => ({
+    webview: {
+      cspSource: 'test:',
+      asWebviewUri: (uri: unknown) => uri,
+      onDidReceiveMessage: (callback: typeof receive) => { receive = callback; return { dispose: () => undefined }; },
+      postMessage: (message: { type: string; text: string }) => { messages.push(message); },
+    },
+    onDidDispose: (callback: typeof dispose) => { dispose = callback; },
+  });
+  try {
+    await withHandlerStub(async () => {
+      const { openModelComparison } = await import('../services/modelComparisonPanel');
+      const storage = await tempProject();
+      openModelComparison({ extensionUri: uriTable.file('/extension'), globalStorageUri: uriTable.file(storage) } as never, {} as never);
+      assert.ok(receive, 'the real panel registered its message handler');
+      const request = { type: 'start', models: ['tee/first', 'tee/second'], taskSet: 'short', mode: 'rerun', runs: 1 };
+      const unavailable = { type: 'error', text: 'Not in your key’s model list: tee/first, tee/second.' };
+      await Promise.all([receive(request), receive(request)]);
+      assert.deepEqual(messages, [unavailable]);
+      await receive(request);
+      assert.deepEqual(messages, [unavailable, unavailable]);
+    });
+  } finally {
+    dispose?.();
+    delete stubWindow.createWebviewPanel;
+    delete uriTable.joinPath;
+  }
+});
