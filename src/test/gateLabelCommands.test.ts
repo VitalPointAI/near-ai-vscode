@@ -15,7 +15,7 @@ import { ShellSession } from '../agent/shell';
 import { readTool } from '../agent/tools';
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
 import type { DecisionRecord } from '../domain/gate/record';
-import { POLICY_BUNDLE_FILE, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, STALE_DRAFT_TEXT, gateDir } from '../gate/bundleStore';
+import { POLICY_BUNDLE_FILE, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import type { GateHost } from '../gate/host';
 import type { CompletionEvent, ToolCall } from '../services/nearAiClient';
@@ -122,7 +122,7 @@ async function readAsAgent(s: Started, file: string): Promise<string> {
 test('tracer: a person adds a Protected B clearance through Edit Policy and Apply Policy Draft, and Set Label then accepts that label', async () => {
   const s = await started();
   assert.equal(await setLabelPB(s), false, 'refused before the clearance exists');
-  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /open SovAI: Policy and choose Edit my rules/);
+  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /open SovAI: Standing Orders and choose Edit my Standing Orders/);
   const before = s.host.bundleState();
   assert.equal(before.state, 'valid');
   const draft = await editPolicy(s);
@@ -162,7 +162,6 @@ test('Edit Policy\'s notice names Apply and Discard and says the clearance is se
   assert.ok(notice?.message.includes(CLEARANCE_SELF_ASSERTED_TEXT));
   assert.ok(notice?.message.includes(LABELS_NOT_ACCREDITATION_TEXT));
   assert.ok(!notice?.message.includes(EM_DASH));
-  void STALE_DRAFT_TEXT;
   void POLICY_BUNDLE_FILE;
 });
 
@@ -202,7 +201,8 @@ test('a draft made before a reset, or before another window\'s Apply, is refused
   const bytes = await storedBytes(s);
   resetUi();
   assert.equal(await apply(s), false);
-  assert.equal(stub.notifications.find((entry) => entry.level === 'warn')?.message, `Nothing was changed. ${STALE_DRAFT_TEXT}`);
+  assert.equal(stub.notifications.find((entry) => entry.level === 'warn')?.message,
+    'Nothing was changed. Your policy changed after this draft was made. Open SovAI: Standing Orders and choose Edit my Standing Orders again to start from the policy in force.');
   assert.equal(await storedBytes(s), bytes);
   // Another window's Apply: two drafts made from the same policy, the second applied after the first.
   const first = await editPolicy(s);
@@ -293,5 +293,5 @@ test('Show Policy names the command that changes the policy (Edit Policy) beside
   stub.shownDocuments.length = 0;
   await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = stub.shownDocuments[0]?.text ?? '';
-  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, open SovAI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only\./);
+  assert.match(text, /This view only shows your Standing Orders\. Editing it changes nothing\. Open SovAI: Standing Orders and choose Edit my Standing Orders to change them\. Reset my Standing Orders restores only your own defaults\./);
 });

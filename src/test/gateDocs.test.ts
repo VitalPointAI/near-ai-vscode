@@ -49,7 +49,7 @@ const flat = (text: string): string => text.replace(/\s+/g, ' ');
 const policySection = sectionOf(SECURITY, POLICY_HEADING);
 const mcpSection = sectionOf(SECURITY, '## MCP connections');
 const readmeMcp = sectionOf(README, '### MCP connections');
-const readmePolicy = README.slice(README.indexOf('- **Your policy.**'), README.indexOf("- API keys live in VS Code's encrypted"));
+const readmePolicy = README.slice(README.indexOf('- **Your Standing Orders.**'), README.indexOf("- API keys live in VS Code's encrypted"));
 
 test('SECURITY.md has the policy section once, after "What the agent can do without asking" and before the sub-agent section', () => {
   assert.equal(SECURITY.split(POLICY_HEADING).length - 1, 1);
@@ -68,18 +68,18 @@ test('the commands the docs name are the ones package.json contributes, and the 
   const reset = commandName('nearAi.policy.reset');
   const show = commandName('nearAi.policy.show');
   const policy = commandName('nearAi.policy.open');
-  assert.equal(reset, 'SovAI: Reset Policy to Defaults');
-  assert.equal(show, 'SovAI: Show Policy');
-  assert.equal(policy, 'SovAI: Policy');
-  for (const text of [policySection, readmePolicy]) {
-    assert.ok(flat(text).includes(`**${policy}**`), 'SovAI: Policy');
-    assert.ok(flat(text).includes('**Reset my rules**'), 'the page\'s reset');
+  assert.equal(reset, 'SovAI: Reset Standing Orders to Defaults');
+  assert.equal(show, 'SovAI: Show Standing Orders');
+  assert.equal(policy, 'SovAI: Standing Orders');
+  for (const [text, command, button] of [[policySection, 'SovAI: Policy', 'Reset my rules'], [readmePolicy, policy, 'Reset my Standing Orders']]) {
+    assert.ok(flat(text).includes(`**${command}**`));
+    assert.ok(flat(text).includes(`**${button}**`), 'the page\'s reset');
     assert.ok(flat(text).includes('**Show as stored**'), 'the page\'s stored view');
   }
-  assert.ok(flat(README).includes(policy) && flat(README).includes('Reset my rules'));
+  assert.ok(flat(README).includes(policy) && flat(README).includes('Reset my Standing Orders'));
   // Every failure sentence that offers a reset names the policy page and says it resets your own rules (D-21).
   for (const sentence of Object.values(BUNDLE_FAILURES)) {
-    if (/reset/i.test(sentence)) assert.ok(sentence.includes(`Open ${policy} and choose Reset my rules`) && sentence.includes('it resets your own rules only'), sentence);
+    if (/reset/i.test(sentence)) assert.ok(sentence.includes('Open SovAI: Policy and choose Reset my rules') && sentence.includes('it resets your own rules only'), sentence);
   }
 });
 
@@ -374,7 +374,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   assert.deepEqual([setLabel, edit, applyDraft], ['SovAI: Set Label', 'SovAI: Edit Policy', 'SovAI: Apply Policy Draft']);
   // D-44: Edit Policy and Apply Policy Draft left the palette; the docs name the page and its two buttons that run them.
   const words = flat(policySection);
-  for (const phrase of [setLabel, `open **${commandName('nearAi.policy.open')}** and use **Edit my rules**, then **Apply my draft**`, '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
+  for (const phrase of [setLabel, 'open **SovAI: Policy** and use **Edit my rules**, then **Apply my draft**', '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
     'anyone who can read the project can read its labels, compartment names included', 'only ever makes a label stricter', 'signed again only after you confirm',
     'or that was deleted, stops agents reading the project', 'through the file tools, searches or a command that names it',
     'Decision records hold the labels involved and stay on this computer', 'Where a labelled chat\'s content may be sent is in']) {
@@ -387,7 +387,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
 test('README names Set Label, Lower This Chat\'s Label and the policy page\'s Edit my rules and Apply my draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
   const words = flat(readmePolicy);
   for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.open']) assert.ok(words.includes(commandName(id)), id);
-  assert.ok(words.includes(`Add a clearance in **${commandName('nearAi.policy.open')}** with **Edit my rules**, then **Apply my draft**.`), 'the clearance sentence names the page');
+  assert.ok(words.includes(`Add a clearance in **${commandName('nearAi.policy.open')}** with **Edit my Standing Orders**, then **Apply my draft**.`), 'the clearance sentence names the page');
   assert.ok(words.includes('decides where its content is sent'));
   assert.ok(!words.includes('does not change where content is sent yet'), 'the 4b sentence is gone');
   assert.ok(words.includes('(SECURITY.md#classification-labels-and-routing)'));
@@ -485,7 +485,7 @@ test('README carries the first sentence of LABELS_NOT_ACCREDITATION_TEXT and the
   const words = flat(readmePolicy);
   assert.ok(words.includes(LABELS_NOT_ACCREDITATION_TEXT.split('. ')[0] ?? ''));
   for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.open']) assert.ok(words.includes(commandName(id)), id);
-  assert.ok(words.includes('**Edit my rules**'));
+  assert.ok(words.includes('**Edit my Standing Orders**'));
   const commands = readFileSync(path.join(ROOT, 'src', 'services', 'gateCommands.ts'), 'utf8');
   assert.ok(commands.includes('placeHolder: LABELS_NOT_ACCREDITATION_TEXT'), 'Set Label shows the constant itself');
 });
@@ -702,7 +702,7 @@ test("Phase 41: the policy section says how your organization's rules reach this
 // ---- D-44 (41-14 took Show, Edit, Apply Policy Draft, Reset and Show Policy as Stored off the palette): every user sentence points to SovAI: Policy ----
 
 /** A command that left the palette, with or without the brand prefix. */
-const LEFT_THE_PALETTE = /(?:(?:NEAR AI|SovAI):\s*)?(?:Show Policy|Edit Policy|Apply Policy Draft|Reset Policy to Defaults)/;
+const LEFT_THE_PALETTE = /(?:(?:NEAR AI|SovAI):\s*)?(?:Show (?:Policy|Standing Orders)|Edit Policy|Apply Policy Draft|Reset (?:Policy|Standing Orders) to Defaults)/;
 /** The page's own button words (media/policy/policy.js), read from the page so the docs and sentences use the page's words. */
 const POLICY_PAGE = readFileSync(path.join(ROOT, 'media', 'policy', 'policy.js'), 'utf8');
 
@@ -720,10 +720,10 @@ test('D-44: no user sentence names a command that left the palette', async () =>
   assert.ok(extractCopy("node.textContent = 'Use Reset Policy to Defaults';", 'media/x.js').some(({ text }) => LEFT_THE_PALETTE.test(text)));
 });
 
-test('D-44, D-21: every swept sentence names the policy page by its contributed name, and every reset offer resets your own rules only', async () => {
+test('D-44, D-21: displayed instructions match the editor and recorded reasons keep their wording', async () => {
   const policy = commandName('nearAi.policy.open');
-  assert.equal(policy, 'SovAI: Policy');
-  for (const button of ['Edit my rules', 'Apply my draft', 'Reset my rules', 'Show as stored']) assert.ok(POLICY_PAGE.includes(`'${button}'`), `the page's ${button} button`);
+  assert.equal(policy, 'SovAI: Standing Orders');
+  for (const button of ['Edit my Standing Orders', 'Apply my draft', 'Reset my Standing Orders', 'Show as stored']) assert.ok(POLICY_PAGE.includes(`'${button}'`), `the page's ${button} button`);
   const uninstall = installVscodeStub(createVscodeStub());
   let commands: typeof import('../services/gateCommands');
   try {
@@ -742,18 +742,14 @@ test('D-44, D-21: every swept sentence names the policy page by its contributed 
   assert.ok(resets.length > 0, 'some failure sentences offer a reset');
   // The safety patch's update sentences never offer one (S6); every other offer names the page and its button, and says it touches your own rules only.
   for (const sentence of resets) {
-    assert.ok(sentence.includes(`Open ${policy} and choose Reset my rules`), sentence);
+    assert.ok(sentence.includes('Open SovAI: Policy and choose Reset my rules'), sentence);
     assert.ok(sentence.includes('it resets your own rules only'), sentence);
   }
-  const swept: Array<[string, string]> = [
+  const original: Array<[string, string]> = [
     ...resets.map((sentence): [string, string] => ['BUNDLE_FAILURES', sentence]),
     ['BUNDLE_FAILURES unknown-field', BUNDLE_FAILURES['unknown-field']],
     ['STALE_DRAFT_TEXT', STALE_DRAFT_TEXT],
     ['the draft shape error', POLICY_DRAFT_SHAPE_TEXT],
-    ['NO_DRAFT_TEXT', commands.NO_DRAFT_TEXT],
-    ['editPolicyNotice', commands.editPolicyNotice(ceiling as never)],
-    ['NO_LABELS_WHILE_FAILED_TEXT', commands.NO_LABELS_WHILE_FAILED_TEXT],
-    ['notYourClearanceText', commands.notYourClearanceText(label as never)],
     ['FAILED_CLOSED_LABEL_TEXT', FAILED_CLOSED_LABEL_TEXT],
     ['ADD_CLEARANCE_HINT', ADD_CLEARANCE_HINT],
     ['localHostPatternNotice', localHostPatternNotice(['*.example.test'])],
@@ -762,15 +758,20 @@ test('D-44, D-21: every swept sentence names the policy page by its contributed 
     ['mcpCeilingUnjudgedText', mcpCeilingUnjudgedText('example-server')],
     ['NO_SIGNING_KEY_TEXT', NO_SIGNING_KEY_TEXT]
   ];
-  for (const [name, sentence] of swept) {
-    assert.ok(sentence.includes(policy), `${name} names ${policy}: ${sentence}`);
-    assert.doesNotMatch(sentence, LEFT_THE_PALETTE, name);
-    assert.ok(!sentence.includes(EM_DASH), name);
-    assert.doesNotMatch(sentence, /NEAR (AI )?organization/i, name);
-  }
-  // A pointer to change rules names the page's Edit my rules (or Apply my draft for a waiting draft).
-  for (const [name, sentence] of swept.filter(([name]) => /STALE|NO_DRAFT|shape|notYourClearance|ADD_CLEARANCE|localHost|mcpCeilingText$/.test(name))) {
-    assert.ok(sentence.includes('Edit my rules'), `${name}: ${sentence}`);
+  const display: Array<[string, string]> = [
+    ['NO_DRAFT_TEXT', commands.NO_DRAFT_TEXT],
+    ['editPolicyNotice', commands.editPolicyNotice(ceiling as never)],
+    ['NO_LABELS_WHILE_FAILED_TEXT', commands.NO_LABELS_WHILE_FAILED_TEXT],
+    ['notYourClearanceText', commands.notYourClearanceText(label as never)]
+  ];
+  for (const [group, command, edit] of [[original, 'SovAI: Policy', 'Edit my rules'], [display, policy, 'Edit my Standing Orders']] as const) {
+    for (const [name, sentence] of group) {
+      assert.ok(sentence.includes(command), `${name} names ${command}: ${sentence}`);
+      assert.doesNotMatch(sentence, LEFT_THE_PALETTE, name);
+      assert.ok(!sentence.includes(EM_DASH), name);
+      assert.doesNotMatch(sentence, /NEAR (AI )?organization/i, name);
+      if (/STALE|NO_DRAFT|shape|notYourClearance|ADD_CLEARANCE|localHost|mcpCeilingText$/.test(name)) assert.ok(sentence.includes(edit), `${name}: ${sentence}`);
+    }
   }
   assert.ok(commands.editPolicyNotice(ceiling as never).includes(`Apply my draft in ${policy}`));
 });
@@ -810,7 +811,7 @@ test('Phase 41: layers, Reset and the policy page', async () => {
   const words = flat(block);
   const setting = { key: 'labels.routing.levels.org/Internal', yours: 'any-cloud', allowed: 'local-only', layer: 'personal' } as const;
   for (const phrase of [
-    `"${titles.organization}"`, `"${titles.own}"`, `**${commandName('nearAi.policy.open')}**`, `\`${PROPOSAL_FILE_EXTENSION}\``,
+    '"Your organization\'s rules"', '"Your rules"', '**SovAI: Policy**', `\`${PROPOSAL_FILE_EXTENSION}\``,
     ignoredSettingsNotice([setting as never]) ?? '', widerThanOrganizationText(setting as never),
     '**Reset touches your own rules only.**', "Your organization's rules, and the files that hold them, stay as they are.",
     'is never reset for you', needsUpdateSentence('0.5.0'),
@@ -820,11 +821,11 @@ test('Phase 41: layers, Reset and the policy page', async () => {
     '**Edit my rules**', '**Apply my draft**', '**Show as stored**', '**Reset my rules**'
   ]) assert.ok(words.includes(flat(phrase)), phrase);
   // The page's own words: each button the text names is the page's.
-  for (const label of ['Apply to my rules', 'Save a file for your organization', 'Discard', 'Edit my rules', 'Apply my draft', 'Show as stored', 'Reset my rules', 'Wider', 'Stricter']) {
+  for (const label of ['Apply to my Standing Orders', 'Save a file for your organization', 'Discard', 'Edit my Standing Orders', 'Apply my draft', 'Show as stored', 'Reset my Standing Orders', 'Wider', 'Stricter']) {
     assert.ok(POLICY_PAGE.includes(`'${label}'`), `${label} is the page's word`);
   }
-  assert.equal(titles.organization, "Your organization's rules");
-  assert.equal(titles.own, 'Your rules');
+  assert.equal(titles.organization, "Your organization's Standing Orders");
+  assert.equal(titles.own, 'Your Standing Orders');
 });
 
 test('Phase 41: authorizations, each kind with its longest life, and self-signed until your organization signs them', async () => {
@@ -1009,15 +1010,14 @@ test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
     'Protected B sent to a server your policy names as local now needs a TLS pin and a Protected B authorization naming that server.']) {
     assert.ok(readme.includes(phrase), phrase);
   }
-  assert.ok(readmePolicy.startsWith('- **Your policy.**'));
+  assert.ok(readmePolicy.startsWith('- **Your Standing Orders.**'));
   // The organization rules stay above Fixes when the entry moves into a release.
   assert.ok(changelogOrganizationRelease.indexOf(changelogOrganizationHeading) < changelogOrganizationRelease.indexOf('### Fixes'), 'above Fixes');
   const entry = flat(changelogOrganization);
   // CHANGELOG.md is history: that release named its commands under the NEAR AI category, which later became SovAI (owner, 2026-11-24).
-  const releasedName = (id: string): string => commandName(id).replace(/^SovAI: /, 'NEAR AI: ');
   for (const phrase of [
     'Protected B sent to a server your policy names as local now needs a TLS pin and a Protected B authorization naming that server.',
-    `**${releasedName('nearAi.organization.addRules')}**`, `**${releasedName('nearAi.policy.open')}**`, `"${titles.organization}"`, '**Reset my rules**'
+    "**NEAR AI: Add Your Organization's Rules**", '**NEAR AI: Policy**', '"Your organization\'s rules"', '**Reset my rules**'
   ]) assert.ok(entry.includes(phrase), phrase);
   const exportBullets = changelogOrganization.split('\n- ').filter((bullet) => bullet.includes('Controlled goods (Canada)'));
   assert.equal(exportBullets.length, 1, 'one export bullet');
@@ -1027,10 +1027,11 @@ test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
 });
 
 test('Phase 41: SECURITY.md and README send people to the policy page, never to a command that left the palette', () => {
-  for (const [name, text] of [['SECURITY.md', SECURITY], ['README', README]] as const) {
+  for (const [name, text, command, button] of [['SECURITY.md', SECURITY, 'SovAI: Policy', 'Reset my rules'],
+    ['README', README, commandName('nearAi.policy.open'), 'Reset my Standing Orders']] as const) {
     assert.doesNotMatch(text, LEFT_THE_PALETTE, `${name} names no command that left the palette`);
-    assert.ok(text.includes(`**${commandName('nearAi.policy.open')}**`), `${name} names the policy page`);
-    assert.ok(text.includes('**Reset my rules**'), `${name} names the page's reset`);
+    assert.ok(text.includes(`**${command}**`), `${name} names the policy page`);
+    assert.ok(text.includes(`**${button}**`), `${name} names the page's reset`);
   }
 });
 

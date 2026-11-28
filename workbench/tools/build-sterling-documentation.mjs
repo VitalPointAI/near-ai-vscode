@@ -16,7 +16,7 @@ if (!existsSync(new URL('docs-site/content/index.md', root))) {
 const guides = [
   ['docs-site/content/index.md', 'Overview', 'Welcome', 'index.md'],
   ['docs-site/content/using/getting-started.md', 'Using Sterling', 'Getting started', 'using/getting-started.md'],
-  ['docs-site/content/using/roles/administration.md', 'Using Sterling', 'Administration and organization rules', 'using/roles/administration.md'],
+  ['docs-site/content/using/roles/administration.md', 'Using Sterling', 'Administration and Standing Orders', 'using/roles/administration.md'],
   ['docs-site/content/using/roles/data-and-connections.md', 'Using Sterling', 'Data and connections', 'using/roles/data-and-connections.md'],
   ['docs-site/content/using/roles/software-projects.md', 'Using Sterling', 'Software projects', 'using/roles/software-projects.md'],
   ['docs-site/content/using/roles/staff-teams.md', 'Using Sterling', 'Staff teams', 'using/roles/staff-teams.md'],

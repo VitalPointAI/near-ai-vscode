@@ -4,7 +4,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
-  const ACTION_LABELS = { apply: 'Apply to my rules', export: 'Save a file for your organization', discard: 'Discard' };
+  const ACTION_LABELS = { apply: 'Apply to my Standing Orders', export: 'Save a file for your organization', discard: 'Discard' };
   const MARKERS = { widens: 'Wider', narrows: 'Stricter' };
   const text = (value) => (typeof value === 'string' ? value : '');
   let lastAtSeq = 0;
@@ -64,13 +64,13 @@
   }
 
   // Edit my rules and Apply my draft only when the host offers them; Show as stored and Reset always. The host checks each message again.
-  const PAGE_ACTION_LABELS = { 'edit-own': 'Edit my rules', 'apply-draft': 'Apply my draft' };
+  const PAGE_ACTION_LABELS = { 'edit-own': 'Edit my Standing Orders', 'apply-draft': 'Apply my draft' };
   function renderPageActions(offered) {
     const own = (Array.isArray(offered) ? offered : []).filter((action) => Object.prototype.hasOwnProperty.call(PAGE_ACTION_LABELS, action));
     $('page-actions').replaceChildren(
       ...own.map((action) => button(PAGE_ACTION_LABELS[action], () => vscode.postMessage({ type: action }), false)),
       button('Show as stored', () => vscode.postMessage({ type: 'show-stored' }), true),
-      button('Reset my rules', () => vscode.postMessage({ type: 'reset' }), true)
+      button('Reset my Standing Orders', () => vscode.postMessage({ type: 'reset' }), true)
     );
   }
 

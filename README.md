@@ -1421,7 +1421,7 @@ The Sterling workbench runs as a container on your computer. Open it in your bro
 The Eclipse Theia release image includes Sterling Sovereign AI Canadian Defence Edition:
 
 - **A right-hand rail** with Get Started, Portfolio, Chat, Team Studio, Agent Activity,
-  Governance, Compliance and Documentation. Data Management and Model Factory are shown as
+  Standing Orders, Compliance and Documentation. Data Management and Model Factory are shown as
   planned. The rail's Chat shortcut slides the chat drawer in and out; closing the last
   conversation hides the drawer and keeps the conversation.
 - **Get Started** with **Set up Sterling**, **Open Chat** and **Explore a sample agent team**,
@@ -1492,19 +1492,20 @@ scope, findings, and approvals through its own review process.
   everywhere they leave it. Sync is off until you turn it on; what your git
   host can see is shown before it is, and the recovery code is shown once and
   never kept by anyone else.
-- **Your policy.** A signed policy file in this extension's own storage, never
+- **Your Standing Orders.** A signed policy file in this extension's own storage, never
   in your project, sets the most the agent may do, and your settings only
   narrow it. Your organization can hand every computer its rules as a signed
   file: **SovAI: Add Your Organization's Rules** opens it and shows twelve
   words to compare with the ones your organization's security contact reads
   to you, and your own rules can then only narrow your organization's.
-  **SovAI: Policy** opens the policy page, "Your organization's rules" (or
-  "Your rules" without them), read only: a change is shown there as a
+  **SovAI: Standing Orders** opens "Your organization's Standing Orders" or
+  "Your Standing Orders" on a computer without them. The page is read-only.
+  You see each change as a
   proposal first, applied to your own rules or saved as a file for your
-  organization, and the page has **Edit my rules**, **Show as stored** and
-  **Reset my rules**, which resets your own rules only. If the policy is
+  organization, and the page has **Edit my Standing Orders**, **Show as stored** and
+  **Reset my Standing Orders**, which resets your own rules only. If the policy is
   missing, changed or expired, only reading and planning run until you choose
-  **Reset my rules**, which asks first and keeps your old file. A policy
+  **Reset my Standing Orders**, which asks first and keeps your old file. A policy
   written for a newer version of the extension is never reset for you: it
   says to update the extension, and until then only reading and planning run.
   Protected B sent to a server your policy names as local now needs a TLS pin
@@ -1521,7 +1522,7 @@ scope, findings, and approvals through its own review process.
   changes where requests go. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - **Labels and clearances.** **SovAI: Set Label** labels a file, a folder or
   the project, and agents cannot read what your clearances do not cover. Add a
-  clearance in **SovAI: Policy** with **Edit my rules**, then **Apply my draft**.
+  clearance in **SovAI: Standing Orders** with **Edit my Standing Orders**, then **Apply my draft**.
   A chat's label rises with what its agents read and decides where its content
   is sent. Content at a level that needs a private cloud model goes to NEAR AI
   Cloud only over a connection proven to end inside its private hardware, and

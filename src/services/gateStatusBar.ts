@@ -13,14 +13,21 @@ import { isDefaultMark } from '../gate/sessionMark';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 
 export const SHOW_POLICY_COMMAND = 'nearAi.policy.show';
-export const POLICY_STATUS_TEXT = 'Policy';
-export const POLICY_RENEWING_TEXT = 'Policy: renewing';
-export const POLICY_READING_ONLY_TEXT = 'Policy: reading only';
-export const POLICY_CHECKING_TEXT = 'Policy: checking';
-export const POLICY_ENDS_SOON_TEXT = 'Policy: ends soon';
+export const POLICY_STATUS_TEXT = 'Standing Orders';
+export const POLICY_RENEWING_TEXT = 'Standing Orders: renewing';
+export const POLICY_READING_ONLY_TEXT = 'Standing Orders: reading only';
+export const POLICY_CHECKING_TEXT = 'Standing Orders: checking';
+export const POLICY_ENDS_SOON_TEXT = 'Standing Orders: ends soon';
 
-const CHECKING_TOOLTIP = 'SovAI is checking your policy file.';
-const READING_ONLY_NOTE = 'Click to see your policy.';
+const CHECKING_TOOLTIP = 'SovAI is checking your Standing Orders.';
+const READING_ONLY_NOTE = 'Click to see your Standing Orders.';
+
+/** Use the current command and button names when displaying a message also kept in decision records. */
+export function standingOrdersInstructions(text: string): string {
+  return text.replaceAll('SovAI: Policy', 'SovAI: Standing Orders')
+    .replaceAll('Edit my rules', 'Edit my Standing Orders')
+    .replaceAll('Reset my rules', 'Reset my Standing Orders');
+}
 
 export interface GateStatusShown {
   readonly text: string;
@@ -40,8 +47,8 @@ export function expiryDate(expiresAt: string): string {
  */
 export function policyProblem(state: BundleState | undefined, now: number, layers?: PolicyLayersView): string | undefined {
   if (state === undefined) return undefined;
-  if (state.state === 'valid') return Date.parse(state.expiresAt) <= now ? (layers?.expiry ?? failedClosed('expired')).sentence : undefined;
-  return state.sentence;
+  if (state.state === 'valid') return Date.parse(state.expiresAt) <= now ? standingOrdersInstructions((layers?.expiry ?? failedClosed('expired')).sentence) : undefined;
+  return standingOrdersInstructions(state.sentence);
 }
 
 /**
@@ -77,13 +84,13 @@ function policyStatusText(state: BundleState | undefined, now: number, layers?: 
     return { text: POLICY_ENDS_SOON_TEXT, tooltip: `${organizationEndingText(expiryDate(organization.expiresAt), contactShown(organization.contacts))} ${READING_ONLY_NOTE}`, warning: false };
   }
   const until = organization === undefined
-    ? `Your policy is signed and valid until ${expiryDate(state.expiresAt)}.`
-    : `Your organization's rules${organization.name === undefined ? '' : ` (${organization.name})`} are signed and valid until ${expiryDate(state.expiresAt)}. Your settings on this computer can only narrow them.`;
+    ? `Your Standing Orders are signed and valid until ${expiryDate(state.expiresAt)}.`
+    : `Your organization's Standing Orders${organization.name === undefined ? '' : ` (${organization.name})`} are signed and valid until ${expiryDate(state.expiresAt)}. Your settings on this computer can only narrow them.`;
   // `renewDue` is what the check found when it ran; a window that opened since then counts too, so a long-open editor shows it with no new check.
   if (state.renewDue || needsRenewal({ expiresAt: state.expiresAt }, now)) {
-    return { text: POLICY_RENEWING_TEXT, tooltip: `${until} It is close to its end and is renewed the next time SovAI starts.`, warning: false };
+    return { text: POLICY_RENEWING_TEXT, tooltip: `${until} They will be renewed the next time SovAI starts.`, warning: false };
   }
-  return { text: POLICY_STATUS_TEXT, tooltip: `${until} Click to see your policy.`, warning: false };
+  return { text: POLICY_STATUS_TEXT, tooltip: `${until} ${READING_ONLY_NOTE}`, warning: false };
 }
 
 /** The most a timer can be asked to wait (a 32-bit count of milliseconds, about 24.8 days); a longer wait is cut to this and armed again when it ends. */
@@ -136,7 +143,7 @@ export interface GateStatusBar {
 export function createGateStatusBar(options: GateStatusBarOptions = {}): GateStatusBar {
   const timers = options.timers ?? defaultTimers;
   const item = vscode.window.createStatusBarItem('nearAi.gate', vscode.StatusBarAlignment.Left, 49);
-  item.name = 'SovAI Policy';
+  item.name = 'SovAI Standing Orders';
   item.command = SHOW_POLICY_COMMAND;
   const apply = (shown: GateStatusShown): void => {
     item.text = shown.text;

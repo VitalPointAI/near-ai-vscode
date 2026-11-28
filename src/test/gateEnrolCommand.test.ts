@@ -356,17 +356,17 @@ test('D-23, D-14: the status bar says who set the rules, and your organization\'
   // No organization: today's words exactly.
   assert.deepEqual(gateStatusBar.gateStatusText(validState(), now, undefined, layersWith(undefined)), gateStatusBar.gateStatusText(validState(), now));
   const valid = gateStatusBar.gateStatusText(validState(), now, undefined, layersWith(EXAMPLE_VALID));
-  assert.equal(valid.text, 'Policy');
-  assert.equal(valid.tooltip, 'Your organization\'s rules (Example Organization) are signed and valid until 2027-02-18. Your settings on this computer can only narrow them. Click to see your policy.');
+  assert.equal(valid.text, 'Standing Orders');
+  assert.equal(valid.tooltip, 'Your organization\'s Standing Orders (Example Organization) are signed and valid until 2027-02-18. Your settings on this computer can only narrow them. Click to see your Standing Orders.');
   assert.equal(valid.warning, false);
   const late = Date.parse('2027-01-25T00:00:00.000Z');
   const ending = gateStatusBar.gateStatusText(validState(), late, undefined, layersWith(EXAMPLE_VALID));
-  assert.equal(ending.text, 'Policy: ends soon');
-  assert.equal(gateStatusBar.POLICY_ENDS_SOON_TEXT, 'Policy: ends soon');
+  assert.equal(ending.text, 'Standing Orders: ends soon');
+  assert.equal(gateStatusBar.POLICY_ENDS_SOON_TEXT, 'Standing Orders: ends soon');
   assert.ok(ending.tooltip.includes(organizationEndingText('2027-02-18', SECURITY_DESK)), ending.tooltip);
   // Past its end, a state that still says valid reads as your organization's own ending sentence.
   const ended = gateStatusBar.gateStatusText(validState(), Date.parse('2027-03-01T00:00:00.000Z'), undefined, layersWith(EXAMPLE_VALID, { expiry: { state: 'failed-closed', reason: 'expired', sentence: organizationEndedText('2027-02-18', SECURITY_DESK) } }));
-  assert.equal(ended.text, 'Policy: reading only');
+  assert.equal(ended.text, 'Standing Orders: reading only');
   assert.ok(ended.tooltip.includes(organizationEndedText('2027-02-18', SECURITY_DESK)));
   assert.doesNotMatch(ended.tooltip, /Reset/);
 
@@ -376,7 +376,7 @@ test('D-23, D-14: the status bar says who set the rules, and your organization\'
   const bar = stub.statusBarItems.filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
   const state = window.host.bundleState();
   assert.equal(state.state, 'valid');
-  if (state.state === 'valid') assert.equal(bar.tooltip, `Your organization's rules (Example Organization) are signed and valid until ${state.expiresAt.slice(0, 10)}. Your settings on this computer can only narrow them. Click to see your policy.`);
+  if (state.state === 'valid') assert.equal(bar.tooltip, `Your organization's Standing Orders (Example Organization) are signed and valid until ${state.expiresAt.slice(0, 10)}. Your settings on this computer can only narrow them. Click to see your Standing Orders.`);
 });
 
 test('D-21, D-23: when your organization\'s rules fail, the status bar reads "reading only" with your organization\'s sentence and never suggests Reset', async () => {
@@ -388,11 +388,11 @@ test('D-21, D-23: when your organization\'s rules fail, the status bar reads "re
   assert.equal(state.state, 'failed-closed');
   assert.equal(window.host.policyLayers().failedLayer, 'organization');
   const bar = stub.statusBarItems.filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
-  assert.equal(bar.text, 'Policy: reading only');
+  assert.equal(bar.text, 'Standing Orders: reading only');
   if (state.state === 'failed-closed') assert.ok(bar.tooltip.includes(state.sentence));
   assert.doesNotMatch(bar.tooltip, /Reset/);
   const view = await stub.contentProviders.get('near-ai-policy')?.provideTextDocumentContent(undefined);
-  assert.ok(view?.includes(`Your organization's rules need attention: ask ${SECURITY_DESK}.`), view);
+  assert.ok(view?.includes(`Ask ${SECURITY_DESK} about your organization's Standing Orders.`), view);
   assert.doesNotMatch(view ?? '', /Reset/);
 });
 
@@ -413,7 +413,7 @@ test('D-23: the stored view names where the rules come from; called without laye
   // An organization failure: the note asks the contact and never names Reset.
   const failed = gateCommands.policyDocumentText({ state: 'failed-closed', reason: 'bad-signature', sentence: 'Your organization\'s rules were changed after they were signed.' }, now,
     layersWith({ state: 'failed', reason: 'bad-signature', sentence: 'x', contacts: EXAMPLE_ORGANIZATION.contacts }, { failedLayer: 'organization' }));
-  assert.ok(failed.includes(`This view only shows your policy. Editing it changes nothing. Your organization's rules need attention: ask ${SECURITY_DESK}.`), failed);
+  assert.ok(failed.includes(`This view only shows your Standing Orders. Editing it changes nothing. Ask ${SECURITY_DESK} about your organization's Standing Orders.`), failed);
   assert.doesNotMatch(failed, /Reset/);
   // A personal failure under no organization keeps today's note.
   assert.equal(gateCommands.policyDocumentText(failedClosed('bad-signature'), now, layersWith(undefined, { failedLayer: 'personal' })), gateCommands.policyDocumentText(failedClosed('bad-signature'), now));
@@ -543,7 +543,7 @@ test('D-44, T-41-142: a stale or invalid draft is refused before anything is pro
   pc.clock.now += 60_000;
   await window.host.reset();
   assert.equal(await applyDraft(), false);
-  assert.deepEqual(warnings(), [`Nothing was changed. ${STALE_DRAFT_TEXT}`]);
+  assert.deepEqual(warnings(), ['Nothing was changed. Your policy changed after this draft was made. Open SovAI: Standing Orders and choose Edit my Standing Orders again to start from the policy in force.']);
   assert.equal(fake.proposed.length, 0, 'a stale draft proposes nothing');
   assert.ok(existsSync(draftFile(pc)), 'the draft is kept');
   await editDraft(pc);
@@ -598,7 +598,7 @@ test('D-44: deps.reset runs the confirmed Reset modal, deps.showStored opens the
   await fake.deps().showStored();
   assert.equal(stub.shownDocuments.length, 1);
   assert.ok(stub.shownDocuments[0]?.uri.startsWith('near-ai-policy:'));
-  assert.ok(stub.shownDocuments[0]?.text.startsWith('Your SovAI policy'));
+  assert.ok(stub.shownDocuments[0]?.text.startsWith('Your Standing Orders'));
   fake.deps().record('policy.proposal-applied', { proposalHash: 'a'.repeat(64), changes: 2, from: 'Edit Policy' });
   fake.deps().record('policy.proposal-exported', { proposalHash: 'b'.repeat(64), changes: 1, from: 'Edit Policy' });
   await window.host.flush();
@@ -612,7 +612,7 @@ test('D-44: deps.reset runs the confirmed Reset modal, deps.showStored opens the
   stub.messageAnswers.push(undefined);
   await fake.deps().reset();
   assert.equal(stub.messageOptions[0]?.detail, gateCommands.RESET_DETAIL_ORGANIZATION);
-  assert.match(gateCommands.RESET_DETAIL_ORGANIZATION, /Your organization's rules stay as they are\./);
+  assert.match(gateCommands.RESET_DETAIL_ORGANIZATION, /Your organization's Standing Orders stay as they are\./);
   assert.equal(window.host.policyLayers().organization.state, 'valid', 'declining changed nothing');
 });
 
@@ -621,8 +621,8 @@ test('D-44, owner Q9: the palette offers SovAI: Policy; Show, Edit, Apply, Reset
     contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: { commandPalette?: Array<{ command: string; when?: string }> } };
   };
   const find = (id: string) => manifest.contributes.commands.find((entry) => entry.command === id);
-  assert.deepEqual([find('nearAi.policy.open')?.title, find('nearAi.policy.open')?.category], ['Policy', 'SovAI']);
-  assert.deepEqual([find('nearAi.policy.showAsStored')?.title, find('nearAi.policy.showAsStored')?.category], ['Show Policy as Stored', 'SovAI']);
+  assert.deepEqual([find('nearAi.policy.open')?.title, find('nearAi.policy.open')?.category], ['Standing Orders', 'SovAI']);
+  assert.deepEqual([find('nearAi.policy.showAsStored')?.title, find('nearAi.policy.showAsStored')?.category], ['Show Standing Orders as Stored', 'SovAI']);
   const hidden = ['nearAi.policy.show', 'nearAi.policy.edit', 'nearAi.policy.applyDraft', 'nearAi.policy.reset', 'nearAi.policy.showAsStored'];
   const palette = manifest.contributes.menus.commandPalette ?? [];
   for (const id of hidden) {

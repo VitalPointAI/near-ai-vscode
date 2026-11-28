@@ -15,15 +15,16 @@ import type { GateHost } from '../gate/host';
 import { NO_SECRET_STORAGE_TEXT } from '../gate/organizationStore';
 import { loadDeviceIdentity } from '../team/identity';
 import type { SecretStorageLike } from './auth';
+import { standingOrdersInstructions } from './gateStatusBar';
 import { openPolicyEditor, openPolicyProposal, registerPolicyEditor } from './policyEditor';
 import type { PolicyChange, PolicyEditorDeps, PolicyEditorState, ProposalOutcome } from './policyEditor';
 
-export const POLICY_APPLIED_TEXT = `Your policy was changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
-export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Open SovAI: Policy and choose Edit my rules first.';
-export const OPEN_FAILED_TEXT = 'SovAI could not open your policy.';
-const APPLY_FAILED_TEXT = 'Nothing was changed: SovAI could not apply your policy draft.';
-const UNTRUSTED_TEXT = 'Nothing was changed: your policy cannot be trusted right now, so it cannot be edited.';
-/** Who proposes a draft, as the page shows it. */
+export const POLICY_APPLIED_TEXT = `Your Standing Orders were changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+export const NO_DRAFT_TEXT = 'There is no draft to apply. Open SovAI: Standing Orders and choose Edit my Standing Orders first.';
+export const OPEN_FAILED_TEXT = 'SovAI could not open your Standing Orders.';
+const APPLY_FAILED_TEXT = 'SovAI could not apply your Standing Orders draft. Nothing was changed.';
+const UNTRUSTED_TEXT = 'SovAI could not verify your Standing Orders. Nothing was changed.';
+/** Origin used in proposal hashes and decision records. */
 const DRAFT_FROM = 'Edit my rules';
 
 /** How the gate's commands reach the policy editor page; a test passes its own. */
@@ -128,7 +129,7 @@ export async function discardDraft(globalStorageDir: string): Promise<void> {
 }
 
 function warn(message: string): void {
-  void Promise.resolve(vscode.window.showWarningMessage(message)).catch(() => undefined);
+  void Promise.resolve(vscode.window.showWarningMessage(standingOrdersInstructions(message))).catch(() => undefined);
 }
 
 /**
