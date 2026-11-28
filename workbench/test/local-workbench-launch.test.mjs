@@ -168,10 +168,14 @@ test('check reports workstation prerequisites in order and never reaches resourc
   const check = { check: true };
   for (const [arch, platform] of [['x64', 'linux/amd64'], ['arm64', 'linux/arm64']]) {
     const f = fixture({ arch, checkOnly: true, installed: false });
-    const [prerequisites, capacity, storage] = (await launchLocalWorkbench(check, f.deps)).split('\n');
+    const [prerequisites, capacity, storage, secretStorage] = (await launchLocalWorkbench(check, f.deps)).split('\n');
     assert.equal(prerequisites, `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`);
     assert.equal(capacity, 'Docker reports 8 logical CPUs and 16 GiB total memory.');
     assert.equal(storage, availableStorage);
+    assert.match(secretStorage, /no local keyring or organization secret store/);
+    assert.match(secretStorage, /saved credentials and active Standing Orders are unavailable/i);
+    assert.match(secretStorage, /you can still use Workbench features/i);
+    assert.match(secretStorage, /ask your administrator/i);
     assert.deepEqual(f.prerequisiteSteps, ['client', 'socket', 'engine', 'capacity']);
     assert.deepEqual(f.capacityQueries, [['info', '--format', '{{.NCPU}} {{.MemTotal}}\n{{json .DockerRootDir}}']]);
     assert.deepEqual(f.storageProbes, [[dockerRoot, { bigint: true }]]);

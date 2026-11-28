@@ -233,7 +233,11 @@ export async function launchLocalWorkbench({ image, repair = false, check = fals
       capacity = `Docker reports ${cpuCount} logical ${cpus} and ${memory} GiB total memory.`;
     }
     const storage = await describeDockerStorage(rootLines.length === 1 ? rootLines[0] : undefined, deps.statfs);
-    return [prerequisites, capacity, storage].join('\n');
+    const secretStorage = 'The released standalone Workbench has no local keyring or organization secret store. '
+      + 'Saved credentials and active Standing Orders are unavailable. '
+      + 'You can still use Workbench features that do not need saved credentials. '
+      + 'Ask your administrator about a Workbench with a configured secret store.';
+    return [prerequisites, capacity, storage, secretStorage].join('\n');
   }
 
   async function checked(step, ...args) {

@@ -4,7 +4,7 @@
 // by test/container/get-started.test.ts against the image, opened at 127.0.0.1 as the owner opens it.
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-const railLabels = ['Get Started', 'Portfolio', 'Chat', 'Team Studio', 'Agent Activity', 'Governance', 'Data Management', 'Model Factory',
+const railLabels = ['Get Started', 'Portfolio', 'Chat', 'Team Studio', 'Agent Activity', 'Standing Orders', 'Data Management', 'Model Factory',
   'Compliance', 'Documentation'];
 const plannedLabels = ['Data Management', 'Model Factory'];
 const nativeShortcuts = [['Portfolio', 'Portfolio Room'], ['Compliance', 'Compliance'], ['Documentation', 'Documentation'], ['Get Started', 'Get Started']];
@@ -238,6 +238,7 @@ test('Get Started switches Canadian language live through User Settings and keep
   expect(page.url()).toBe(shellUrl);
   expect(await welcome.evaluate((node, before) => node === before, original)).toBe(true);
   await expect(page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Ordres permanents', exact: true })).toBeVisible();
   await page.getByRole('navigation', { name: 'Raccourcis Sterling' }).getByRole('button', { name: 'Premiers pas' }).click();
   await expect(currentTab(page).filter({ hasText: /^Premiers pas$/ })).toBeVisible();
   await expect(welcome.getByRole('heading', { name: 'Espaces de travail de la défense' })).toBeVisible();

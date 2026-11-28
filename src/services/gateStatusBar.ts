@@ -1,7 +1,5 @@
-// The policy status bar item (OFFL-02, D-13, D-33): "Policy" while the signed policy file is good, "Policy: renewing" in its last days, and a visible
-// "Policy: reading only" with the bundle's own one-sentence cause and fix when the gate has failed closed. The words come from one pure function so a test
-// can check every state; the item itself is a thin wrapper, like the Team status bar. Under your organization's rules it says so, with your organization's
-// name, and "Policy: ends soon" with the contact in their last 30 days (D-14, D-23); with no organization every word is as before.
+// The Standing Orders status bar item (OFFL-02, D-13, D-33) shows the current policy state and its cause and fix in reading-only mode.
+// The words come from one pure function. Under your organization's rules it shows the organization name and the renewal contact (D-14, D-23).
 import * as vscode from 'vscode';
 import { RENEW_WINDOW_DAYS, failedClosed, needsRenewal } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
@@ -13,14 +11,28 @@ import { isDefaultMark } from '../gate/sessionMark';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 
 export const SHOW_POLICY_COMMAND = 'nearAi.policy.show';
-export const POLICY_STATUS_TEXT = 'Policy';
-export const POLICY_RENEWING_TEXT = 'Policy: renewing';
-export const POLICY_READING_ONLY_TEXT = 'Policy: reading only';
-export const POLICY_CHECKING_TEXT = 'Policy: checking';
-export const POLICY_ENDS_SOON_TEXT = 'Policy: ends soon';
+export const POLICY_STATUS_TEXT = 'Standing Orders';
+export const POLICY_RENEWING_TEXT = 'Standing Orders: renewing';
+export const POLICY_READING_ONLY_TEXT = 'Standing Orders: reading only';
+export const POLICY_CHECKING_TEXT = 'Standing Orders: checking';
+export const POLICY_ENDS_SOON_TEXT = 'Standing Orders: ends soon';
 
-const CHECKING_TOOLTIP = 'SovAI is checking your policy file.';
-const READING_ONLY_NOTE = 'Click to see your policy.';
+const CHECKING_TOOLTIP = 'SovAI is checking your Standing Orders.';
+const READING_ONLY_NOTE = 'Click to see your Standing Orders.';
+
+/** Translate the known recovery instructions at display time. Other text keeps its original wording. */
+export function standingOrdersInstructions(text: string): string {
+  return text
+    .replaceAll('Open SovAI: Policy and choose Reset my rules to sign a fresh one',
+      'Open SovAI: Standing Orders and choose Reset my Standing Orders to sign a fresh one')
+    .replaceAll('open SovAI: Policy and choose Show as stored to see how to go back.',
+      'open SovAI: Standing Orders and choose Show as stored to see how to go back.')
+    .replaceAll('Open SovAI: Policy and choose Edit my rules again to start from the policy in force.',
+      'Open SovAI: Standing Orders and choose Edit my Standing Orders again to start from the policy in force.')
+    .replaceAll('the policy as Edit my rules in SovAI: Policy wrote it.',
+      'the policy as Edit my Standing Orders in SovAI: Standing Orders wrote it.')
+    .replaceAll('Open SovAI: Policy and try again.', 'Open SovAI: Standing Orders and try again.');
+}
 
 export interface GateStatusShown {
   readonly text: string;
@@ -40,8 +52,8 @@ export function expiryDate(expiresAt: string): string {
  */
 export function policyProblem(state: BundleState | undefined, now: number, layers?: PolicyLayersView): string | undefined {
   if (state === undefined) return undefined;
-  if (state.state === 'valid') return Date.parse(state.expiresAt) <= now ? (layers?.expiry ?? failedClosed('expired')).sentence : undefined;
-  return state.sentence;
+  if (state.state === 'valid') return Date.parse(state.expiresAt) <= now ? standingOrdersInstructions((layers?.expiry ?? failedClosed('expired')).sentence) : undefined;
+  return standingOrdersInstructions(state.sentence);
 }
 
 /**
@@ -77,13 +89,13 @@ function policyStatusText(state: BundleState | undefined, now: number, layers?: 
     return { text: POLICY_ENDS_SOON_TEXT, tooltip: `${organizationEndingText(expiryDate(organization.expiresAt), contactShown(organization.contacts))} ${READING_ONLY_NOTE}`, warning: false };
   }
   const until = organization === undefined
-    ? `Your policy is signed and valid until ${expiryDate(state.expiresAt)}.`
-    : `Your organization's rules${organization.name === undefined ? '' : ` (${organization.name})`} are signed and valid until ${expiryDate(state.expiresAt)}. Your settings on this computer can only narrow them.`;
+    ? `Your Standing Orders are signed and valid until ${expiryDate(state.expiresAt)}.`
+    : `Your organization's Standing Orders${organization.name === undefined ? '' : ` (${organization.name})`} are signed and valid until ${expiryDate(state.expiresAt)}. Your settings on this computer can only narrow them.`;
   // `renewDue` is what the check found when it ran; a window that opened since then counts too, so a long-open editor shows it with no new check.
   if (state.renewDue || needsRenewal({ expiresAt: state.expiresAt }, now)) {
-    return { text: POLICY_RENEWING_TEXT, tooltip: `${until} It is close to its end and is renewed the next time SovAI starts.`, warning: false };
+    return { text: POLICY_RENEWING_TEXT, tooltip: `${until} They will be renewed the next time SovAI starts.`, warning: false };
   }
-  return { text: POLICY_STATUS_TEXT, tooltip: `${until} Click to see your policy.`, warning: false };
+  return { text: POLICY_STATUS_TEXT, tooltip: `${until} ${READING_ONLY_NOTE}`, warning: false };
 }
 
 /** The most a timer can be asked to wait (a 32-bit count of milliseconds, about 24.8 days); a longer wait is cut to this and armed again when it ends. */
@@ -136,7 +148,7 @@ export interface GateStatusBar {
 export function createGateStatusBar(options: GateStatusBarOptions = {}): GateStatusBar {
   const timers = options.timers ?? defaultTimers;
   const item = vscode.window.createStatusBarItem('nearAi.gate', vscode.StatusBarAlignment.Left, 49);
-  item.name = 'SovAI Policy';
+  item.name = 'SovAI Standing Orders';
   item.command = SHOW_POLICY_COMMAND;
   const apply = (shown: GateStatusShown): void => {
     item.text = shown.text;

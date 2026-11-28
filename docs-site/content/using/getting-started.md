@@ -36,6 +36,13 @@ no Docker changes. If your shell says `node` is missing, install the supported N
 node scripts/launch-local-workbench.mjs --check
 ```
 
+The released standalone image includes no local keyring or connection to your organization's secret
+store. You can use Documentation and trusted local Resource Inventory. Profiles that rely on saved
+credentials and the active Standing Orders need a durable store. If you need those features, ask
+your administrator about a configured Workbench. The launcher's `--repair` can retrieve only the
+approved Workbench image by digest. For the planned organization setup, see
+[Hosting for many people](../architecture/overview.mdx#hosting-for-many-people-planned-not-yet-released).
+
 On the [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases), open the approved
 release and copy the image reference from `sterling-image.txt`. The current file points to the
 Linux x86-64 image. A signed Linux ARM64 release image is pending.
@@ -117,7 +124,7 @@ from the selected trusted local workspace folder.
 
 From the right sidebar you can open:
 
-- **Get Started**, **Portfolio**, **Team Studio**, **Agent Activity** and **Governance**;
+- **Get Started**, **Portfolio**, **Team Studio**, **Agent Activity** and **Standing Orders**;
 - **Chat**, which slides the chat drawer open and closed;
 - **Documentation**, the guides bundled with the image, which you can search without a network;
 - **Compliance**, which shows control states only from an evidence bundle checked for the same
@@ -126,9 +133,8 @@ From the right sidebar you can open:
 The SovAI extension is also inside, so **SovAI: Set Up a New Profile** and the other SovAI
 commands are in the Command Palette.
 
-The workspace opens at `/home/sterling/workspace`. The local preview has no secret store.
-Profiles that need a saved API key cannot finish setup here. The planned hosted workbench uses
-your organization's secret store.
+The workspace opens at `/home/sterling/workspace`. See the [launcher check](#use-the-local-launcher)
+for the standalone image’s secret storage limits.
 
 Hosting the workbench for many people, with sign-in, at your organization's own sites is planned
 and not yet released. See [Hosting for many people](../architecture/overview.mdx#hosting-for-many-people-planned-not-yet-released).

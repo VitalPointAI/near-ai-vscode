@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Standing Orders is the new name for the policy editor, its Command Palette entries, and its Workbench and status bar shortcuts. The French Workbench shortcut reads **Ordres permanents**.
+
 ## 0.4.43
 
 This Workbench release adds offline documentation and extends Canadian English and French support.

@@ -336,24 +336,24 @@
       },
       {
         "command": "nearAi.policy.open",
-        "title": "Policy",
+        "title": "Standing Orders",
         "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.policy.show",
-        "title": "Show Policy",
+        "title": "Show Standing Orders",
         "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.policy.showAsStored",
-        "title": "Show Policy as Stored",
+        "title": "Show Standing Orders as Stored",
         "category": "SovAI"
       },
       {
         "command": "nearAi.policy.reset",
-        "title": "Reset Policy to Defaults",
+        "title": "Reset Standing Orders to Defaults",
         "category": "SovAI"
       },
       {

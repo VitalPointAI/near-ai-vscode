@@ -10,6 +10,7 @@ import type { PolicyContact } from '../domain/gate/sections';
 import { PayloadError, signPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import { STALE_DRAFT_TEXT } from '../gate/bundleStore';
+import { standingOrdersInstructions } from './gateStatusBar';
 import { openPanel } from './webview/openPanel';
 
 // The policy editor (FND-09, Phase 41 D-44, D-47, D-23): one page, "Your organization's rules" (or "Your rules" without an organization), that shows the
@@ -24,8 +25,8 @@ import { openPanel } from './webview/openPanel';
 // changes nothing.
 
 export const POLICY_EDITOR_VIEW_TYPE = 'nearAiPolicy';
-export const POLICY_EDITOR_TITLE = "Your organization's rules";
-export const POLICY_EDITOR_TITLE_OWN = 'Your rules';
+export const POLICY_EDITOR_TITLE = "Your organization's Standing Orders";
+export const POLICY_EDITOR_TITLE_OWN = 'Your Standing Orders';
 
 /** How a proposal ends. One closed list; a proposal never ends half-done. */
 export const PROPOSAL_OUTCOMES = Object.freeze(['applied', 'exported', 'discarded', 'replaced'] as const);
@@ -34,16 +35,16 @@ export type ProposalOutcome = (typeof PROPOSAL_OUTCOMES)[number];
 /** The first sentence after a proposal is saved for your organization. */
 export const PROPOSAL_EXPORTED_TEXT = 'Nothing changed on this computer.';
 /** Said when your organization's rules name no contact. */
-export const NO_CONTACT_TEXT = "Send this file to whoever manages your organization's rules.";
+export const NO_CONTACT_TEXT = "Send this file to whoever manages your organization's Standing Orders.";
 /** The last sentence after a proposal is saved for your organization. */
-export const ORGANIZATION_SENDS_TEXT = "Your organization's rules change when they send new rules.";
+export const ORGANIZATION_SENDS_TEXT = "Your organization's Standing Orders change when your organization sends an update.";
 /** Shown when your organization's rules were signed by a key other than this device's (D-23). */
 export const SET_BY_ORGANIZATION_TEXT = 'Set by your organization';
 /** Shown for rules this device signed itself (D-23). */
-export const SELF_SIGNED_RULES_TEXT = `These rules are ${SELF_SIGNED_TEXT}.`;
-export const APPLIED_TEXT = 'Your rules were changed.';
-export const NO_CHANGE_TEXT = 'This proposal changes nothing in your rules.';
-export const UNREADABLE_TEXT = 'Your rules cannot be read right now.';
+export const SELF_SIGNED_RULES_TEXT = `These Standing Orders are ${SELF_SIGNED_TEXT}.`;
+export const APPLIED_TEXT = 'Your Standing Orders were changed.';
+export const NO_CHANGE_TEXT = 'This proposal makes no changes to your Standing Orders.';
+export const UNREADABLE_TEXT = 'Your Standing Orders cannot be read right now.';
 
 /** The rules the editor shows, from the host's bundle state (41-09). */
 export interface PolicyEditorState {
@@ -210,7 +211,7 @@ async function post(): Promise<void> {
   const shown = pending;
   const proposal = shown === undefined ? undefined : {
     id: shown.id,
-    from: shown.from,
+    from: shown.from === 'Edit my rules' ? 'Edit my Standing Orders' : shown.from,
     ...(shown.reason === undefined ? {} : { reason: shown.reason }),
     target: shown.target,
     stale: shown.stale,
@@ -227,7 +228,7 @@ async function post(): Promise<void> {
     ...(proposal === undefined ? {} : { proposal }),
     actions: actionsOf(),
     pageActions: pageActionsOf(),
-    ...(text === undefined ? {} : { notice: text }),
+    ...(text === undefined ? {} : { notice: standingOrdersInstructions(text) }),
     ...(at === undefined ? {} : { at, atSeq })
   });
 }
@@ -253,7 +254,7 @@ function show(): vscode.WebviewPanel {
     try {
       await receive(message);
     } catch (error) {
-      void view.webview.postMessage({ type: 'error', text: cut(error instanceof Error ? error.message : String(error), MAX_TEXT) });
+      void view.webview.postMessage({ type: 'error', text: cut(standingOrdersInstructions(error instanceof Error ? error.message : String(error)), MAX_TEXT) });
     }
     await post();
   });
@@ -413,14 +414,14 @@ export function openPolicyEditor(section?: PolicySectionId): void {
  */
 export function openPolicyProposal(change: PolicyChange): Promise<ProposalOutcome> {
   if (host === undefined) return Promise.reject(new Error('The rules page is not ready yet.'));
-  if (pending?.busy === true) return Promise.reject(new Error('A change to your rules is being saved. Try again in a moment.'));
+  if (pending?.busy === true) return Promise.reject(new Error('A change to your Standing Orders is being saved. Try again in a moment.'));
   const state = host.deps.state();
   if (state === undefined) return Promise.reject(new Error(`${UNREADABLE_TEXT} Nothing was proposed.`));
   const target: Target = change.target ?? (state.organization === undefined ? 'personal' : 'organization');
   const base = target === 'organization' ? state.organization : state.personal;
   const baseHash = hashOf(state, target);
   if (base === undefined || baseHash === undefined) {
-    return Promise.reject(new Error("This computer has no rules from your organization, so nothing can be proposed to your organization."));
+    return Promise.reject(new Error("This computer has no Standing Orders from your organization, so nothing can be proposed to your organization."));
   }
   let next: PolicyDocument;
   let changes: readonly ProposalChange[];

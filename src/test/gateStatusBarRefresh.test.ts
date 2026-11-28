@@ -68,10 +68,10 @@ test('nextStatusChange: the start of the renewal window, then the end, then noth
 test('gateStatusText: a policy inside its renewal window reads renewing even when the state was read before the window began', () => {
   const expires = T0 + 100 * DAY;
   const stale = validState(expires, { renewDue: false });
-  assert.equal(statusBar.gateStatusText(stale, expires - 31 * DAY).text, 'Policy');
-  assert.equal(statusBar.gateStatusText(stale, expires - 30 * DAY).text, 'Policy: renewing');
-  assert.equal(statusBar.gateStatusText(stale, expires - 1).text, 'Policy: renewing');
-  assert.equal(statusBar.gateStatusText(stale, expires).text, 'Policy: reading only');
+  assert.equal(statusBar.gateStatusText(stale, expires - 31 * DAY).text, 'Standing Orders');
+  assert.equal(statusBar.gateStatusText(stale, expires - 30 * DAY).text, 'Standing Orders: renewing');
+  assert.equal(statusBar.gateStatusText(stale, expires - 1).text, 'Standing Orders: renewing');
+  assert.equal(statusBar.gateStatusText(stale, expires).text, 'Standing Orders: reading only');
 });
 
 test('a policy already in its last days says renewing, and when its end passes the bar says reading only with no other trigger', () => {
@@ -80,12 +80,12 @@ test('a policy already in its last days says renewing, and when its end passes t
   const bar = statusBar.createGateStatusBar({ read: hostReading(clock, validState(expires)), timers: clock.timers });
   const item = itemOf(stub.statusBarItems.length - 1);
   bar.update(validState(expires), clock.now);
-  assert.equal(item.text, 'Policy: renewing');
+  assert.equal(item.text, 'Standing Orders: renewing');
   assert.deepEqual(clock.delays, [10 * DAY], 'one timer, to the end');
   clock.advanceTo(expires - 1);
-  assert.equal(item.text, 'Policy: renewing');
+  assert.equal(item.text, 'Standing Orders: renewing');
   clock.advanceTo(expires);
-  assert.equal(item.text, 'Policy: reading only');
+  assert.equal(item.text, 'Standing Orders: reading only');
   assert.ok(item.backgroundColor !== undefined, 'the warning background shows');
   assert.equal(clock.pending, 0, 'nothing more is scheduled once it has ended');
   bar.dispose();
@@ -98,28 +98,28 @@ test('a host that still hands back the old valid state after the end is shown as
   const bar = statusBar.createGateStatusBar({ read: () => ({ state: stale, now: clock.now }), timers: clock.timers });
   const item = itemOf(stub.statusBarItems.length - 1);
   bar.update(stale, clock.now);
-  assert.equal(item.text, 'Policy');
+  assert.equal(item.text, 'Standing Orders');
   clock.advanceTo(expires);
-  assert.equal(item.text, 'Policy: reading only');
+  assert.equal(item.text, 'Standing Orders: reading only');
   bar.dispose();
 });
 
-test('the renewal window start changes the words to "Policy: renewing", then the end to "reading only", each at its own moment', () => {
+test('the renewal window start changes the words to "Standing Orders: renewing", then the end to "reading only", each at its own moment', () => {
   const clock = new FakeTimers();
   const expires = T0 + 100 * DAY;
   const bar = statusBar.createGateStatusBar({ read: hostReading(clock, validState(expires)), timers: clock.timers });
   const item = itemOf(stub.statusBarItems.length - 1);
   bar.update(validState(expires), clock.now);
-  assert.equal(item.text, 'Policy');
+  assert.equal(item.text, 'Standing Orders');
   clock.advanceTo(expires - 30 * DAY - 1);
-  assert.equal(item.text, 'Policy');
+  assert.equal(item.text, 'Standing Orders');
   clock.advanceTo(expires - 30 * DAY);
-  assert.equal(item.text, 'Policy: renewing');
+  assert.equal(item.text, 'Standing Orders: renewing');
   assert.equal(item.backgroundColor, undefined, 'renewing does not warn');
   clock.advanceTo(expires - 1);
-  assert.equal(item.text, 'Policy: renewing');
+  assert.equal(item.text, 'Standing Orders: renewing');
   clock.advanceTo(expires);
-  assert.equal(item.text, 'Policy: reading only');
+  assert.equal(item.text, 'Standing Orders: reading only');
   bar.dispose();
 });
 
@@ -132,13 +132,13 @@ test('a delay longer than a timer can hold is cut and re-armed until the moment 
   assert.equal(clock.delays[0], statusBar.MAX_TIMER_DELAY_MS, 'the first wait is cut to the most a timer can hold (about 24.8 days)');
   assert.ok(statusBar.MAX_TIMER_DELAY_MS < 25 * DAY);
   clock.advanceTo(T0 + 100 * DAY);
-  assert.equal(item.text, 'Policy', 'a cut wait ended with nothing to show yet');
+  assert.equal(item.text, 'Standing Orders', 'a cut wait ended with nothing to show yet');
   assert.ok(clock.delays.length > 3, 'it armed again each time');
   assert.ok(clock.delays.every((delay) => delay >= 1 && delay <= statusBar.MAX_TIMER_DELAY_MS), 'every wait is a real positive delay a timer accepts');
   clock.advanceTo(expires - 30 * DAY);
-  assert.equal(item.text, 'Policy: renewing');
+  assert.equal(item.text, 'Standing Orders: renewing');
   clock.advanceTo(expires);
-  assert.equal(item.text, 'Policy: reading only');
+  assert.equal(item.text, 'Standing Orders: reading only');
   assert.equal(clock.pending, 0);
   bar.dispose();
 });
@@ -172,7 +172,7 @@ test('dispose clears the timer, and a timer that fires after it changes nothing'
   bar.update(validState(expires), clock.now);
   assert.equal(clock.pending, 0, 'an update after dispose arms nothing');
   clock.advanceTo(expires + DAY);
-  assert.equal(item.text, 'Policy');
+  assert.equal(item.text, 'Standing Orders');
 });
 
 test('a read that throws never breaks the bar: it keeps what it shows and reads again a minute later', () => {
@@ -183,12 +183,12 @@ test('a read that throws never breaks the bar: it keeps what it shows and reads 
   const item = itemOf(stub.statusBarItems.length - 1);
   bar.update(validState(expires), clock.now);
   assert.doesNotThrow(() => clock.advanceTo(expires - 30 * DAY));
-  assert.equal(item.text, 'Policy', 'nothing to show from a host that cannot be read');
+  assert.equal(item.text, 'Standing Orders', 'nothing to show from a host that cannot be read');
   assert.equal(clock.pending, 1, 'it will try again');
   assert.equal(clock.delays.at(-1), statusBar.READ_RETRY_MS);
   broken = false;
   clock.advanceTo(clock.now + statusBar.READ_RETRY_MS);
-  assert.equal(item.text, 'Policy: renewing');
+  assert.equal(item.text, 'Standing Orders: renewing');
   bar.dispose();
   assert.equal(clock.pending, 0);
 });

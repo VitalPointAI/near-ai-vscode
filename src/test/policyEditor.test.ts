@@ -9,7 +9,6 @@ import type { PolicyDocument } from '../domain/gate/policyDocument';
 import { POLICY_SECTION_IDS, PROPOSAL_FILE_EXTENSION, policySections, proposalOf } from '../domain/gate/proposal';
 import { verifyPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
-import { STALE_DRAFT_TEXT } from '../gate/bundleStore';
 import { activeKeys, deviceKey, fullDocumentFor, issuerKey, policyDocumentFor } from './helpers/policyFixtures';
 
 // The policy editor's host controller (FND-09, Phase 41 D-44, D-47), driven as VS Code drives it: a stand-in panel and save dialog, and fake host
@@ -193,10 +192,9 @@ const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 test('D-44: a proposal on your own rules is shown and applied', async () => {
   const state = ownState();
   const h = harness({ state, signer: deviceKey() });
-  const outcome = h.editor.openPolicyProposal(widenInternal);
+  const outcome = h.editor.openPolicyProposal({ ...widenInternal, from: 'Edit my rules' });
   await settle();
   const shown = h.lastState();
-  assert.equal(shown.title, 'Your rules');
   assert.deepEqual(shown.actions, ['apply', 'discard']);
   assert.equal(shown.proposal.changes.length, 1);
   assert.equal(shown.proposal.changes[0].key, 'routing.levels.org/Internal');
@@ -209,10 +207,12 @@ test('D-44: a proposal on your own rules is shown and applied', async () => {
   assert.equal(h.calls.record.length, 1);
   assert.equal(h.calls.record[0]?.id, 'policy.proposal-applied');
   assert.equal(h.calls.record[0]?.detail['changes'], 1);
-  assert.equal(h.calls.record[0]?.detail['from'], 'Example flow');
-  assert.match(String(h.calls.record[0]?.detail['proposalHash']), /^[0-9a-f]{64}$/);
+  assert.equal(h.calls.record[0]?.detail['from'], 'Edit my rules');
+  assert.equal(h.calls.record[0]?.detail['proposalHash'], '3c9b825aed652d71c4bd878b339c8d50c0812415429af218c08540260ace593d');
   assert.equal(await outcome, 'applied');
   assert.equal(h.lastState().proposal, undefined, 'after applying, the rules are shown with no proposal');
+  assert.equal(shown.title, 'Your Standing Orders');
+  assert.equal(shown.proposal.from, 'Edit my Standing Orders');
 });
 
 test('IN-08, D-44: Apply is not offered on your own rules when this device has no signing key, and a forged Apply does nothing', async () => {
@@ -221,7 +221,7 @@ test('IN-08, D-44: Apply is not offered on your own rules when this device has n
   const outcome = unsigned.editor.openPolicyProposal(widenInternal);
   await settle();
   const shown = unsigned.lastState();
-  assert.equal(shown.title, 'Your rules');
+  assert.equal(shown.title, 'Your Standing Orders');
   assert.equal(shown.proposal.changes.length, 1, 'the proposal is still shown');
   assert.deepEqual(shown.actions, ['discard'], 'no Apply without a key to sign your rules');
   await unsigned.send({ type: 'apply', id: shown.proposal.id });
@@ -252,7 +252,7 @@ test('the panel has one CSP with a fresh nonce, base.css and the page script, an
   assert.ok(scripts.some((tag) => tag.includes('/media/policy/policy.js')), 'the page script');
   assert.match(html, /href="\/extension\/media\/shared\/base\.css"/);
   assert.match(html, /href="\/extension\/media\/policy\/policy\.css"/);
-  assert.equal(h.created[0]?.title, 'Your rules');
+  assert.equal(h.created[0]?.title, 'Your Standing Orders');
   assert.equal(h.created[0]?.viewType, h.editor.POLICY_EDITOR_VIEW_TYPE);
   const context = { extensionUri: uri('/extension'), subscriptions: [] };
   const spec = { viewType: 'example', folder: 'policy', script: 'policy.js', style: 'policy.css', body: '', probe: 'example' };
@@ -314,8 +314,8 @@ test('D-44: under an organization layer the title is your organization\'s rules 
   const outcome = h.editor.openPolicyProposal(widenInternal);
   await settle();
   const shown = h.lastState();
-  assert.equal(shown.title, "Your organization's rules");
-  assert.equal(h.created[0]?.title, "Your organization's rules");
+  assert.equal(shown.title, "Your organization's Standing Orders");
+  assert.equal(h.created[0]?.title, "Your organization's Standing Orders");
   assert.deepEqual(shown.actions, ['export', 'discard'], 'no Apply: your organization signs its own rules');
   const id = shown.proposal.id as string;
   // A forged Apply changes nothing and calls nothing.
@@ -367,7 +367,7 @@ test('D-44: no contact named, and a dismissed save dialog writes nothing', async
   assert.equal(await outcome, 'exported');
   const notice = String(h.lastState().notice);
   assert.ok(notice.includes(h.editor.NO_CONTACT_TEXT), notice);
-  assert.equal(h.editor.NO_CONTACT_TEXT, "Send this file to whoever manages your organization's rules.");
+  assert.equal(h.editor.NO_CONTACT_TEXT, "Send this file to whoever manages your organization's Standing Orders.");
 });
 
 test('D-44: an export that cannot be signed or written says nothing was written and keeps the proposal', async () => {
@@ -396,7 +396,7 @@ test('D-44: a proposal for your own rules under your organization is applied the
   const h = harness({ state, signer: deviceKey() });
   const outcome = h.editor.openPolicyProposal({ ...widenInternal, target: 'personal' });
   await settle();
-  assert.equal(h.lastState().title, "Your organization's rules");
+  assert.equal(h.lastState().title, "Your organization's Standing Orders");
   assert.deepEqual(h.lastState().actions, ['apply', 'discard']);
   await h.send({ type: 'export', id: h.lastState().proposal.id });
   assert.equal(h.saveCalls.length, 0, 'no export for your own rules');
@@ -417,7 +417,8 @@ test('D-47: a proposal goes stale when your rules change under it', async () => 
   const id = h.lastState().proposal.id as string;
   h.change({ ...state, personalHash: 'f'.repeat(64) });
   await settle();
-  assert.equal(h.lastState().notice, STALE_DRAFT_TEXT);
+  const staleNotice = 'Your policy changed after this draft was made. Open SovAI: Standing Orders and choose Edit my Standing Orders again to start from the policy in force.';
+  assert.equal(h.lastState().notice, staleNotice);
   assert.deepEqual(h.lastState().actions, ['discard']);
   assert.equal(h.lastState().proposal.stale, true);
   await h.send({ type: 'apply', id });
@@ -432,7 +433,7 @@ test('D-47: a proposal goes stale when your rules change under it', async () => 
   racing.swap({ ...state, personalHash: 'e'.repeat(64) });
   await racing.send({ type: 'apply', id: racing.lastState().proposal.id });
   assert.equal(racing.calls.applyPersonal.length, 0);
-  assert.equal(racing.lastState().notice, STALE_DRAFT_TEXT);
+  assert.equal(racing.lastState().notice, staleNotice);
   assert.equal(await settled(raced), false);
   // Your organization's rules changing under an export makes it stale too, and so do rules that cannot be read.
   const org = organizationState();
@@ -574,7 +575,7 @@ test('copy on the page', async () => {
   const code = script.replace(/^\s*\/\/.*$/gm, '');
   const literals = [...code.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g)].map((match) => match[1] ?? match[2] ?? '');
   const words = literals.filter((literal) => / /.test(literal) || /^[A-Z]/.test(literal));
-  assert.ok(words.includes('Apply to my rules') && words.includes('Save a file for your organization') && words.includes('Reset my rules'), 'the button labels are found');
+  assert.ok(words.includes('Apply to my Standing Orders') && words.includes('Save a file for your organization') && words.includes('Reset my Standing Orders'), 'the button labels are found');
   for (const literal of words) assertCopy(literal, 'policy.js');
   assert.doesNotMatch(script, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   // The host HTML's text, the texts the editor exports, every section title and an effect sentence.
@@ -615,7 +616,7 @@ test('41-15: Edit my rules is offered when this device can sign your own rules a
   assert.equal(organization.calls.editOwn, 1);
   // The page script draws exactly the offered buttons, with these words.
   const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'policy', 'policy.js'), 'utf8');
-  assert.match(script, /'edit-own': 'Edit my rules'/);
+  assert.match(script, /'edit-own': 'Edit my Standing Orders'/);
   assert.match(script, /'apply-draft': 'Apply my draft'/);
   assert.match(script, /renderPageActions\(message\.pageActions\)/);
 });

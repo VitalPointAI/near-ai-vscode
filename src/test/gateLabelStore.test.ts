@@ -193,11 +193,11 @@ test('CLAS-07 on a fresh install with no label anywhere: Set Label\'s first pick
   assert.equal(existsSync(path.join(s.root, LABEL_MAP_FILE)), false);
 });
 
-test('Set Label refuses a label the person\'s own clearance does not cover and names Edit Policy, writing nothing (D-27)', async () => {
+test('Set Label refuses a label outside the person\'s clearance and names the Standing Orders action, writing nothing (D-27)', async () => {
   const s = await started();
   assert.equal(await setLabelVia(s.root, 'secret/plan.md', { scale: 'ca-protected', level: 'Protected B' }), false);
   const warned = stub.notifications.find((entry) => entry.level === 'warn');
-  assert.match(warned?.message ?? '', /open SovAI: Policy and choose Edit my rules/);
+  assert.match(warned?.message ?? '', /open SovAI: Standing Orders and choose Edit my Standing Orders/);
   assert.equal(existsSync(path.join(s.root, LABEL_MAP_FILE)), false);
 });
 
@@ -640,7 +640,7 @@ test('D-64: LABEL_EVENT_IDS names label.branch-accepted and label.declassify-rej
   assert.equal((await broken.state()).state, 'failed-closed');
   assert.equal(await setLabelVia(s.root, 'secret/plan.md', { scale: 'org', level: 'Internal' }), false);
   assert.ok(stub.notifications.some((entry) => entry.message === gateCommands.NO_LABELS_WHILE_FAILED_TEXT));
-  assert.match(gateCommands.NO_LABELS_WHILE_FAILED_TEXT, /^Nothing can be labelled while your policy cannot be trusted/);
+  assert.match(gateCommands.NO_LABELS_WHILE_FAILED_TEXT, /^Nothing can be labelled while your Standing Orders cannot be trusted/);
   assert.equal(existsSync(path.join(s.root, LABEL_MAP_FILE)), false);
 });
 
