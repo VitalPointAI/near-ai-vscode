@@ -122,6 +122,9 @@ class SterlingWelcomeWidget extends BaseWidget {
               </button>
             `).join('')}
           </div>
+          <div class="sterling-actions">
+            <button type="button" class="sterling-secondary" data-command="sterling.resources.open" data-welcome-text="openLocalInventory"></button>
+          </div>
         </section>
       </main>`;
     const logo = this.node.querySelector<HTMLImageElement>('.sterling-wordmark img')!;
