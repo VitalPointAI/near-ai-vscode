@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
-import type { Mark } from '../../domain/gate/dominance';
-import { parseLabel, SCALE_PRESETS, type ScaleTable } from '../../domain/gate/labels';
-import { parseModelsSection, passportHash, type Passport } from '../../domain/gate/models';
+import { markDominated, type Mark } from '../../domain/gate/dominance';
+import type { EndpointClass } from '../../domain/gate/endpoints';
+import { parseLabel, SCALE_PRESETS, type Clearance, type ScaleTable } from '../../domain/gate/labels';
+import { parseModelsSection, passportCovers, passportHash, resolvePassport, type Passport, type UseTier } from '../../domain/gate/models';
+import { verifyPolicyLayer } from '../../domain/gate/policyDocument';
 import { parseIsoMillis } from '../../domain/gate/shape';
 import { canonicalBytes, verifySignature } from '../../domain/team/canonical';
 import type { PayloadSignerRef } from '../../domain/team/signedPayload';
@@ -55,6 +57,7 @@ export interface CandidateRecord {
   version: VersionTuple;
   reportSha256: string;
   passportSha256: string;
+  visibleResult?: 'incumbent';
 }
 
 const evaluationPurpose = 'fictional-model-evaluation.v1';
@@ -115,4 +118,125 @@ export function acceptEvaluatedCandidate(
   }
   record(evaluated);
   return true;
+}
+
+export type Stage = 'shadow' | 'canary';
+
+export interface StageSelection {
+  decision: 'select' | 'decline';
+  predecessor: 'inactive' | 'shadow';
+  stage: Stage;
+  model: string;
+  version: VersionTuple;
+  reportSha256: string;
+  passportSha256: string;
+  role: string;
+  use: UseTier;
+  endpointClass: EndpointClass;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export interface StageAdoption {
+  layerSha256: string;
+  selectionSha256: string;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export interface StageRequest {
+  selection: SignedFixture<StageSelection>;
+  policy: unknown;
+  adoption?: SignedFixture<StageAdoption>;
+}
+
+export interface StageAuthority {
+  now: number;
+  record: CandidateRecord;
+  candidate: EvaluationCandidate;
+  evaluation: EvaluationExpectation;
+  layerSha256: string;
+  issuer: PayloadSignerRef;
+  issuerActive: boolean;
+  approvals: Record<Stage, { key: PayloadSignerRef; active: boolean }>;
+  clearance: readonly Clearance[];
+  role: string;
+  use: UseTier;
+  endpointClass: EndpointClass;
+}
+
+const selectionPurpose = 'fictional-model-stage-selection.v1';
+const adoptionPurpose = 'fictional-model-stage-adoption.v1';
+
+function checkStage(request: StageRequest, authority: StageAuthority): CandidateRecord | 'held' | 'declined' {
+  const { now, record, candidate, evaluation, issuer, issuerActive, role, use, endpointClass } = authority;
+  if (!checkedEvaluation(candidate, { ...evaluation, now }) ||
+      record.model !== candidate.model || !sameBytes(record.version, candidate.version) ||
+      record.reportSha256 !== evaluation.reportSha256 || record.passportSha256 !== evaluation.passportSha256) return 'held';
+
+  const predecessor = record.state;
+  if (predecessor !== 'inactive' && predecessor !== 'shadow') return 'held';
+  const stage = predecessor === 'inactive' ? 'shadow' : 'canary';
+  const approver = authority.approvals[stage];
+  const selection = request.selection.payload;
+  const { decision, issuedAt, expiresAt } = selection;
+  const exactSelection: StageSelection = {
+    decision, predecessor, stage, model: record.model, version: record.version,
+    reportSha256: record.reportSha256, passportSha256: record.passportSha256,
+    role, use, endpointClass, issuedAt, expiresAt,
+  };
+  if ((decision !== 'select' && decision !== 'decline') || !approver.active ||
+      !authentic(selectionPurpose, request.selection, approver.key) ||
+      !current(issuedAt, expiresAt, now) ||
+      !controlledMark(selection.version.mark, SCALE_PRESETS) || !sameBytes(selection, exactSelection)) return 'held';
+  if (decision === 'decline') return 'declined';
+
+  const policy = verifyPolicyLayer(request.policy, {
+    purpose: 'org-policy-layer', now,
+    status: (key) => issuerActive && issuer.fingerprint === key.fingerprint && issuer.publicKey === key.publicKey
+      ? { state: 'active' } : { state: 'unknown' },
+  });
+  if (policy.state !== 'valid' || policy.wireVersion !== 2 ||
+      policy.hash !== authority.layerSha256 || policy.document.models?.mode !== 'enforce' ||
+      !current(policy.document.issuedAt, policy.document.expiresAt, now)) return 'held';
+
+  const adoption = request.adoption;
+  if (!adoption || !authentic(adoptionPurpose, adoption, issuer) || !current(adoption.payload.issuedAt, adoption.payload.expiresAt, now) ||
+      !sameBytes(adoption.payload, {
+        layerSha256: policy.hash,
+        selectionSha256: sha256(canonicalBytes(request.selection)),
+        issuedAt: adoption.payload.issuedAt,
+        expiresAt: adoption.payload.expiresAt,
+      })) return 'held';
+
+  const resolved = resolvePassport(policy.document.models, record.model, now);
+  if (!resolved || resolved.source !== 'policy' || resolved.hash !== record.passportSha256 ||
+      !current(resolved.passport.issuedAt, resolved.passport.expiresAt, now) ||
+      !passportCovers({ resolved, use, endpointClass, t1RiskCovers: false, now }).covers) return 'held';
+  const { scales, mappings } = policy.document.labels;
+  if (!controlledMark(record.version.mark, scales) ||
+      !markDominated(authority.clearance, record.version.mark, { scales, mappings, now })) return 'held';
+
+  return stage === 'shadow'
+    ? { ...record, version: structuredClone(record.version), state: stage, visibleResult: 'incumbent' }
+    : { ...record, version: structuredClone(record.version), state: stage };
+}
+
+export function recordStage(
+  request: StageRequest,
+  readAuthority: () => StageAuthority,
+  record: (candidate: CandidateRecord) => void,
+): 'recorded' | 'declined' | 'held' {
+  let final: CandidateRecord;
+  try {
+    const evaluated = checkStage(request, readAuthority());
+    if (typeof evaluated === 'string') return evaluated;
+    const current = checkStage(request, readAuthority());
+    if (typeof current === 'string' || !sameBytes(current, evaluated)) return 'held';
+    final = current;
+  } catch {
+    return 'held';
+  }
+  record(final);
+  return 'recorded';
 }
