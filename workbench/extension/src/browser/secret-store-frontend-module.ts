@@ -32,7 +32,7 @@ const guideCopy = {
     stale: 'The latest check did not answer. Last confirmed choice.',
     limits: 'What this affects',
     impacts: [
-      'Profiles that depend on saved API keys or provider credentials cannot save or retrieve them.',
+      'You cannot save or retrieve API keys or other credentials for your AI connections.',
       'This Workbench cannot verify and display the active signed Standing Orders or sign and apply a change. Where permitted, you can still read and plan.',
       'Shared staff projects cannot open in this local mode.',
       'Documentation and trusted local Resource Inventory remain available with their existing access checks.'
@@ -62,7 +62,7 @@ const guideCopy = {
     stale: 'La dernière vérification n’a donné aucun résultat. Dernier choix confirmé.',
     limits: 'Ce que cela change',
     impacts: [
-      'Les profils qui dépendent de clés API ou d’identifiants de fournisseur enregistrés ne peuvent pas les enregistrer ni les récupérer.',
+      'Vous ne pouvez ni enregistrer ni récupérer les clés API ou les autres identifiants de vos connexions à l’IA.',
       'Cet espace de travail ne peut pas vérifier et afficher les Ordres permanents signés en vigueur, ni signer et appliquer une modification. Vous pouvez continuer à lire et à planifier là où vous y êtes autorisé.',
       'Les projets d’équipe partagés ne peuvent pas s’ouvrir dans ce mode local.',
       'La Documentation et l’Inventaire local des ressources approuvées demeurent accessibles selon les contrôles d’accès habituels.'

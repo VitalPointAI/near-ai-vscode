@@ -55,7 +55,7 @@ test('the secret probe for this step', async ({ page }) => {
     await expect(guide).toContainText('system keyring module or its native binding');
     await expect(guide).toContainText('approved authenticated OpenBao integration');
     await expect(guide).toContainText('restart the Workbench backend and reopen this browser tab');
-    await expect(guide).toContainText('Profiles that depend on saved API keys or provider credentials cannot save or retrieve them.');
+    await expect(guide).toContainText('You cannot save or retrieve API keys or other credentials for your AI connections.');
     await expect(guide).toContainText('verify and display the active signed Standing Orders or sign and apply a change');
     await expect(guide).toContainText('Shared staff projects cannot open in this local mode.');
     await expect(guide).toContainText('Documentation and trusted local Resource Inventory remain available');

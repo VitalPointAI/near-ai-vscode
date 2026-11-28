@@ -68,6 +68,8 @@ Added five focused unit cases and extended three existing store-selection cases 
 - The user feedback preview now runs the integrated native Workbench package from `54680c3bb`. Its verification covers the recovery interface and offline Documentation. The installed synthetic secret probe and hosted secret operations remain open below.
 - Exact diff review covers four source and test paths. The changes use the existing status RPC and internal Documentation command. The guide sends no secret or configuration data.
 
+The first PR CI finished with a passing Workbench job and one root test failure from the user-facing word “Profiles.” The repair says “AI connections” in English and uses the equivalent French wording. Existing copy-lint checks passed 35/35, and the Workbench test and extension TypeScript projects passed. The baseline stayed as recorded. Final local log SHA-256 `f418f0d60e7650a36cdb4437cfa8fd9ed93f4692b7f58bcffd0e73b033ce3d2e`.
+
 ## Open conditions
 
 - Exact installed-Workbench Playwright with `SPEC_STEP=unavailable` needs a disposable, no-egress local launch approval covering the candidate, cached Chromium and existing synthetic secret probe. Playwright 1.65.0 pins Chromium Headless Shell 1254 / 158.0.8127.18. The cached binary SHA-256 is `41ff61e6e65b8d16b40631f4f094b46ec02f1a0f5375ae477c1d478f1fc2d89d`. The checked-in probe's package and extension SHA-256 values are `d23270b086fe93f5b32ff9b7b6a6c78b877ce2ab2626b32014365da8568d7575` and `ad28f909bbed6a13abd5c694aad6ca1f2c949fafd63d781eb56bdfba2d17428a`.
