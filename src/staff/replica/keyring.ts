@@ -211,7 +211,7 @@ function grantCell(signed: unknown): string | undefined {
 export class DeviceKeyRing {
   private readonly keys: Map<string, Buffer>;
   private readonly own: Map<string, OwnEpochKey>;
-  // What this device's wrap in a grant opens to, by grant hash, so each grant is unwrapped once. Memory only; null when nothing opens.
+  // Memoized unwraps by grant hash, including failed unwraps. A page without the device's wrap does not populate this cache.
   private readonly unwrapped = new Map<string, Buffer | null>();
   private changes = 0;
 
@@ -333,10 +333,12 @@ export class DeviceKeyRing {
 
   /** What this device's wrap in a grant opens to, or undefined. */
   private open(grant: CellGrant, hash: string): Buffer | undefined {
+    const mine = grant.wraps.find((wrap) => wrap.writer === this.device.writer);
+    // A raw founding page and its assembled grant share a hash. A later page may carry this device's wrap.
+    if (mine === undefined) return undefined;
     let key = this.unwrapped.get(hash);
     if (key === undefined) {
-      const mine = grant.wraps.find((wrap) => wrap.writer === this.device.writer);
-      key = (mine === undefined ? undefined : unwrapForDevice({ cell: grant.cell, epoch: grant.epoch, writer: this.device.writer, x25519: this.device.privateKey, ...(this.device.kem === undefined ? {} : { kem: this.device.kem }), wrap: mine.wrap })) ?? null;
+      key = unwrapForDevice({ cell: grant.cell, epoch: grant.epoch, writer: this.device.writer, x25519: this.device.privateKey, ...(this.device.kem === undefined ? {} : { kem: this.device.kem }), wrap: mine.wrap }) ?? null;
       this.unwrapped.set(hash, key);
     }
     return key === null ? undefined : Buffer.from(key);
@@ -386,4 +388,10 @@ export async function joinSecret(secrets: SecretStorageLike, invite: string): Pr
  */
 export async function forgetJoinSecret(secrets: SecretStorageLike, invite: string): Promise<void> {
   await secrets.delete(joinSecretName(invite));
+}
+/** Compare candidate roster-reading keys without making either map authoritative. */
+export function sameReadingKeys(a: ReadonlyMap<number, Buffer>, b: ReadonlyMap<number, Buffer>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [epoch, key] of a) if (b.get(epoch)?.equals(key) !== true) return false;
+  return true;
 }

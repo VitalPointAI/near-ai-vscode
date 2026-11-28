@@ -30,6 +30,7 @@ import type { SyncEvent, SyncMachineState, SyncState } from '../../domain/replic
 import type { PayloadSigner } from '../../domain/team/signedPayload';
 import { syncOnce } from './hubSync';
 import type { HubMemory, SyncLocal, SyncReport, SyncTransport } from './hubSync';
+import type { ManagedSyncHandoffs } from './managedSync';
 import { readLiveFrame } from './hubLive';
 import type { PresenceFrame } from './hubLive';
 import { HubTransport, HubTransportError } from './hubTransport';
@@ -47,6 +48,7 @@ export interface LiveTimers {
 export interface LiveReplicatorOptions {
   local: SyncLocal;
   memory: HubMemory;
+  managed?: ManagedSyncHandoffs;
   /** Your organization's server as the roster admits it (its id, writer id and certificate pin), or undefined when the project has none. */
   hub: { id: string; writer: string; certPin: string } | undefined;
   /** The server's address for this project on this device (D-10), read at each connection, or undefined when none is known. */
@@ -89,6 +91,7 @@ export interface LiveStatus {
   pulled: number;
   pushed: number;
   lastSyncedAt?: number;
+  managed?: SyncReport['managed'];
   retryAt?: number;
 }
 
@@ -128,6 +131,7 @@ export class LiveReplicator {
   private pulled = 0;
   private pushed = 0;
   private lastSyncedAt: number | undefined;
+  private managed: SyncReport['managed'];
   private scheduled: { handle: unknown; wake: Wake } | undefined;
   private stateTimer: unknown;
   private reopenTimer: unknown;
@@ -152,6 +156,7 @@ export class LiveReplicator {
     const status: LiveStatus = { state, since, findings: [...findings], pulled: this.pulled, pushed: this.pushed };
     if (reason !== undefined) status.reason = reason;
     if (this.lastSyncedAt !== undefined) status.lastSyncedAt = this.lastSyncedAt;
+    if (this.managed !== undefined) status.managed = this.managed;
     if (retryAt !== undefined) status.retryAt = retryAt;
     return status;
   }
@@ -345,8 +350,13 @@ export class LiveReplicator {
    */
   private watched(transport: LiveTransport, generation: number): SyncTransport {
     const live = <T>(call: () => Promise<T>): Promise<T> => (generation === this.generation ? call() : Promise.reject(new HubTransportError('unreachable')));
+    const route = transport.managedRoute;
     return {
       project: transport.project,
+      ...(route === undefined ? {} : { managedRoute: {
+        get: (handle: string) => live(() => route.get(handle)),
+        put: (handle: string, packet: unknown) => live(() => route.put(handle, packet))
+      } }),
       hub: transport.hub,
       hubHeads: () => live(async () => {
         const heads = await transport.hubHeads();
@@ -401,7 +411,7 @@ export class LiveReplicator {
       let report: SyncReport;
       const newestBefore = await this.newestCheckpoint(transport);
       try {
-        report = await syncOnce(this.watched(transport, generation), this.options.local, this.options.memory, { now: this.now, startFromBase: this.options.startFromBase === true });
+        report = await syncOnce(this.watched(transport, generation), this.options.local, this.options.memory, { now: this.now, managed: this.options.managed, startFromBase: this.options.startFromBase === true });
         if (report.readInFull.length > 0) this.log(`read in full ${report.readInFull.length}`);
       } catch (error) {
         // The local replica failed (syncOnce throws only for that). A fold stopped for a feature this build lacks is needs-update (D-06); anything
@@ -414,6 +424,7 @@ export class LiveReplicator {
         return;
       }
       if (generation !== this.generation) return;
+      this.managed = report.managed;
       this.pulled += report.pulled;
       this.pushed += report.pushed;
       if (report.outcome === 'synced') this.lastSyncedAt = this.now().getTime();

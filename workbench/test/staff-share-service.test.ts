@@ -15,6 +15,7 @@ import { STAFF_SHARE_TEXT, type ShareOutcome } from '../extension/src/common/sta
 import type { ServiceResult } from '../extension/src/common/service-result.ts';
 import { INVITE_OPEN_TEXT, InviteOpenHandler, invitationFields, type InvitationOpened } from '../extension/src/browser/staff/invite-open-handler.ts';
 import { SESSION_KEY_TEXT, startSessionKeys } from '../extension/src/node/staff/session-keys.ts';
+import { createPendingActions } from '../extension/src/node/staff/person-signer.ts';
 import { SHOW_WORK_SECRET, StaffShareService, type StaffShareApi } from '../extension/src/node/staff/share-service.ts';
 import { loadStaffEngine, type EngineProject, type StaffEngine } from '../extension/src/node/staff/staff-engine.ts';
 import { StaffLiveEngine } from '../extension/src/node/staff/staff-live-engine.ts';
@@ -308,6 +309,276 @@ test('a 0.4.35 preview project, its products in the base cell, is refused with i
   } finally {
     await lead.live.stop();
   }
+});
+
+test('managed hosted Workbench removal challenges the exact current operation before any engine write', async () => {
+  let instant = 1_800_000_000_000;
+  const acr = 'urn:sterling:acr:phishing-resistant';
+  const actions = createPendingActions({ stepUpAcr: acr, windowSeconds: 60, latestAuthTime: () => instant / 1000, clock: { now: () => instant } });
+  let selected = 'a'.repeat(64);
+  let actor = 'b'.repeat(64);
+  let hosted = true;
+  let required = ['cell-access@1'];
+  const projectId = 'd'.repeat(32);
+  const member = 'mbr-fictional';
+  const root = '/fictional-managed-share';
+  const secrets = new MemorySecrets();
+  let synced = 0;
+  const writes: { target: string; action?: string }[] = [];
+  const project = {
+    projectId, get deviceWriter() { return actor; },
+    state: async () => ({ roster: { positions: [selected], required, members: {} }, fold: {} })
+  };
+  const wiring = {
+    engine: {
+      ...engine,
+      isRosterWriterAt: () => true,
+      memberAt: (_state: never, target: string) => ({ name: target === member ? 'Mo Analyst' : 'Nell Planner' }),
+      managedWithdrawalActionBytes: (roster: { positions: readonly string[] }, writer: string, input: { member: string }) =>
+        Buffer.from(JSON.stringify([projectId, roster.positions.at(-1), writer, input.member])),
+      removeFromProject: async (_shared: never, input: { member: string }, action?: string) => {
+        writes.push({ target: input.member, action });
+        return { ok: true, message: 'Fictional withdrawal committed.', notices: [] };
+      }
+    } as never,
+    live: () => ({
+      projects: () => [{ root, project: projectId }], project: () => project,
+      shareContext: () => ({ deps: {}, secrets, globalStorageDir: root, ...(hosted ? { hosted: {} } : {}) }),
+      syncNow: () => { synced += 1; }
+    }) as never,
+    root: async () => root, actions
+  };
+  const service = new StaffShareService(wiring);
+  const challenge = async () => {
+    const answer = value(await service.remove({ member }), 'request withdrawal confirmation');
+    const pending = answer.confirmation;
+    assert.ok(pending, 'a hosted managed request returns a challenge before calling the writer');
+    const nonce = pending.url.split('/').at(-1);
+    assert.ok(nonce);
+    assert.deepEqual(actions.summaryOf(nonce)?.fields, [{ label: 'Person', value: 'Mo Analyst' }]);
+    assert.equal((await service.remove({ member, requestId: pending.requestId })).kind, 'refused');
+    instant += 1000;
+    assert.equal(actions.bindStepUp(nonce, { acr, authTime: instant / 1000, sub: 'fictional', activeSub: 'fictional' }), true);
+    return pending;
+  };
+
+  const first = await challenge();
+  assert.equal(writes.length, 0);
+  assert.equal(synced, 0);
+  const wrongMember = { member: 'mbr-other-fictional', requestId: first.requestId };
+  assert.equal((await service.remove(wrongMember)).kind, 'refused');
+  actor = 'f'.repeat(64);
+  assert.equal((await service.remove({ member, requestId: first.requestId })).kind, 'refused');
+  actor = 'b'.repeat(64);
+  selected = 'c'.repeat(64);
+  const stale = { member, requestId: first.requestId };
+  assert.equal((await service.remove(stale)).kind, 'refused');
+  assert.equal(writes.length, 0);
+  assert.equal(synced, 0);
+
+  const current = await challenge();
+  const resume = { member, requestId: current.requestId };
+  assert.equal((await service.remove(resume)).kind, 'ok');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].target, member);
+  assert.equal(typeof writes[0].action, 'string');
+  assert.equal((await service.remove(resume)).kind, 'refused');
+  assert.equal(writes.length, 1);
+  assert.equal(synced, 1);
+
+  hosted = false;
+  assert.equal((await service.remove(resume)).kind, 'refused');
+  const local = value(await service.remove({ member }), 'local withdrawal');
+  assert.equal(local.confirmation, undefined);
+  assert.deepEqual(writes[1], { target: member, action: undefined });
+  hosted = true;
+  required = [];
+  const legacy = value(await service.remove({ member }), 'legacy hosted withdrawal');
+  assert.equal(legacy.confirmation, undefined);
+  assert.deepEqual(writes[2], { target: member, action: undefined });
+  assert.equal(synced, 3);
+});
+
+test('managed Workbench Finish reviews one private draft and never falls back on a stale request', async () => {
+  let instant = 1_800_000_000_000;
+  const acr = 'urn:sterling:acr:phishing-resistant';
+  const actions = createPendingActions({ stepUpAcr: acr, windowSeconds: 60, latestAuthTime: () => instant / 1000, clock: { now: () => instant } });
+  const projectId = 'd'.repeat(32);
+  const cell = 'a'.repeat(32);
+  const other = 'b'.repeat(32);
+  const root = '/fictional-finish-share';
+  const secrets = new MemorySecrets();
+  let selected = 'first';
+  let authority = true;
+  let signer = fixedSigner('fixture-finish-person').signer;
+  let synced = 0;
+  let prepares = 0;
+  let refuseCommit = false;
+  const writes: { cell: string; action: string }[] = [];
+  const resolved = new Set<string>();
+  const project = { projectId, deviceWriter: 'c'.repeat(64), state: async () => ({
+    roster: { positions: [selected], required: ['cell-access@1'], members: { members: new Map(), devices: new Map() } }, fold: {}
+  }) };
+  let liveProject = project;
+  const live = {
+    projects: () => [{ root, project: projectId }], project: () => liveProject,
+    shareContext: () => ({ deps: {}, secrets, globalStorageDir: root, hosted: { keys: { personSigner: signer } } }),
+    syncNow: () => { synced += 1; }
+  };
+  const wiring = {
+    live: () => live as never, root: async () => root, now: () => new Date(instant), actions,
+    engine: {
+      ...engine,
+      isRosterWriterAt: () => authority,
+      hubStanding: async () => [],
+      cellsAt: () => [],
+      pendingWorkbenchFinishParts: () => [{ cell, label: 'Protected A' }, { cell: other, label: 'Protected B' }]
+        .filter(({ cell: target }) => !resolved.has(target)),
+      prepareWorkbenchFinish: (_host: never, roster: { positions: string[] }, target: string) => {
+        prepares += 1;
+        if (resolved.has(target)) return undefined;
+        const label = target === cell ? 'Protected A' : 'Protected B';
+        const preview = Buffer.from(JSON.stringify([roster.positions.at(-1), target, 'private-fictional-draft']));
+        return { label, currentBytes: (_current: never, fresh: { positions: string[] }) =>
+          fresh.positions.at(-1) === roster.positions.at(-1) ? Buffer.from(preview) : undefined,
+        async commit(_current: never, action: string) {
+          assert.equal(actions.authorizePayload(action, preview), true);
+          writes.push({ cell: target, action });
+          if (refuseCommit) return { ok: false, reason: 'action-required', message: 'Mock expiry.', notices: [] };
+          resolved.add(target);
+          return { ok: true, message: 'Fictional Finish committed.', notices: [] };
+        } };
+      }
+    } as never
+  };
+  const service = new StaffShareService(wiring);
+  const call = (on: StaffShareService, target: string, requestId?: string) =>
+    on.finishKeyChange({ cell: target, ...(requestId === undefined ? {} : { requestId }) });
+  const challenge = async (target = cell) => {
+    const response = value(await call(service, target), 'request one Finish confirmation');
+    const pending = response.confirmation;
+    assert.ok(pending);
+    assert.deepEqual(Object.keys(pending).sort(), ['requestId', 'url']);
+    assert.equal(JSON.stringify(response).includes('private-fictional-draft'), false);
+    const nonce = pending.url.split('/').at(-1);
+    assert.ok(nonce);
+    assert.deepEqual(actions.summaryOf(nonce), { kind: 'cell.rekey.finish', fields: [{ label: 'Part', value: target === cell ? 'Protected A' : 'Protected B' }] });
+    return { pending, nonce };
+  };
+  const bind = (nonce: string) => {
+    instant += 1000;
+    assert.equal(actions.bindStepUp(nonce, { acr, authTime: instant / 1000, sub: 'fictional', activeSub: 'fictional' }), true);
+  };
+  assert.deepEqual(value(await service.view(), 'lead pending parts').keyChanges, [
+    { cell, label: 'Protected A' }, { cell: other, label: 'Protected B' }
+  ]);
+  const first = await challenge();
+  assert.equal((await call(service, cell, first.pending.requestId)).kind, 'refused', 'an early return cannot sign');
+  bind(first.nonce);
+  assert.equal((await call(service, other, first.pending.requestId)).kind, 'refused');
+  assert.equal((await call(new StaffShareService(wiring), cell, first.pending.requestId)).kind, 'refused', 'a backend restart drops the draft');
+  selected = 'changed';
+  assert.equal((await call(service, cell, first.pending.requestId)).kind, 'refused');
+
+  const replaced = await challenge();
+  bind(replaced.nonce);
+  signer = fixedSigner('different-fixture-finish-person').signer;
+  assert.equal((await call(service, cell, replaced.pending.requestId)).kind, 'refused');
+  const replacedProject = await challenge();
+  bind(replacedProject.nonce);
+  liveProject = { ...project };
+  assert.equal((await call(service, cell, replacedProject.pending.requestId)).kind, 'refused');
+  liveProject = project;
+  const supersededByOtherAction = await challenge();
+  actions.beginAction(Buffer.from('different action'), { kind: 'member.remove', fields: [] });
+  assert.equal(actions.summaryOf(supersededByOtherAction.nonce), undefined);
+  assert.equal((await call(service, cell, supersededByOtherAction.pending.requestId)).kind, 'refused');
+  const canceled = await challenge();
+  const current = await challenge(other);
+  assert.equal((await call(service, cell, canceled.pending.requestId)).kind, 'refused');
+  bind(current.nonce);
+  instant += 61_000;
+  assert.equal((await call(service, other, current.pending.requestId)).kind, 'refused');
+  assert.equal(writes.length, 0);
+  assert.equal(synced, 0);
+
+  const checked = await challenge();
+  bind(checked.nonce);
+  authority = false;
+  assert.equal(value(await service.view(), 'non-lead pending parts').keyChanges, undefined);
+  assert.equal((await call(service, cell, checked.pending.requestId)).kind, 'refused');
+  authority = true;
+  refuseCommit = true;
+  const expiring = await challenge();
+  bind(expiring.nonce);
+  const beforeResume = prepares;
+  assert.equal((await call(service, cell, expiring.pending.requestId)).kind, 'refused');
+  assert.equal((await call(service, cell, expiring.pending.requestId)).kind, 'refused');
+  assert.equal(prepares, beforeResume, 'a failed resume never generates another draft');
+  assert.equal(writes.length, 1);
+  assert.equal(synced, 0);
+  refuseCommit = false;
+  const renewed = await challenge();
+  bind(renewed.nonce);
+  assert.equal((await call(service, cell, renewed.pending.requestId)).kind, 'ok');
+  assert.equal(actions.reviewAttachment(renewed.pending.requestId), undefined);
+  assert.deepEqual(value(await service.view(), 'remaining pending part').keyChanges, [{ cell: other, label: 'Protected B' }]);
+  assert.equal((await call(service, cell, renewed.pending.requestId)).kind, 'refused');
+  assert.equal((await call(service, other, renewed.pending.requestId)).kind, 'refused');
+  assert.deepEqual(writes.map((write) => write.cell), [cell, cell]);
+  assert.equal(synced, 1);
+});
+
+test('Share file save and open stay bound to the selected project and exact recipient', async () => {
+  const root = '/fictional-managed-files';
+  const projectId = 'd'.repeat(32);
+  const part = 'a'.repeat(32);
+  const recipient = 'b'.repeat(64);
+  const repeat = 'c'.repeat(64);
+  const text = '{"handle":"fictional","packet":"ciphertext-only"}';
+  const calls: string[] = [];
+  let lead = true;
+  let activeRoot = root;
+  let switchWhileSaving = false;
+  const project = { projectId, deviceWriter: 'e'.repeat(64), state: async () => ({
+    roster: { positions: ['selected'], required: ['cell-access@1'], members: {} }, fold: {}
+  }) };
+  const live = { projects: () => [{ root, project: projectId }], project: () => project,
+    shareContext: () => ({ deps: {}, secrets: new MemorySecrets(), globalStorageDir: root }), syncNow: () => undefined };
+  const service = new StaffShareService({
+    live: () => live as never, root: async () => activeRoot,
+    engine: { ...engine, isRosterWriterAt: () => lead,
+      exportWorkbenchManagedFile: async (_host: never, cell: string, target: string, prior?: string) => {
+        calls.push('save');
+        if (cell !== part || target !== recipient || (prior !== undefined && prior !== repeat)) return undefined;
+        if (switchWhileSaving) activeRoot = '/fictional-different-project';
+        return { name: 'shared-keys.near-staff-keys', text, repeat };
+      },
+      openWorkbenchManagedFile: async (_host: never, file: string) => {
+        calls.push('open');
+        return file === text ? { ok: true, message: 'Fictional private file checked.', notices: [] } :
+          { ok: false, message: 'Fictional file refused.', notices: [] };
+      }
+    } as never
+  });
+  assert.equal((await service.saveManagedKeys({ project: 'wrong', cell: part, recipient })).kind, 'refused');
+  assert.equal((await service.openManagedKeys({ project: 'wrong', text })).kind, 'refused');
+  assert.equal(calls.length, 0);
+  const saved = value(await service.saveManagedKeys({ project: projectId, cell: part, recipient }), 'save exact managed file');
+  assert.deepEqual(saved.file, { name: 'shared-keys.near-staff-keys', text });
+  assert.equal(saved.fileRepeat, repeat);
+  const again = value(await service.saveManagedKeys({ project: projectId, cell: part, recipient, repeat }), 'repeat exact file');
+  assert.deepEqual(again.file, saved.file);
+  assert.equal((await service.saveManagedKeys({ project: projectId, cell: part, recipient: 'f'.repeat(64), repeat })).kind, 'refused');
+  switchWhileSaving = true;
+  assert.equal((await service.saveManagedKeys({ project: projectId, cell: part, recipient, repeat })).kind, 'refused');
+  activeRoot = root;
+  switchWhileSaving = false;
+  lead = false;
+  assert.equal((await service.saveManagedKeys({ project: projectId, cell: part, recipient })).kind, 'refused');
+  assert.equal((await service.openManagedKeys({ project: projectId, text })).kind, 'ok');
+  assert.equal((await service.openManagedKeys({ project: projectId, text: '{}' })).kind, 'refused');
+  assert.deepEqual(calls, ['save', 'save', 'save', 'save', 'open', 'open']);
 });
 
 test('a hosted person key without a fresh confirmation signs nothing: the action is refused with the Staff Room sentence and its fix', async () => {

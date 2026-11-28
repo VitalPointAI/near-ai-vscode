@@ -4,7 +4,7 @@
 // builders they need beyond it live in their own test files.
 import { createHash } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
-import { GENESIS_PREV, buildEntry } from '../../domain/replica/entry';
+import { GENESIS_PREV, buildEntry, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, Dep, NewBody, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { buildGrant, grantHash, unwrapEpochKey, wrapEpochKey, x25519BindingBytes, x25519PrivateFromSeed, x25519PublicRaw } from '../../domain/replica/cellKeys';
 import type { CellGrant } from '../../domain/replica/cellKeys';
@@ -39,22 +39,23 @@ export interface RosterDevice {
   descriptor(slot: number): DeviceDescriptor;
 }
 
-/** A device whose Ed25519 and X25519 keys come from the label alone. */
-export function rosterDevice(label: string, member: string): RosterDevice {
-  const fixed = fixedSigner(label);
+/** A synthetic device with a label-derived encryption key and an optional fixture identity. */
+export function rosterDevice(label: string, member: string, signer = fixedSigner(label).signer): RosterDevice {
+  const { publicKey } = signer;
+  const writer = writerIdOf(publicKey);
   const x25519Private = x25519PrivateFromSeed(sha256(`x25519/${label}`));
   const x25519 = x25519PublicRaw(x25519Private).toString('base64url');
-  const x25519Sig = fixed.signer.sign(x25519BindingBytes(x25519, fixed.writer));
+  const x25519Sig = signer.sign(x25519BindingBytes(x25519, writer));
   return {
     label,
     member,
-    signer: fixed.signer,
-    publicKey: fixed.publicKey,
-    writer: fixed.writer,
+    signer,
+    publicKey,
+    writer,
     x25519,
     x25519Private,
     x25519Sig,
-    descriptor: (slot) => ({ writer: fixed.writer, publicKey: fixed.publicKey, x25519, x25519Sig, slot })
+    descriptor: (slot) => ({ writer, publicKey, x25519, x25519Sig, slot })
   };
 }
 
@@ -85,9 +86,9 @@ export interface RosterWorld {
   ctxFor(state: RosterState, keys: KeyRing): ReplicaContext;
 }
 
-export function createRosterWorld(options: { leadLabel?: string; leadMember?: string; projectLabel?: string } = {}): RosterWorld {
+export function createRosterWorld(options: { leadLabel?: string; leadMember?: string; projectLabel?: string; leadSigner?: PayloadSigner } = {}): RosterWorld {
   const project = streamId(options.projectLabel ?? 'roster-project');
-  const lead = rosterDevice(options.leadLabel ?? 'LEAD', options.leadMember ?? 'mbr-lead');
+  const lead = rosterDevice(options.leadLabel ?? 'LEAD', options.leadMember ?? 'mbr-lead', options.leadSigner);
   const entries: SealedEntry[] = [];
   const blobs = new Map<string, SealedBlob>();
   const grants: Array<SignedPayload<CellGrant>> = [];

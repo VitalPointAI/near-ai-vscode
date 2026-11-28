@@ -8,15 +8,17 @@ import type { CellGrant, GrantWrap } from '../domain/replica/cellKeys';
 import { WRAP_V2_BYTES } from '../domain/replica/cellWrapV2';
 import { GRANT_PAGE_REFUSALS, MAX_WRAPS_PER_V2_PAGE, buildGrantPages, readGrantPages } from '../domain/replica/grantPages';
 import { canonicalBytes } from '../domain/team/canonical';
-import { signPayload } from '../domain/team/signedPayload';
-import type { SignedPayload } from '../domain/team/signedPayload';
+import { payloadSigningInput, signPayload } from '../domain/team/signedPayload';
+import type { SignOptions, SignedPayload } from '../domain/team/signedPayload';
+import { accessPermitBytes, accessRevisionId } from '../domain/replica/rotationProof';
 import { REPLICA_SIGNED_AT } from '../domain/replica/entry';
 import { joinSecretHash, newJoinSecret } from '../domain/replica/invite';
 import { granteesAt } from '../domain/replica/rosterCells';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld, rosterDevice } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
 import type { Written } from './helpers/replicaWorld';
-import { streamId } from './helpers/replicaWorld';
+import { fixedSigner, streamId } from './helpers/replicaWorld';
+import { createFinishGrantScope, createFinishIntent } from '../staff/replica/managedFinishSigning';
 
 const LEAD = rosterDevice('PAGES-LEAD', 'mbr-lead');
 const CELL = streamId('pages-cell');
@@ -33,6 +35,143 @@ const wraps = (count: number, make: (index: number) => string = v2Wrap): GrantWr
 const input = (count: number, overrides: Partial<CellGrant> = {}): CellGrant => ({ cell: CELL, epoch: 3, roster: ROSTER, labelSealed: LABEL, wraps: wraps(count), ...overrides });
 type Page = SignedPayload<CellGrant>;
 const reasonOf = (result: { ok: boolean; reason?: string }): string => (result.ok ? 'ok' : (result.reason as string));
+
+test('hosted Finish forwards only the exact approved grant envelope in child and founding order', async () => {
+  const draft = input(MAX_WRAPS_PER_V2_PAGE * 2 + 1);
+  const context = {
+    project: CELL, writer: LEAD.writer, predecessor: ROSTER, accessEntry: 'c'.repeat(64), accessRoot: 'd'.repeat(64),
+    oldEpoch: 2, reason: 'clearance-lowered' as const, evidence: 'e'.repeat(64), policy: null,
+    recipients: draft.wraps.map(({ writer }) => ({ writer, format: 2 as const })), continuity: []
+  };
+  const intent = createFinishIntent(context, draft);
+  assert.ok(intent);
+  const approved = intent.actionBytes();
+  const altered = createFinishIntent(context, { ...draft, labelSealed: 'M'.repeat(64) });
+  assert.ok(altered && !altered.actionBytes().equals(approved));
+  draft.wraps[0].wrap = v2Wrap(90);
+  assert.equal(intent.actionBytes().equals(approved), true);
+
+  const [founding, ...children] = buildGrantPages(LEAD.signer, input(MAX_WRAPS_PER_V2_PAGE * 2 + 1));
+  const exact = payloadSigningInput(children[0]);
+  const ids: string[] = [];
+  let current = true;
+  let valid = true;
+  let invalidateAfterReply = false;
+  let badSignature = false;
+  const action = 'fictional-finish-action';
+  const signer = {
+    ...LEAD.signer,
+    canSignAction: (id: string, bytes: Uint8Array) => valid && id === action && approved.equals(bytes),
+    async sign(bytes: Buffer, options?: SignOptions) {
+      ids.push(options?.action ?? '');
+      const result = badSignature ? LEAD.signer.sign(Buffer.from('different bytes')) : LEAD.signer.sign(bytes);
+      bytes.fill(0);
+      if (invalidateAfterReply) valid = false;
+      return result;
+    }
+  };
+  const scope = createFinishGrantScope(intent, signer, action, async () => current);
+  const rejected = async (role: 'child' | 'founding', index: number, bytes: Buffer, count: number) => {
+    assert.equal(typeof await scope.signerFor(role, index).sign(bytes), 'object');
+    assert.equal(ids.length, count);
+  };
+  await rejected('founding', 0, payloadSigningInput(founding), 0);
+  await rejected('child', 1, payloadSigningInput(children[1]), 0);
+  await rejected('child', 0, payloadSigningInput({ ...children[0], purpose: 'staff-invite' }), 0);
+  current = false;
+  await rejected('child', 0, exact, 0);
+  current = true;
+  valid = false;
+  await rejected('child', 0, exact, 0);
+  valid = true;
+  assert.equal(await scope.signerFor('child', 0).sign(exact), children[0].sig);
+  assert.equal(exact.equals(payloadSigningInput(children[0])), true, 'the signer received a private copy');
+  await rejected('child', 0, exact, 1);
+  await rejected('child', 1, exact, 1);
+  invalidateAfterReply = true;
+  await rejected('child', 1, payloadSigningInput(children[1]), 2);
+  invalidateAfterReply = false;
+  valid = true;
+  badSignature = true;
+  await rejected('child', 1, payloadSigningInput(children[1]), 3);
+  badSignature = false;
+  assert.equal(await scope.signerFor('child', 1).sign(payloadSigningInput(children[1])), children[1].sig);
+  await rejected('founding', 0, payloadSigningInput({ ...founding, payload: { ...founding.payload, pages: [] } }), 4);
+  assert.equal(await scope.signerFor('founding', 0).sign(payloadSigningInput(founding)), founding.sig);
+  await rejected('founding', 0, payloadSigningInput(founding), 5);
+  assert.deepEqual(ids, Array.from({ length: 5 }, () => action));
+});
+
+test('hosted Finish fixes the unpaged envelope and rejects an unrelated approval before dispatch', async () => {
+  const grant = input(1, { wraps: wraps(1, v1Wrap) });
+  const intent = createFinishIntent({
+    project: CELL, writer: LEAD.writer, predecessor: ROSTER, accessEntry: 'c'.repeat(64), accessRoot: 'd'.repeat(64),
+    oldEpoch: 2, reason: 'device-revoked', evidence: 'e'.repeat(64), policy: null,
+    recipients: grant.wraps.map(({ writer }) => ({ writer, format: 1 })), continuity: []
+  }, grant);
+  assert.ok(intent);
+  const [page] = buildGrantPages(LEAD.signer, grant);
+  const ids: string[] = [];
+  const signer = { ...LEAD.signer, canSignAction: (id: string, bytes: Uint8Array) => id === 'reviewed-finish' && intent.actionBytes().equals(bytes),
+    async sign(bytes: Buffer, options?: SignOptions) { ids.push(options?.action ?? ''); return LEAD.signer.sign(bytes); } };
+  const other = createFinishGrantScope(intent, signer, 'reviewed-removal', async () => true);
+  assert.equal(typeof await other.signerFor('founding', 0).sign(payloadSigningInput(page)), 'object');
+  assert.deepEqual(ids, []);
+  const reviewed = createFinishGrantScope(intent, signer, 'reviewed-finish', async () => true);
+  assert.equal(await reviewed.signerFor('founding', 0).sign(payloadSigningInput(page)), page.sig);
+  assert.deepEqual(ids, ['reviewed-finish']);
+});
+
+test('hosted Finish permits are fixed by the verified grant hash and selected session bindings', async () => {
+  const grant = input(1, { wraps: wraps(1, v1Wrap) });
+  const writer = grant.wraps[0].writer;
+  const sessionKey = fixedSigner('hosted-finish-permit-session');
+  const session = { writer: sessionKey.writer, device: writer, hash: '1'.repeat(64), sessionKey: sessionKey.publicKey,
+    slot: 1, member: 'mbr-reader', notAfter: '2026-11-26T00:00:00.000Z', roster: ROSTER };
+  const priorRevision = '2'.repeat(64);
+  const context = {
+    project: CELL, writer: LEAD.writer, predecessor: ROSTER, accessEntry: 'c'.repeat(64), accessRoot: 'd'.repeat(64),
+    priorRevision, oldEpoch: 2, reason: 'device-revoked' as const, evidence: 'e'.repeat(64), policy: null,
+    recipients: [{ writer, format: 1 as const }],
+    continuity: [{ cell: CELL, epoch: grant.epoch, devices: [writer], sessions: [session] }]
+  };
+  const intent = createFinishIntent(context, grant);
+  assert.ok(intent);
+  const [page] = buildGrantPages(LEAD.signer, grant);
+  const operation = { cell: grant.cell, epoch: grant.epoch, grant: grantHash(page), reason: context.reason };
+  const revision = accessRevisionId(CELL, priorRevision, ROSTER, 'cell.rekey', operation);
+  const direct = { project: CELL, revision, predecessor: ROSTER, cell: CELL, epoch: grant.epoch, authority: LEAD.writer, writer, device: writer, certificate: null };
+  const certified = { ...direct, writer: session.writer, certificate: session.hash };
+  const calls: string[] = [];
+  const signer = { ...LEAD.signer, canSignAction: (_id: string, bytes: Uint8Array) => intent.actionBytes().equals(bytes),
+    async sign(bytes: Buffer, options?: SignOptions) { calls.push(options?.action ?? ''); return LEAD.signer.sign(bytes); } };
+  let current = true;
+  const scope = createFinishGrantScope(intent, signer, 'reviewed-finish', async () => current);
+  const permit = (index: number) => scope.signerFor('permit', index);
+  const refuse = async (index: number, bytes: Buffer, count: number) => {
+    assert.equal(typeof await permit(index).sign(bytes), 'object');
+    assert.equal(calls.length, count);
+  };
+  await refuse(0, accessPermitBytes(direct), 0);
+  assert.equal(scope.permitDrafts(), undefined);
+  assert.equal(await scope.signerFor('founding', 0).sign(payloadSigningInput(page)), page.sig);
+  assert.deepEqual(scope.permitDrafts(), [direct, certified]);
+  assert.equal(scope.verifiedRekey(), undefined);
+  await refuse(1, accessPermitBytes(certified), 1);
+  await refuse(0, accessPermitBytes({ ...direct, revision: ROSTER }), 1);
+  await refuse(0, accessPermitBytes({ ...direct, authority: writer }), 1);
+  assert.equal(await permit(0).sign(accessPermitBytes(direct)), LEAD.signer.sign(accessPermitBytes(direct)));
+  await refuse(0, accessPermitBytes(direct), 2);
+  await refuse(1, accessPermitBytes({ ...certified, certificate: ROSTER }), 2);
+  current = false;
+  await refuse(1, accessPermitBytes(certified), 2);
+  current = true;
+  assert.equal(await permit(1).sign(accessPermitBytes(certified)), LEAD.signer.sign(accessPermitBytes(certified)));
+  await refuse(1, accessPermitBytes(certified), 3);
+  assert.deepEqual(calls, ['reviewed-finish', 'reviewed-finish', 'reviewed-finish']);
+  assert.deepEqual(scope.verifiedRekey()?.operation, operation);
+  assert.equal(scope.verifiedRekey()?.revision, revision);
+});
 
 test('tracer: 2,000 v2 wraps make four signed pages, each within GRANT_MAX_BYTES, and readGrantPages gives back all 2,000 and the label', () => {
   const pages = buildGrantPages(LEAD.signer, input(2000));

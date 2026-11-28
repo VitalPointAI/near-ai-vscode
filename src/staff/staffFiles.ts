@@ -10,6 +10,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { linkSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { link, lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { syncFolder } from '../team/fileSafety';
+
+export { setFolderSyncProbe, syncFolder } from '../team/fileSafety';
+export type { FolderSyncProbe } from '../team/fileSafety';
 
 /** The most a staff file may hold to be read at all. */
 export const MAX_STAFF_FILE_BYTES = 2 * 1024 * 1024;
@@ -175,31 +179,4 @@ export async function replaceKeepingEdits(file: string, expected: FileSnapshot, 
   } finally {
     await rm(temporary, { force: true });
   }
-}
-
-// A file system that cannot sync a folder answers with one of these; the rename it follows still happened, so they are not errors here.
-const FOLDER_SYNC_UNSUPPORTED = new Set(['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EBADF']);
-
-/** For tests only: runs after each folder sync with the folder synced, so a test can see the order of syncs. */
-export type FolderSyncProbe = (dir: string) => Promise<void> | void;
-let folderSyncProbe: FolderSyncProbe | undefined;
-export function setFolderSyncProbe(next: FolderSyncProbe | undefined): void { folderSyncProbe = next; }
-
-/**
- * Makes a rename (or a new file) in `dir` survive a power cut by syncing the folder itself (32-CONTEXT D-06). The one copy for the whole extension.
- * Windows has no folder sync, so there it only runs the test probe. A file system that cannot sync a folder is ignored; any other error is thrown.
- */
-export async function syncFolder(dir: string): Promise<void> {
-  if (process.platform !== 'win32') {
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-      handle = await open(dir, 'r');
-      await handle.sync();
-    } catch (error) {
-      if (!FOLDER_SYNC_UNSUPPORTED.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-    } finally {
-      await handle?.close();
-    }
-  }
-  await folderSyncProbe?.(dir);
 }

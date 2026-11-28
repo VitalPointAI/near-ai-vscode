@@ -32,6 +32,11 @@ import { readGrant } from './cellKeys';
 import type { CellGrant } from './cellKeys';
 import { readGrantPages } from './grantPages';
 import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
+import { CELL_ACCESS_FEATURE } from './features';
+import { accessRevisionId, verifiesAccessWrite } from './rotationProof';
+import type { AccessRevision } from './rotationProof';
+import { advanceGrantEvidence, matchesGrantEvidence, openGrantEvidence, readAuthoredAccessStage, readGrantDelivery } from './rotationGrants';
+import type { GrantEvidence, OpenedGrantEvidence } from './rotationGrants';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
@@ -42,7 +47,7 @@ import type { MembersState } from './rosterMembers';
 import { POSITION_REFUSALS, applyPositionEntry, createPostsState, positionAt, positionTakenAt, postingAt, postingReportedAt } from './rosterPositions';
 import type { PositionRefusal, PostsState } from './rosterPositions';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
-import { SESSION_MAX_LIFETIME_MS, certificateProblem } from './sessionKeys';
+import { SESSION_MAX_LIFETIME_MS, certificateProblem, certifiedWriter } from './sessionKeys';
 import type { SessionCertificate, SessionCertifyData } from './sessionKeys';
 import { verifyEntry } from './verify';
 import type { VerifiedEntry } from './verify';
@@ -74,6 +79,7 @@ export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Obje
   'invite.void': 'members',
   'cell.create': 'cells',
   'cell.rekey': 'cells',
+  'cell.access.commit': 'roster',
   'lead.handover': 'roster',
   'roster.choose': 'roster',
   'deputy.name': 'roster',
@@ -126,6 +132,7 @@ export interface RosterFoldInput {
   blobs: (hash: string) => SealedBlob | undefined;
   // Signed grant objects (readGrant checks each).
   grants: readonly unknown[];
+  grantEvidence?: readonly unknown[];
   // Passed to verifyEntry only; the roster fold decides nothing from it.
   now: Date;
 }
@@ -156,6 +163,9 @@ export interface RosterState {
   required: readonly string[];
   // The roster position at which each required feature was first required (33.2 D-06 reads wrap@2's).
   requiredFrom: Map<string, number>;
+  accessRevision?: AccessRevision;
+  accessHistory: Map<string, AccessRevision>;
+  accessGrants: Map<string, OpenedGrantEvidence>;
   // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
   sessions: Map<string, SessionCertificate>;
   // Each device's latest placed device.kem (33.2 D-03), by the device's writer id. kemKeysAt (deviceKem.ts) reads it. No position.
@@ -180,6 +190,8 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     choices: [],
     required: Object.freeze([]),
     requiredFrom: new Map(),
+    accessHistory: new Map(),
+    accessGrants: new Map(),
     sessions: new Map(),
     kems: new Map(),
     notChosen: new Set(),
@@ -203,6 +215,32 @@ export function isRosterWriterAt(state: RosterState, writer: string, position: n
   const device = deviceAt(state.members, writer, position);
   if (device === undefined || memberAt(state.members, device.member, position) === undefined) return false;
   return device.member === leadAt(state, position) || device.member === deputyAt(state, position);
+}
+
+/** Undefined delegates to the existing guard on a project which has not enabled managed access. */
+export function managedWriteAllowed(state: RosterState, stream: string, epoch: number, writer: string, cited: number, now: Date, proof: unknown, storedProofs: readonly unknown[] = []): boolean | undefined {
+  const since = state.requiredFrom.get(CELL_ACCESS_FEATURE);
+  if (since === undefined) return undefined;
+  const revision = state.accessRevision;
+  const head = state.positions.length - 1;
+  if (revision === undefined || state.pending.length > 0 || epochAt(state.cells, stream, head) !== epoch) return false;
+  const cell = state.cells.cells.get(stream);
+  const founding = cell?.epochs.find((item) => item.epoch === epoch);
+  if (founding === undefined || (founding.from > since && !cell?.grants.some((grant) => grant.founding && grant.hash === founding.grant))) return false;
+  const at = state.positionOf.get(revision.entry);
+  const predecessor = state.positionOf.get(revision.predecessor);
+  if (at === undefined || predecessor === undefined || cited < at) return false;
+  const certificate = state.sessions.get(writer);
+  let device = writer;
+  if (certificate !== undefined) {
+    if (certifiedWriter(rosterView(state), writer, state.positions[head]) === undefined || !(Date.parse(certificate.notAfter) > now.getTime())) return false;
+    device = certificate.device;
+  } else if (deviceAt(state.members, writer, head) === undefined) return false;
+  const verifies = (candidate: unknown): boolean => verifiesAccessWrite(revision, candidate, {
+    project: state.anchor.project, cell: stream, epoch, device, writer, certificate: certificate?.hash ?? null,
+    authorityKey: (authority) => isRosterWriterAt(state, authority, predecessor) ? deviceKeyOf(state.members, authority)?.publicKey : undefined
+  });
+  return proof === undefined ? storedProofs.some(verifies) : verifies(proof);
 }
 
 /** The parts of an entry the position write rule reads: the same from a verified entry (the fold) and an opened base-stream body (the hub). */
@@ -255,7 +293,9 @@ const positionWriteOf = (entry: VerifiedEntry): PositionWrite => ({ writer: entr
 // writer for every other kind.
 function authorityProblem(state: RosterState, entry: VerifiedEntry, head: number): string | undefined {
   if (ROSTER_KIND_OWNER[entry.body.kind] === 'positions') return positionWriteProblem(state, positionWriteOf(entry), head);
-  return isRosterWriterAt(state, entry.header.writer, head) ? undefined : 'not-a-roster-writer';
+  if (!isRosterWriterAt(state, entry.header.writer, head)) return 'not-a-roster-writer';
+  const access = nextAccessRevision(state, entry);
+  return typeof access === 'string' ? access : undefined;
 }
 
 // The member whose device wrote the entry, at the roster the entry cites.
@@ -410,7 +450,7 @@ function applyRequire(state: RosterState, entry: VerifiedEntry, position: number
   return { status: 'applied' };
 }
 
-function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+function applyOperation(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   const position = state.positions.length;
   const owner = ROSTER_KIND_OWNER[entry.body.kind];
   if (entry.body.kind === 'project.genesis') return applyGenesis(state, entry, position);
@@ -423,6 +463,7 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
   if (entry.body.kind === 'roster.require') return applyRequire(state, entry, position);
+  if (entry.body.kind === 'cell.access.commit') return { status: 'applied' };
   if (owner === 'positions') {
     // Judged again at the roster it cites, because a chosen branch reaches here without the head's authority check.
     const problem = positionWriteProblem(state, positionWriteOf(entry), position - 1);
@@ -432,6 +473,35 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   }
   // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
+}
+
+const ACCESS_CHANGES: ReadonlySet<string> = new Set(['member.remove', 'device.revoke', 'device.rotate', 'hub.revoke', 'cell.create', 'cell.rekey', 'cell.access.commit']);
+
+function nextAccessRevision(state: RosterState, entry: VerifiedEntry): { id: string; root: string } | string | undefined {
+  if (entry.body.kind === 'project.genesis') return undefined;
+  const { accessRevision, accessRoot, rosterPrev: _prev, ...operation } = entry.data as Record<string, unknown>;
+  const kind = entry.body.kind;
+  const changesAccess = ACCESS_CHANGES.has(kind) || (kind === 'member.update' &&
+    ('clearance' in operation || 'did' in operation || 'evidence' in operation));
+  if (!state.requiredFrom.has(CELL_ACCESS_FEATURE) || !changesAccess) {
+    return accessRevision !== undefined || accessRoot !== undefined ? 'cell-access-not-required' : undefined;
+  }
+  const id = accessRevisionId(state.anchor.project, state.accessRevision?.id ?? null, entry.body.roster, kind, operation);
+  return accessRevision === id && typeof accessRoot === 'string' ? { id, root: accessRoot } : 'cell-access-revision-invalid';
+}
+
+/** A managed mutation and its access revision apply together, including on a chosen roster branch. */
+function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+  const access = nextAccessRevision(state, entry);
+  if (typeof access === 'string') return { status: 'refused', reason: access };
+  const outcome = applyOperation(state, entry);
+  if (outcome.status === 'applied' && access !== undefined) {
+    state.accessRevision = Object.freeze({
+      ...access, entry: entry.hash, predecessor: entry.body.roster, cells: Object.freeze([...state.cells.cells.keys()].sort())
+    });
+    state.accessHistory.set(entry.hash, state.accessRevision);
+  }
+  return outcome;
 }
 
 const isRouted = (kind: string): boolean => Object.prototype.hasOwnProperty.call(ROSTER_KIND_OWNER, kind);
@@ -577,7 +647,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
   for (const entry of ready) state.held.push({ hash: entry.hash, reason: state.notChosen.has(entry.hash) ? 'roster-branch-not-chosen' : 'roster-prev-not-applied' });
   state.held.sort(byHash);
 
-  placeGrants(state, input.grants);
+  placeGrants(state, input.grants, input.grantEvidence ?? []);
   return state;
 }
 
@@ -639,10 +709,33 @@ function markNotChosen(state: RosterState, unapplied: readonly VerifiedEntry[]):
 // Places the grants. A grant that lists pages (33.2 D-04) is read with readGrantPages together with the pages it lists and placed as one grant under
 // its own hash; a listed page is never placed alone. A grant whose pages have not all arrived waits, held missing-blob under its hash like an entry
 // whose blob has not arrived (33-07), and is placed when they come.
-function placeGrants(state: RosterState, grants: readonly unknown[]): void {
+function placeGrants(state: RosterState, grants: readonly unknown[], openings: readonly unknown[]): void {
+  const evidence: OpenedGrantEvidence[] = [];
+  const delivered: unknown[] = [];
+  for (const candidate of openings) {
+    const stage = readAuthoredAccessStage(candidate);
+    for (const opening of stage?.openings ?? [candidate]) {
+      const bound = openGrantEvidence(state.anchor.project, state.accessHistory, opening);
+      if (bound !== undefined) evidence.push(bound);
+    }
+    const item = stage?.founding ?? stage?.supplemental ?? readGrantDelivery(candidate);
+    if (item === undefined) continue;
+    const bound = openGrantEvidence(state.anchor.project, state.accessHistory, item.opening);
+    if (bound === undefined) continue;
+    evidence.push(bound);
+    delivered.push(...item.grants);
+  }
+  if (state.pending.length === 0) {
+    const position = state.positions.length - 1;
+    for (const item of evidence) {
+      const { cell, epoch } = item.evidence;
+      if (item.entry === state.accessRevision?.entry && epochAt(state.cells, cell, position) === epoch) state.accessGrants.set(cell, item);
+    }
+  }
+  const approved = new Set(evidence.flatMap(({ evidence: item }) => item.grants.map((grant) => grant.hash)));
   const reads: Array<{ value: unknown; read: Extract<ReturnType<typeof readGrant>, { ok: true }> }> = [];
   const byHash = new Map<string, unknown>();
-  for (const value of grants) {
+  for (const value of [...grants, ...delivered]) {
     const read = readGrant(value);
     if (!read.ok) {
       state.refused.push({ hash: '', kind: 'grant', reason: read.reason });
@@ -653,9 +746,16 @@ function placeGrants(state: RosterState, grants: readonly unknown[]): void {
     reads.push({ value, read });
   }
   const listed = new Set<string>();
-  for (const { read } of reads) for (const page of read.grant.pages ?? []) listed.add(page);
+  for (const { read } of reads) {
+    if (approved.has(read.hash) || !requiresManagedGrant(state, read.grant)) for (const page of read.grant.pages ?? []) listed.add(page);
+  }
   for (const { value, read: first } of reads) {
     if (listed.has(first.hash)) continue;
+    const managed = requiresManagedGrant(state, first.grant);
+    if (managed && !approved.has(first.hash)) {
+      state.held.push({ hash: first.hash, reason: 'cell-access-grant-pending' });
+      continue;
+    }
     let read: { grant: CellGrant; hash: string; signer: { writer: string } } = first;
     if ((first.grant.pages ?? []).length > 0) {
       const pages = (first.grant.pages as string[]).map((hash) => byHash.get(hash));
@@ -675,6 +775,13 @@ function placeGrants(state: RosterState, grants: readonly unknown[]): void {
       state.held.push({ hash: read.hash, reason: 'missing-roster' });
       continue;
     }
+    if (managed && !evidence.some(({ entry, evidence: item }) => item.cell === read.grant.cell && item.epoch === read.grant.epoch &&
+      (state.positionOf.get(entry) ?? -1) >= position && matchesGrantEvidence(item, {
+        hash: read.hash, pages: read.grant.pages ?? [], recipients: read.grant.wraps.map((wrap) => wrap.writer).sort()
+      }))) {
+      state.held.push({ hash: read.hash, reason: 'cell-access-grant-pending' });
+      continue;
+    }
     // The cutover rule (33.2 D-06), the same function your organization's server calls: no v1 wrap for an epoch founded after the switch.
     const founded = state.cells.cells.get(read.grant.cell)?.epochs.find((epoch) => epoch.epoch === read.grant.epoch)?.from;
     const format = founded === undefined ? undefined : wrapFormatProblem(read.grant, founded, state.requiredFrom.get(WRAP_FEATURE));
@@ -691,4 +798,67 @@ function placeGrants(state: RosterState, grants: readonly unknown[]): void {
     });
     if (outcome.status === 'refused') state.refused.push({ hash: read.hash, kind: 'grant', reason: outcome.reason });
   }
+}
+
+type Withdrawal = { member: string; writer?: string };
+type WithdrawalCell = { evidence: GrantEvidence; decision: OpenedGrantEvidence['decision']; recipients: string[] };
+
+/** Prepare the next managed membership operation without signing or writing. Every cell needs selected-root evidence. */
+export function prepareManagedWithdrawal(state: RosterState, authority: string, input: Withdrawal):
+  { kind: 'member.remove' | 'device.revoke'; operation: Withdrawal; predecessor: string; priorRoot: string; priorEntry: string;
+    revision: string; cells: WithdrawalCell[] } | undefined {
+  const prior = state.accessRevision;
+  const position = state.positions.length - 1;
+  const predecessor = state.positions[position];
+  if (!state.requiredFrom.has(CELL_ACCESS_FEATURE) || prior === undefined || state.pending.length > 0 || !isRosterWriterAt(state, authority, position)) return undefined;
+  if (memberAt(state.members, input.member, position) === undefined) return undefined;
+  const devices = devicesOfMemberAt(state.members, input.member, position);
+  const target = input.writer;
+  if (input.member === leadAt(state, position) && (target === undefined || (devices.filter((device) => device.kind === 'person').length <= 1 &&
+      deviceAt(state.members, authority, position)?.member !== deputyAt(state, position)))) return undefined;
+  if (target !== undefined && !devices.some(({ writer }) => writer === target)) return undefined;
+  const withdrawn = new Set(target === undefined ? devices.map(({ writer }) => writer) : [target]);
+  const cells: WithdrawalCell[] = [];
+  for (const cell of prior.cells) {
+    const known = state.accessGrants.get(cell);
+    if (known?.entry !== prior.entry || known.evidence.epoch !== epochAt(state.cells, cell, position)) return undefined;
+    const holders = [...new Set(known.evidence.grants.flatMap((grant) => grant.recipients))].sort();
+    const excludedNow = holders.filter((writer) => withdrawn.has(writer) || deviceAt(state.members, writer, position) === undefined);
+    const evidence = advanceGrantEvidence(known.evidence, { epoch: known.evidence.epoch, grants: [], excluded: excludedNow });
+    if (evidence === undefined) return undefined;
+    const excluded = new Set(evidence.excluded);
+    const recipients = holders.filter((writer) => !excluded.has(writer));
+    const pending = known.decision === 'pending' || recipients.length < holders.length;
+    const decision = known.decision === 'closed' || recipients.length === 0 ? 'closed' : pending ? 'pending' : 'continues';
+    cells.push({ evidence, decision, recipients: decision === 'closed' ? [] : recipients });
+  }
+  const operation = { member: input.member, ...(target === undefined ? {} : { writer: target }) };
+  const kind = target === undefined ? 'member.remove' : 'device.revoke';
+  return { kind, operation, predecessor, priorRoot: prior.root, priorEntry: prior.entry, cells,
+    revision: accessRevisionId(state.anchor.project, prior.id, predecessor, kind, operation) };
+}
+
+/** Raw grant bytes can arrive before their authority. After the switch they are only staging material. */
+export function requiresManagedGrant(state: RosterState, grant: Pick<CellGrant, 'roster' | 'cell' | 'epoch'>): boolean {
+  const since = state.requiredFrom.get(CELL_ACCESS_FEATURE);
+  if (since === undefined) return false;
+  const cited = state.positionOf.get(grant.roster);
+  const founded = state.cells.cells.get(grant.cell)?.epochs.find((epoch) => epoch.epoch === grant.epoch)?.from;
+  return cited === undefined || founded === undefined || cited >= since || founded > since;
+}
+
+/** Only legacy grants may bootstrap read keys through the legacy catching-up path. */
+export function legacyReadingGrants(state: RosterState, grants: readonly unknown[]): readonly unknown[] {
+  if (!state.requiredFrom.has(CELL_ACCESS_FEATURE)) return grants;
+  return grants.filter((signed) => {
+    const grant = readGrant(signed);
+    return grant.ok && !requiresManagedGrant(state, grant.grant);
+  });
+}
+
+/** What can change the cached roster view used by the main fold. */
+export function rosterSignature(roster: RosterState): string {
+  let grants = 0;
+  for (const cell of roster.cells.cells.values()) grants += cell.grants.length;
+  return [roster.positions.join(','), roster.pending.map((split) => `${split.at}:${split.branches.join('+')}`).join(';'), roster.choices.map((choice) => choice.choose).join(';'), String(roster.notChosen.size), String(grants), String(roster.sessions.size)].join('|');
 }

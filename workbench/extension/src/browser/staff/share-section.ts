@@ -5,7 +5,7 @@
  * STAFF_SHARE_TEXT and the engine's own result sentences.
  */
 import type { ServiceResult } from '../../common/service-result.js';
-import { STAFF_SHARE_TEXT, type ShareOutcome, type ShareView, type StaffShareServer } from '../../common/staff-share.js';
+import { MANAGED_KEY_FILE_EXTENSION, MANAGED_KEY_FILE_MAX_BYTES, STAFF_SHARE_TEXT, type ShareConfirmation, type ShareOutcome, type ShareView, type StaffShareServer } from '../../common/staff-share.js';
 import type { InvitationOpened } from './invite-open-handler.js';
 import '../sterling-share.css';
 
@@ -59,16 +59,21 @@ function save(file: { readonly name: string; readonly text: string }): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function readFile(accept: string): Promise<string | undefined> {
+function readFile(accept: string, maximum = 4 * 1024 * 1024, tooLarge?: () => void): Promise<string | undefined> {
   return new Promise((resolve) => {
     const picker = el('input');
     picker.type = 'file';
     picker.accept = accept;
     picker.addEventListener('change', () => {
       const file = picker.files?.[0];
-      if (file === undefined || file.size > 4 * 1024 * 1024) { resolve(undefined); return; }
+      if (file === undefined || file.size > maximum) {
+        if (file !== undefined) tooLarge?.();
+        resolve(undefined);
+        return;
+      }
       void file.text().then(resolve, () => resolve(undefined));
     });
+    picker.addEventListener('cancel', () => resolve(undefined), { once: true });
     picker.click();
   });
 }
@@ -78,6 +83,9 @@ export class ShareWithPeopleSection {
   private readonly body = el('div', undefined, 'sterling-share-body');
   private readonly status = el('p', undefined, 'sterling-share-status');
   private invitation: InvitationOpened | undefined;
+  private removal: { project: string | undefined; member: string; confirmation: ShareConfirmation } | undefined;
+  private keyChange: { project: string | undefined; cell: string; confirmation: ShareConfirmation } | undefined;
+  private lastKeyFile: { project: string; cell: string; recipient: string; repeat: string } | undefined;
   private disposed = false;
 
   constructor(private readonly server: StaffShareServer) {
@@ -125,7 +133,13 @@ export class ShareWithPeopleSection {
     }
     this.say('');
     this.body.append(this.peopleCard(view));
-    if (view.lead) this.body.append(this.inviteCard(view), this.serverCard(view));
+    if (view.lead) {
+      if (view.keyChanges?.length) this.body.append(this.keyChangesCard(view));
+      this.body.append(this.inviteCard(view), this.serverCard(view));
+    }
+    if (view.project !== undefined && (view.canOpenManagedKeyFile || view.managedKeyFiles?.length)) {
+      this.body.append(this.managedKeyFilesCard(view, view.project));
+    }
     this.body.append(this.selfCard(view));
   }
 
@@ -197,13 +211,131 @@ export class ShareWithPeopleSection {
     return card;
   }
 
+  private async removeMember(project: string | undefined, member: string, requestId?: string): Promise<void> {
+    const answer = await this.server.remove({ member, ...(requestId === undefined ? {} : { requestId }) }).catch(() => undefined);
+    if (this.disposed) return;
+    if (answer === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
+    if (answer.kind === 'ok' && answer.value.confirmation !== undefined) {
+      this.keyChange = undefined;
+      this.removal = { project, member, confirmation: answer.value.confirmation };
+      await this.refresh();
+      this.say(answer.value.message);
+      return;
+    }
+    if (requestId !== undefined) {
+      this.removal = undefined;
+      if (answer.kind === 'refused') await this.refresh();
+    }
+    await this.shown(Promise.resolve(answer));
+  }
+
+  private async finishCellKeyChange(project: string | undefined, cell: string, requestId?: string): Promise<void> {
+    const answer = await this.server.finishKeyChange({ cell, ...(requestId === undefined ? {} : { requestId }) }).catch(() => undefined);
+    if (this.disposed) return;
+    if (answer === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
+    if (answer.kind === 'ok' && answer.value.confirmation !== undefined) {
+      this.removal = undefined;
+      this.keyChange = { project, cell, confirmation: answer.value.confirmation };
+      await this.refresh();
+      this.say(answer.value.message);
+      return;
+    }
+    if (requestId !== undefined) {
+      this.keyChange = undefined;
+      if (answer.kind === 'refused') await this.refresh();
+    }
+    await this.shown(Promise.resolve(answer));
+  }
+
+  private async saveManagedKeyFile(project: string, cell: string, recipient: string, repeat?: string): Promise<void> {
+    const answer = await this.server.saveManagedKeys({ project, cell, recipient, ...(repeat === undefined ? {} : { repeat }) }).catch(() => undefined);
+    if (this.disposed) return;
+    if (answer === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
+    if (answer.kind === 'ok' && answer.value.fileRepeat !== undefined) {
+      this.lastKeyFile = { project, cell, recipient, repeat: answer.value.fileRepeat };
+    } else if (repeat !== undefined) {
+      this.lastKeyFile = undefined;
+      await this.refresh();
+    }
+    await this.shown(Promise.resolve(answer));
+    if (answer.kind === 'ok') this.say(answer.value.message);
+  }
+
+  private managedKeyFilesCard(view: ShareView, project: string): HTMLElement {
+    const card = this.card(STAFF_SHARE_TEXT.managedKeyFiles, 'key');
+    for (const part of view.managedKeyFiles ?? []) {
+      const item = el('div', undefined, 'sterling-share-row');
+      const devices = el('select');
+      const previous = this.lastKeyFile?.project === project && this.lastKeyFile.cell === part.cell ? this.lastKeyFile : undefined;
+      for (const recipient of part.recipients) {
+        const option = el('option', recipient.label);
+        option.value = recipient.writer;
+        option.selected = recipient.writer === previous?.recipient;
+        devices.append(option);
+      }
+      const repeat = () => previous !== undefined && devices.value === previous.recipient ? previous.repeat : undefined;
+      const button = this.button(STAFF_SHARE_TEXT.saveManagedKeys, 'save', () => this.saveManagedKeyFile(project, part.cell, devices.value, repeat()));
+      const update = () => {
+        button.textContent = repeat() === undefined ? STAFF_SHARE_TEXT.saveManagedKeys : STAFF_SHARE_TEXT.repeatManagedKeys;
+      };
+      devices.addEventListener('change', update);
+      update();
+      item.append(el('span', part.label), labelled(STAFF_SHARE_TEXT.managedKeyRecipient, devices), button);
+      card.append(item);
+    }
+    if (view.canOpenManagedKeyFile) {
+      card.append(this.button(STAFF_SHARE_TEXT.openManagedKeys, 'folder-opened', async () => {
+        const text = await readFile(MANAGED_KEY_FILE_EXTENSION, MANAGED_KEY_FILE_MAX_BYTES, () => this.say(STAFF_SHARE_TEXT.managedKeyFileTooLarge));
+        if (text !== undefined && !this.disposed) {
+          const answer = await this.server.openManagedKeys({ project, text }).catch(() => undefined);
+          if (answer === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
+          await this.shown(Promise.resolve(answer));
+          if (answer.kind === 'ok') this.say(answer.value.message);
+        }
+      }));
+    }
+    return card;
+  }
+
+  private keyChangesCard(view: ShareView): HTMLElement {
+    const card = this.card(STAFF_SHARE_TEXT.keyChanges, 'key');
+    const list = el('ul', undefined, 'sterling-share-list');
+    for (const part of view.keyChanges ?? []) {
+      const item = el('li', undefined, 'sterling-share-row');
+      item.append(el('span', part.label));
+      const current = this.keyChange;
+      const pending = current !== undefined && current.project === view.project && current.cell === part.cell ? current.confirmation : undefined;
+      if (pending === undefined) item.append(this.button(STAFF_SHARE_TEXT.startKeyChange, 'key', () => this.finishCellKeyChange(view.project, part.cell)));
+      else {
+        const review = el('a', STAFF_SHARE_TEXT.reviewKeyChange);
+        review.href = pending.url;
+        review.target = '_blank';
+        review.rel = 'noopener noreferrer';
+        item.append(review, this.button(STAFF_SHARE_TEXT.finishKeyChange, 'key', () => this.finishCellKeyChange(view.project, part.cell, pending.requestId)));
+      }
+      list.append(item);
+    }
+    card.append(list);
+    return card;
+  }
+
   private peopleCard(view: ShareView): HTMLElement {
     const card = this.card('People', 'person');
     const list = el('ul', undefined, 'sterling-share-list');
     for (const person of view.people) {
       const item = el('li', undefined, 'sterling-share-row');
       item.append(el('span', person.seat === undefined ? person.name : `${person.name}, ${person.seat}`));
-      if (view.lead) item.append(this.button(STAFF_SHARE_TEXT.remove, 'trash', () => this.shown(this.server.remove({ member: person.member }))));
+      if (view.lead) {
+        const pending = this.removal?.project === view.project && this.removal?.member === person.member ? this.removal.confirmation : undefined;
+        if (pending === undefined) item.append(this.button(STAFF_SHARE_TEXT.remove, 'trash', () => this.removeMember(view.project, person.member)));
+        else {
+          const review = el('a', STAFF_SHARE_TEXT.reviewRemoval);
+          review.href = pending.url;
+          review.target = '_blank';
+          review.rel = 'noopener noreferrer';
+          item.append(review, this.button(STAFF_SHARE_TEXT.finishRemoval, 'trash', () => this.removeMember(view.project, person.member, pending.requestId)));
+        }
+      }
       list.append(item);
     }
     card.append(list);

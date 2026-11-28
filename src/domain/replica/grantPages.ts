@@ -21,7 +21,7 @@ export const MAX_WRAPS_PER_V2_PAGE = Math.floor((GRANT_MAX_BYTES - MAX_LABEL_SEA
 // Builds the pages of one epoch grant, the founding page first. Only v1 wraps, up to MAX_GRANT_WRAPS: one v1 grant, as today. Otherwise pages of at
 // most MAX_WRAPS_PER_V2_PAGE wraps each. Throws on an invalid grant, more than MAX_GRANT_WRAPS wraps or a repeated writer.
 export function buildGrantPages(signer: PayloadSigner, input: CellGrant): Array<SignedPayload<CellGrant>> {
-  const plan = pagePlan(input);
+  const plan = grantPagePlan(input);
   if (plan.single !== undefined) return [buildGrant(signer, plan.single)];
   const others = plan.others.map((page) => buildGrant(signer, page));
   return [buildGrant(signer, plan.founding(others.map((page) => grantHash(page)))), ...others];
@@ -30,7 +30,7 @@ export function buildGrantPages(signer: PayloadSigner, input: CellGrant): Array<
 // buildGrantPages with a signer that answers later: the person key in a hosted session signs as the device the roster names (Phase 33 D-60). The
 // same pages and hashes buildGrantPages makes with that key; the first refusal comes back as it is and nothing else is signed after it.
 export async function buildGrantPagesAsync(signer: PayloadSigner | AsyncPayloadSigner, input: CellGrant): Promise<Array<SignedPayload<CellGrant>> | SignRefused> {
-  const plan = pagePlan(input);
+  const plan = grantPagePlan(input);
   if (plan.single !== undefined) {
     const one = await buildGrantAsync(signer, plan.single);
     return 'refused' in one ? one : [one];
@@ -46,7 +46,7 @@ export async function buildGrantPagesAsync(signer: PayloadSigner | AsyncPayloadS
 }
 
 // The unsigned pages of one epoch grant: one v1 grant when only v1 wraps fit, else the other pages and the founding page given their hashes.
-function pagePlan(input: CellGrant): { single?: CellGrant; others: CellGrant[]; founding: (hashes: string[]) => CellGrant } {
+export function grantPagePlan(input: CellGrant): { single?: CellGrant; others: CellGrant[]; founding: (hashes: string[]) => CellGrant } {
   const wraps = input.wraps;
   if (wraps.length > MAX_GRANT_WRAPS) throw new Error('A grant names at most 4,095 devices.');
   if (new Set(wraps.map((item) => item.writer)).size !== wraps.length) throw new Error('A grant names each device once.');

@@ -61,6 +61,7 @@ export interface EngineDeviceRecord {
 
 /** The roster state, as far as the live engine reads it; anything else of it is passed back to the engine untouched. */
 export interface EngineRoster {
+  readonly required?: readonly string[];
   readonly positions: readonly string[];
   readonly members: { readonly devices: ReadonlyMap<string, readonly EngineDeviceRecord[]> };
 }

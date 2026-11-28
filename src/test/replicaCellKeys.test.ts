@@ -139,7 +139,7 @@ test('removal: planRekey drops M from X, cell.rekey moves X to epoch 2 wrapped o
     cells: [{ cell: CELL_X, grantees: [...(before.cellGrantees?.(CELL_X, create.hash) ?? [])], clearedNow: [lead.writer] }]
   });
   assert.deepEqual(plans, [{ cell: CELL_X, reason: 'member-removed', recipients: [lead.writer], dropped: [member.writer], text: REKEY_KEEP_TEXT }]);
-  assert.equal(plans[0].text, 'They keep what they already received. They will not receive anything new.');
+  assert.equal(plans[0].text, 'They keep what they already received.');
   const recipients = plans[0].recipients.map((writer) => [lead, member].find((device) => device.writer === writer) as RosterDevice);
   const next = cellGrant(world, lead, { cell: CELL_X, epoch: 2, roster: create.hash, to: recipients, label: LABEL_X });
   const rekey = world.rosterEntry(lead, 'cell.rekey', { cell: CELL_X, epoch: 2, reason: 'member-removed', grant: grantHash(next) }, create.hash);

@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalBytes } from '../domain/team/canonical';
-import { GENESIS_PREV, INLINE_BODY_MAX_BYTES, buildEntry, entryHash, headerAad, openBody, sealBody, sha256Hex, signHeader, verifyHeader } from '../domain/replica/entry';
-import type { EntryHeader, SealedBlob, SealedEntry, UnsignedHeader } from '../domain/replica/entry';
+import { GENESIS_PREV, INLINE_BODY_MAX_BYTES, buildEntry, entryHash, headerAad, openBody, prepareEntrySigning, sealBody, sha256Hex, signHeader, verifyHeader } from '../domain/replica/entry';
+import type { BuildEntryInput, EntryHeader, SealedBlob, SealedEntry, UnsignedHeader } from '../domain/replica/entry';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
 import { staticRosterView } from '../domain/replica/rosterView';
@@ -49,6 +49,32 @@ function rejectedReason(outcome: VerifyOutcome): string {
 function productsOf(result: FoldResult): ProductTextOutput[] {
   return result.families.doc as ProductTextOutput[];
 }
+
+test('prepared roster signing fixes one sealed body and blob and rejects a different artifact', () => {
+  const world = twoWriters();
+  const signer = world.signerOf('A').signer;
+  const data = { cell: world.stream, epoch: 2, grant: HASH_A, reason: 'device-revoked', detail: 'X'.repeat(INLINE_BODY_MAX_BYTES) };
+  const input: BuildEntryInput = { signer, stream: world.stream, seq: 0, prev: GENESIS_PREV, epoch: 0, key: world.keyFor(world.stream, 0),
+    body: { deps: [], roster: world.rosterHash, lamport: 1, at: WORLD_AT, actor: { kind: 'person' }, kind: 'cell.rekey', data } };
+  const candidate = prepareEntrySigning(input);
+  assert.ok(candidate);
+  const first = candidate.signingBytes();
+  const wrong = prepareEntrySigning({ ...input, body: { ...input.body, data: { ...data, grant: HASH_B } } });
+  assert.ok(wrong);
+  assert.equal(candidate.finish(signer.sign(wrong.signingBytes())), undefined);
+  data.grant = HASH_B;
+  candidate.signingBytes().fill(0);
+  assert.equal(candidate.signingBytes().equals(first), true);
+  const built = candidate.finish(signer.sign(first));
+  assert.ok(built);
+  assert.equal(verifyHeader(built.entry.header, signer.publicKey), true);
+  assert.equal(built.blobs.length, 1);
+  assert.equal(candidate.matches(built), true);
+  const replacement = wrong.finish(signer.sign(wrong.signingBytes()));
+  assert.ok(replacement);
+  assert.equal(candidate.matches({ ...built, entry: { ...built.entry, body: replacement.entry.body } }), false);
+  assert.equal(candidate.matches({ ...built, blobs: [{ ...built.blobs[0], bytes: 'changed' }] }), false);
+});
 
 // ---- headers ----
 

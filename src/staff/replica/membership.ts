@@ -21,23 +21,20 @@
 // The join secret lives in this computer's secret storage from the invitation until a roster entry records its outcome (used or voided), and is then
 // forgotten (P-31-28). Nothing else is ever deleted.
 //
-// The rekey flows use the roster to find interrupted rotations before handing out keys (MJ-03).
-// The writing host opens the cell's label and checks clearance with its clock and scales (D-22). The signed grant is the fold's authority.
+// Rekey uses the roster to find interrupted rotations (MJ-03) and checks clearance against the private labels (D-22).
 //
-// No result, message, file name or error holds a join secret, a MAC or a key (P-31-23). The invitation file holds the secret by design, inside its
-// signed payload, and the join request file holds the MAC by design; nothing else does.
+// No status or error holds a join secret, MAC or key (P-31-23). Only the invitation contains the join secret and only the join request contains the MAC.
 import { createHash, randomBytes } from 'node:crypto';
-import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, rename } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rename } from 'node:fs/promises';
 import * as path from 'node:path';
+import { eachRosterLine } from './rosterBranchFiles';
 import { dominates } from '../../domain/gate/dominance';
 import type { DominanceContext } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseClearance, parseLabel } from '../../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../../domain/gate/labels';
-import { REKEY_KEEP_TEXT, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, REKEY_PENDING_TEXT, REKEY_VERIFIED_TEXT, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel } from '../../domain/replica/cellKeys';
 import type { RekeyPlan, RekeyReason } from '../../domain/replica/cellKeys';
-import { HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
+import { entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
 import type { SealedEntry } from '../../domain/replica/entry';
 import {
   INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, WELCOME_MAX_BYTES, buildInviteAsync, buildJoinRequestAsync,
@@ -47,6 +44,10 @@ import type { InviteLead, InvitePayload, InviteRefusal, JoinRequestPayload } fro
 import type { ProjectOutput } from '../../domain/replica/projectFold';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
+import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
+import { appendManagedClearance } from './managedClearance';
+import { appendManagedWithdrawal } from './managedWithdrawal';
+import { finishManagedRekeys, leftReason } from './managedRecovery';
 import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, deviceAt, devicesOfMemberAt, hubCellsAt, inviteAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
@@ -163,7 +164,7 @@ const now = (deps: ReplicaProjectDeps): Date => deps.now?.() ?? new Date();
 export const headOf = (roster: RosterState): { hash: string; position: number } => ({ hash: roster.positions[roster.positions.length - 1], position: roster.positions.length - 1 });
 
 /** Runs a flow, turning a store refusal on refresh into a plain result instead of an exception. */
-async function guarded<T extends MembershipResult>(work: () => Promise<T>): Promise<T | MembershipResult> {
+async function guarded<T>(work: () => Promise<T>): Promise<T | MembershipResult> {
   try {
     return await work();
   } catch (error) {
@@ -240,13 +241,7 @@ export function gateOf(shared: SharedProjectHost): Gate {
   return { scales, context: { scales, mappings: shared.mappings ?? [], now: now(shared.deps).getTime() } };
 }
 
-/**
- * Is the member cleared for the cell? Every member is on the base cell. A labelled cell this device cannot read clears nobody. A member with a
- * declared clearance is cleared when it dominates the label (Phase 70, all five conditions). A member with no declared clearance (only the founding
- * lead, whose genesis names none) is cleared for the cells one of its devices already holds, so the lead is never dropped from a cell it founded.
- * The legacy cell (D-20) clears only the lead or the deputy at the position (leadOrDeputy), and then only with a declared clearance that dominates
- * every label in it (or, with none declared, when a device of theirs already holds it): admission, an ordinary member and a hub never get it.
- */
+/** Check a cell's clearance with the active policy. The base is shared; the legacy cell is restricted to lead and deputy. */
 export function clearedFor(clearance: unknown, info: CellInfo, holds: boolean, gate: Gate, leadOrDeputy = false): boolean {
   if (info.base) return true;
   if (info.legacy !== undefined) {
@@ -290,11 +285,7 @@ export function clearedDevices(roster: RosterState, info: CellInfo, position: nu
   return writers.sort();
 }
 
-/**
- * The cell order the fold checks writes against (D-25), for ReplicaProjectDeps.cellOrder: an entry in one cell may cite an entry in another only when
- * the citing cell's label dominates the cited one's, by Phase 70 rules with the host clock and the given scales. The base cell is the lowest: every
- * cell may cite it and it may cite no labelled cell. A cell whose label this device cannot read answers no (fail closed).
- */
+/** Order citations upward by the active policy (D-25); an unreadable label cannot be used. */
 export function cellOrderHook(options: { scales?: ScaleTable; mappings?: readonly ScaleMapping[]; now?: () => Date } = {}): (roster: RosterState, keys: DeviceKeyRing) => NonNullable<ReplicaContext['cellOrder']> {
   return (roster, keys) => {
     const scales = options.scales ?? SCALE_PRESETS;
@@ -334,11 +325,19 @@ async function applied(shared: SharedProjectHost, hash: string): Promise<{ roste
   return found === undefined ? refuse('change-not-applied') : refused(found.reason, foldMessage(found.reason));
 }
 
-export async function append(shared: SharedProjectHost, kind: string, data: unknown, roster?: string): Promise<{ hash: string; roster: RosterState } | MembershipResult> {
+export async function append(
+  shared: SharedProjectHost, kind: string, data: unknown, roster?: string, confirmation?: 'report-saved'
+): Promise<{ hash: string; roster: RosterState } | MembershipResult> {
   const written = await shared.project.appendOwn(kind, data, roster === undefined ? {} : { roster });
   if (isProjectRefused(written)) return fromProject(written);
-  const outcome = await applied(shared, written.hash);
-  return 'roster' in outcome ? { hash: written.hash, roster: outcome.roster } : outcome;
+  try {
+    const outcome = await applied(shared, written.hash);
+    return 'roster' in outcome ? { hash: written.hash, roster: outcome.roster } : outcome;
+  } catch (error) {
+    if (confirmation !== 'report-saved' || !(error instanceof ReplicaProjectError)) throw error;
+    const { refused: reason, message } = error.refusal;
+    return refused(reason, `The signed change was saved. This computer could not confirm whether it applied to the roster. ${diagnosticAfterWrite(message)}`);
+  }
 }
 
 const isResult = (value: unknown): value is MembershipResult => isRecord(value) && typeof value.ok === 'boolean' && typeof value.message === 'string';
@@ -1081,20 +1080,22 @@ export async function writeRekeys(shared: SharedProjectHost, plans: readonly Rek
 }
 
 function rekeyMessage(first: string, outcome: RekeyOutcome): string {
-  const moved = outcome.rekeyed.length === 0 ? '' : ` ${outcome.rekeyed.length === 1 ? 'One part of the project was' : `${outcome.rekeyed.length} parts of the project were`} moved to a new key.`;
+  const moved = outcome.rekeyed.length === 0 ? '' : ` ${outcome.rekeyed.length === 1 ? 'One part of the project was' : `${outcome.rekeyed.length} parts of the project were`} moved to a new key. ${REKEY_VERIFIED_TEXT}`;
   const left = outcome.skipped.length === 0 ? '' : ` Nobody else is on ${outcome.skipped.length === 1 ? 'one part' : `${outcome.skipped.length} parts`} of the project, so no new key was made for ${outcome.skipped.length === 1 ? 'it' : 'them'}.`;
   return `${first}${moved}${left} ${REKEY_KEEP_TEXT}`;
 }
 
-/** The kind of rekey a cell needs because of the devices that left it: a removed member, a revoked device, or a revoked hub device. */
-function leftReason(roster: RosterState, gone: readonly string[], position: number): RekeyReason {
-  const reasons = gone.map((writer): RekeyReason => {
-    const versions = roster.members.devices.get(writer);
-    const last = versions?.[versions.length - 1];
-    if (last?.kind === 'hub') return 'hub-revoked';
-    return last !== undefined && memberAt(roster.members, last.member, position) !== undefined ? 'device-revoked' : 'member-removed';
-  });
-  return (['member-removed', 'device-revoked', 'hub-revoked'] as const).find((reason) => reasons.includes(reason)) ?? 'member-removed';
+/** A diagnostic for a later step cannot guarantee that an earlier write changed nothing. */
+function diagnosticAfterWrite(message: string): string {
+  return message.replace(/, so nothing was changed\.|\. Nothing was changed\./g, '.');
+}
+
+/** A key operation failed after the roster change was already recorded. Keep the underlying refusal scoped to that later step. */
+export function withPendingRekeyMessage(result: MembershipResult, recorded: string): MembershipResult {
+  const cause = result.message === MEMBERSHIP_REFUSALS['no-grant-key']
+    ? 'This computer does not hold every key needed to finish. Finish on the staff lead\'s computer that holds the project\'s keys.'
+    : diagnosticAfterWrite(result.message);
+  return { ...result, message: `${recorded} This computer could not verify all the required new keys. ${REKEY_PENDING_TEXT} ${cause}` };
 }
 
 /**
@@ -1124,9 +1125,8 @@ function pendingRekeys(shared: SharedProjectHost, roster: RosterState, gate: Gat
   return { plans, cells: new Map(infos.map((info) => [info.cell, info])) };
 }
 
-/** Finishes the rekeys an interrupted removal or clearance change left (MJ-03). Nothing to do is an empty outcome. */
-async function finishPending(shared: SharedProjectHost): Promise<RekeyOutcome | MembershipResult> {
-  const { roster } = await shared.project.state();
+async function finishPending(shared: SharedProjectHost, initial?: RosterState): Promise<RekeyOutcome | MembershipResult> {
+  const roster = initial ?? (await shared.project.state()).roster;
   const problem = writerProblem(shared, roster);
   if (problem !== undefined) return problem;
   const pending = pendingRekeys(shared, roster, gateOf(shared));
@@ -1134,61 +1134,70 @@ async function finishPending(shared: SharedProjectHost): Promise<RekeyOutcome | 
   return writeRekeys(shared, pending.plans, pending.cells);
 }
 
-/** The sentence a flow puts first when it finished an earlier change before its own. */
 function finishedNote(outcome: RekeyOutcome): string {
   const count = outcome.rekeyed.length;
   if (count === 0) return '';
   return `A removal or clearance change left unfinished was finished first: ${count === 1 ? 'one part of the project was' : `${count} parts of the project were`} moved to a new key. `;
 }
 
-/** How many cells an interrupted removal or clearance change left on an old key; 0 when this device cannot change the roster now. Writes nothing. */
 export async function unfinishedRekeys(shared: SharedProjectHost): Promise<number> {
   try {
     const { roster } = await shared.project.state();
-    return writerProblem(shared, roster) === undefined ? pendingRekeys(shared, roster, gateOf(shared)).plans.length : 0;
+    if (writerProblem(shared, roster) !== undefined) return 0;
+    return roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? [...roster.accessGrants.values()].filter(({ decision }) => decision === 'pending').length :
+      pendingRekeys(shared, roster, gateOf(shared)).plans.length;
   } catch (error) {
     if (error instanceof ReplicaProjectError) return 0;
     throw error;
   }
 }
 
-/**
- * Finishes a removal, a device revocation or a lowered clearance whose rekeys were interrupted (MJ-03): every cell still on a key a removed device or
- * a member no longer cleared holds moves to a new key for the devices still cleared (D-23). Refused nothing-to-finish when nothing is left, and
- * not-a-roster-writer or roster-split as every roster change is.
- */
+/** Finish an interrupted key change from its selected managed state or the legacy roster. */
 export function finishRekeys(shared: SharedProjectHost): Promise<MembershipResult> {
   return guarded(async () => {
     const { roster } = await shared.project.state();
     const problem = writerProblem(shared, roster);
     if (problem !== undefined) return problem;
-    const pending = pendingRekeys(shared, roster, gateOf(shared));
-    if (pending.plans.length === 0) return refuse('nothing-to-finish');
-    const outcome = await writeRekeys(shared, pending.plans, pending.cells);
-    if (isResult(outcome)) return outcome;
+    const outcome = roster.requiredFrom.has(CELL_ACCESS_FEATURE) ?
+      await finishManagedRekeys(shared.project, roster, (fresh, cell) => cellsAt(fresh, shared.project.keys, headOf(fresh).position, gateOf(shared).scales)
+        .find((info) => info.cell === cell), shared.routing, () => now(shared.deps)) :
+      await finishPending(shared, roster);
+    if (isProjectRefused(outcome)) return fromProject(outcome);
+    if ('ok' in outcome) {
+      if ('message' in outcome) return outcome;
+      if (outcome.reason === 'switch-first') return refused(outcome.reason, SWITCH_FIRST_TEXT);
+      if (outcome.reason === 'change-not-applied') return refused(outcome.reason, 'The shared history changed while the key change was prepared. Try again.');
+      return Object.hasOwn(PROJECT_REFUSALS_HOST, outcome.reason) ?
+        refused(outcome.reason, PROJECT_REFUSALS_HOST[outcome.reason as keyof typeof PROJECT_REFUSALS_HOST]) : refuse(outcome.reason as MembershipRefusal);
+    }
+    if (outcome.rekeyed.length + outcome.skipped.length === 0) return refuse('nothing-to-finish');
     return done(rekeyMessage('The removal or clearance change left unfinished is now finished.', outcome), { rekeyed: outcome.rekeyed });
   });
 }
 
 export type RemoveInput = { member: string } | { member: string; writer: string };
 
-/**
- * Removes a member (member.remove) or one of a member's devices (device.revoke), then moves every cell the removed devices held to a new key wrapped
- * only to the devices still cleared (D-23). The lead cannot be removed, and the lead's last device can be revoked only by the deputy (D-09, D-48);
- * both are refused with the roster's own sentence.
- */
-export function removeFromProject(shared: SharedProjectHost, input: RemoveInput): Promise<MembershipResult> {
+export function removeFromProject(shared: SharedProjectHost, input: RemoveInput, action?: string): Promise<MembershipResult> {
   return guarded(async () => {
     const { project } = shared;
-    const finished = await finishPending(shared);
+    const initial = (await project.state()).roster;
+    if (initial.requiredFrom.has(CELL_ACCESS_FEATURE)) {
+      const result = await appendManagedWithdrawal(project, initial, input, now(shared.deps), action);
+      if (isProjectRefused(result)) return fromProject(result);
+      if (!result.ok) return refused(result.reason, result.reason === 'no-grant-key' ? MEMBERSHIP_REFUSALS['no-grant-key'] :
+        result.reason === 'change-not-applied' ? 'The shared history changed while this removal was prepared. Try again.' : PROJECT_REFUSALS_HOST[result.reason]);
+      return done('Access was withdrawn. Parts awaiting a new key will stay read only.', { member: input.member, ...('writer' in input ? { writer: input.writer } : {}) });
+    }
+    const finished = await finishPending(shared, initial);
     if (isResult(finished)) return finished;
     const { roster } = await project.state();
     const problem = writerProblem(shared, roster);
     if (problem !== undefined) return problem;
     const head = headOf(roster);
     const record = memberAt(roster.members, input.member, head.position);
-    // Removing again the member whose removal was left unfinished finishes it, and says so.
-    if (record === undefined && finished.rekeyed.length > 0) return done(rekeyMessage('The removal or clearance change left unfinished is now finished.', finished), { rekeyed: finished.rekeyed });
+    // Earlier recovery may have been for a different member. Report the recovery separately.
+    if (record === undefined && finished.rekeyed.length > 0) return done(
+      'The requested member is already absent from the project. An earlier key change left unfinished is now finished.', { rekeyed: finished.rekeyed });
     if (record === undefined) return refuse('member-unknown');
     const lead = leadAt(roster, head.position);
     const gate = gateOf(shared);
@@ -1213,10 +1222,10 @@ export function removeFromProject(shared: SharedProjectHost, input: RemoveInput)
     }
     const planned = rekeyPlans(shared, roster, { kind, writers }, { without: new Set(writers) }, gate);
     if (isResult(planned)) return planned;
-    const written = await append(shared, entry.kind, entry.data);
+    const written = await append(shared, entry.kind, entry.data, undefined, 'report-saved');
     if (isResult(written)) return written;
-    const outcome = await writeRekeys(shared, planned.plans, planned.cells);
-    if (isResult(outcome)) return outcome;
+    const outcome = await guarded(() => writeRekeys(shared, planned.plans, planned.cells));
+    if (isResult(outcome)) return withPendingRekeyMessage(outcome, 'The removal was recorded.');
     const first = 'writer' in input ? `That device of ${record.name} was removed from the project.` : `${record.name} was removed from the project.`;
     return done(`${finishedNote(finished)}${rekeyMessage(first, outcome)}`, { rekeyed: [...finished.rekeyed, ...outcome.rekeyed], member: input.member, ...('writer' in input ? { writer: input.writer } : {}) });
   });
@@ -1224,16 +1233,14 @@ export function removeFromProject(shared: SharedProjectHost, input: RemoveInput)
 
 export interface UpdateMemberInput { member: string; name?: string; seat?: string; roles?: string[]; clearance?: unknown; agentSeats?: string[] }
 
-/**
- * Changes a member's name, seat, roles, clearance or agent seats (member.update). A lowered clearance moves every cell the member is no longer cleared
- * for to a new key without the member's devices (D-23); a raised one gives those devices every epoch of the cells they are newly cleared for (D-45).
- */
 export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput): Promise<MembershipResult> {
   return guarded(async () => {
     const { project } = shared;
-    const finished = await finishPending(shared);
+    const initial = (await project.state()).roster;
+    const managed = initial.requiredFrom.has(CELL_ACCESS_FEATURE);
+    const finished = managed ? { rekeyed: [], skipped: [] } : await finishPending(shared, initial);
     if (isResult(finished)) return finished;
-    const { roster } = await project.state();
+    const roster = managed ? initial : (await project.state()).roster;
     const problem = writerProblem(shared, roster);
     if (problem !== undefined) return problem;
     const head = headOf(roster);
@@ -1246,6 +1253,18 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
     const gate = gateOf(shared);
     const devices = devicesOfMemberAt(roster.members, input.member, head.position).filter((device) => device.kind === 'person');
     const changesClearance = input.clearance !== undefined;
+    if (managed && changesClearance) {
+      const result = await appendManagedClearance(project, roster, data, { context: gate.context,
+        cells: cellsAt(roster, project.keys, head.position, gate.scales),
+        cleared: (value, info, held, privileged) => clearedFor(value, info, held, gate, privileged) });
+      if (isProjectRefused(result)) return fromProject(result);
+      if (!result.ok) {
+        if (result.reason === 'clearance-grants-pending') return refused(result.reason, 'This clearance change would give access to more parts of the project. It needs managed key delivery before it can apply.');
+        if (result.reason === 'change-not-applied') return refused(result.reason, 'The shared history changed while this change was prepared. Try again.');
+        return refused(result.reason, result.reason === 'no-grant-key' ? MEMBERSHIP_REFUSALS['no-grant-key'] : PROJECT_REFUSALS_HOST[result.reason]);
+      }
+      return done('The clearance changed. Parts awaiting a new key will stay read only.', { member: input.member, rekeyed: [], granted: [] });
+    }
     const planned = changesClearance
       ? rekeyPlans(shared, roster, { kind: 'clearance-lowered', writers: devices.map((device) => device.writer) }, { clearance: { member: input.member, value: input.clearance } }, gate)
       : { plans: [] as RekeyPlan[], cells: new Map<string, CellInfo>() };
@@ -1256,24 +1275,32 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
     // The cells the member is newly cleared for, and their keys, are checked before anything is written too.
     const raisedCheck = changesClearance ? grantPlans(shared, roster, { clearance: input.clearance }, cellsAt(roster, project.keys, head.position, gate.scales), gate, head.position) : [];
     if (isResult(raisedCheck)) return raisedCheck;
-    const written = await append(shared, 'member.update', data);
+    const written = await append(shared, 'member.update', data, undefined, changesClearance && !managed ? 'report-saved' : undefined);
     if (isResult(written)) return written;
+    const needsRotation = planned.plans.some((plan) => plan.recipients.length > 0);
     const granted = new Set<string>();
-    if (changesClearance) {
-      const updated = headOf(written.roster);
-      const now2 = memberAt(written.roster.members, input.member, updated.position) as MemberRecord;
-      const cells = cellsAt(written.roster, project.keys, updated.position, gate.scales);
-      for (const device of devices) {
-        const holding = (cell: string): boolean => (granteesAt(written.roster.cells, cell, updated.position, () => true) ?? []).includes(device.writer);
-        const plans = grantPlans(shared, written.roster, { clearance: now2.clearance }, cells, gate, updated.position, holding);
-        if (isResult(plans)) return plans;
-        const stored = await writeGrants(shared, written.roster, plans, { writer: device.writer }, written.hash);
-        if (stored !== undefined) return stored;
-        for (const plan of plans) granted.add(plan.cell);
+    const outcome = await guarded(async () => {
+      if (changesClearance) {
+        const updated = headOf(written.roster);
+        const now2 = memberAt(written.roster.members, input.member, updated.position) as MemberRecord;
+        const cells = cellsAt(written.roster, project.keys, updated.position, gate.scales);
+        for (const device of devices) {
+          const holding = (cell: string): boolean => (granteesAt(written.roster.cells, cell, updated.position, () => true) ?? []).includes(device.writer);
+          const plans = grantPlans(shared, written.roster, { clearance: now2.clearance }, cells, gate, updated.position, holding);
+          if (isResult(plans)) return plans;
+          const stored = await writeGrants(shared, written.roster, plans, { writer: device.writer }, written.hash);
+          if (stored !== undefined) return stored;
+          for (const plan of plans) granted.add(plan.cell);
+        }
       }
+      return writeRekeys(shared, planned.plans, planned.cells);
+    });
+    if (isResult(outcome)) {
+      if (!changesClearance) return outcome;
+      const recorded = 'The clearance change was recorded.';
+      if (needsRotation) return withPendingRekeyMessage(outcome, recorded);
+      return { ...outcome, message: `${recorded} This computer could not finish giving keys for the newly cleared parts. ${diagnosticAfterWrite(outcome.message)}` };
     }
-    const outcome = await writeRekeys(shared, planned.plans, planned.cells);
-    if (isResult(outcome)) return outcome;
     const first = `${input.name ?? record.name} was changed.`;
     const gave = granted.size === 0 ? '' : ` ${granted.size === 1 ? 'One part of the project was' : `${granted.size} parts of the project were`} shared with them.`;
     const message = outcome.rekeyed.length > 0 || outcome.skipped.length > 0 ? rekeyMessage(`${first}${gave}`, outcome) : `${first}${gave}`;
@@ -1336,58 +1363,7 @@ function branchSummary(kind: string, data: unknown, nameOf: (member: string) => 
   }
 }
 
-// The longest line the store writes (store.ts): a header, the longest inline body as base64url, and room for the JSON around them. A longer line is
-// not an entry, and it is skipped without being held whole.
-const ROSTER_LINE_MAX_BYTES = HEADER_MAX_BYTES + Math.ceil(((INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD + 3) * 4) / 3) + 1024;
-const ROSTER_READ_CHUNK = 64 * 1024;
 const WRITER_LINE_FILE = /^[0-9a-f]{64}\.jsonl$/;
-
-/**
- * Calls `take` with each whole line of one line file, read in chunks, until it returns true. A line longer than ROSTER_LINE_MAX_BYTES is skipped and
- * bytes after the last newline are left, as the store does. A file that is a link or not a plain file, or cannot be read, gives no lines.
- */
-async function eachLine(file: string, take: (line: string) => boolean): Promise<void> {
-  let handle: FileHandle;
-  try {
-    if (!(await lstat(file)).isFile()) return;
-    handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-  } catch {
-    return;
-  }
-  try {
-    if (!(await handle.stat()).isFile()) return;
-    const chunk = Buffer.allocUnsafe(ROSTER_READ_CHUNK);
-    let pending: Buffer[] = [];
-    let pendingLength = 0;
-    let overlong = false;
-    let position = 0;
-    for (;;) {
-      const { bytesRead } = await handle.read(chunk, 0, ROSTER_READ_CHUNK, position);
-      if (bytesRead === 0) return;
-      position += bytesRead;
-      let start = 0;
-      for (;;) {
-        const newline = chunk.indexOf(10, start);
-        if (newline === -1 || newline >= bytesRead) break;
-        const whole = !overlong && pendingLength + (newline - start) <= ROSTER_LINE_MAX_BYTES;
-        const line = whole ? Buffer.concat([...pending, chunk.subarray(start, newline)]).toString('utf8') : undefined;
-        pending = [];
-        pendingLength = 0;
-        overlong = false;
-        start = newline + 1;
-        if (line !== undefined && take(line)) return;
-      }
-      if (start < bytesRead && !overlong) {
-        pendingLength += bytesRead - start;
-        if (pendingLength > ROSTER_LINE_MAX_BYTES) { overlong = true; pending = []; } else pending.push(Buffer.from(chunk.subarray(start, bytesRead)));
-      }
-    }
-  } catch {
-    return;
-  } finally {
-    await handle.close();
-  }
-}
 
 /**
  * The roster entries with the given hashes, read straight from the store's line files of the base stream, streams/<project id>/<writer>.jsonl
@@ -1416,7 +1392,7 @@ async function branchEntries(project: ReplicaProject, hashes: readonly string[])
     return found;
   }
   for (const name of names) {
-    await eachLine(path.join(folder, name), (line) => {
+    await eachRosterLine(path.join(folder, name), (line) => {
       let entry: SealedEntry | undefined;
       try {
         entry = parseSealed(JSON.parse(line) as unknown);

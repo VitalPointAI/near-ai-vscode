@@ -278,6 +278,7 @@ function stagedRule(data: Record<string, unknown>, path: string): string | undef
 // - invite.void: closes an open invite (D-17).
 // - roster.require (Phase 33 POST-01, D-04): the features the project requires; written by a lead device, the required set only grows.
 // - hub.readmit (Phase 33 D-42): a lead device trusts an admitted hub again with the pin the lead compared; fromCheckpoint names a restored checkpoint.
+const ACCESS_FIELDS = { accessRevision: hashCheck, accessRoot: hashCheck };
 const SHAPES: Readonly<Record<string, Shape>> = {
   'member.invite': { required: { invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, expiresAt: timeCheck, secretHash: hashCheck, rosterPrev: hashCheck }, optional: { forMember: slugCheck } },
   // Phase 33.1 (D-16, D-39, Q6): the member's own did and the credential evidence; a declared clearance never stands beside them, and a member.admit
@@ -288,21 +289,22 @@ const SHAPES: Readonly<Record<string, Shape>> = {
   },
   'member.update': {
     required: { member: slugCheck, rosterPrev: hashCheck },
-    optional: { name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, agentSeats: agentSeatsProblem, did: didCheck, evidence: evidenceCheck, status: statusCheck },
+    optional: { name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, agentSeats: agentSeatsProblem, did: didCheck, evidence: evidenceCheck, status: statusCheck, ...ACCESS_FIELDS },
     atLeastOneOf: ['name', 'seat', 'roles', 'clearance', 'agentSeats', 'did', 'evidence'], rule: memberSlotsRule
   },
-  'member.remove': { required: { member: slugCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck } },
+  'member.remove': { required: { member: slugCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck, ...ACCESS_FIELDS } },
   'device.add': { required: { member: slugCheck, device: deviceProblem, rosterPrev: hashCheck }, optional: { invite: slugCheck } },
-  'device.rotate': { required: { member: slugCheck, from: hashCheck, device: deviceProblem, rosterPrev: hashCheck } },
-  'device.revoke': { required: { member: slugCheck, writer: hashCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck } },
+  'device.rotate': { required: { member: slugCheck, from: hashCheck, device: deviceProblem, rosterPrev: hashCheck }, optional: ACCESS_FIELDS },
+  'device.revoke': { required: { member: slugCheck, writer: hashCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck, ...ACCESS_FIELDS } },
   'device.quarantine': { required: { writer: hashCheck, stream: streamCheck, seq: countCheck, rosterPrev: hashCheck } },
   'device.release': { required: { writer: hashCheck, stream: streamCheck, seq: countCheck, branch: hashCheck, rosterPrev: hashCheck } },
   'hub.admit': { required: { hub: slugCheck, device: deviceProblem, certPin: hashCheck, ceiling: clearanceProblem, rosterPrev: hashCheck } },
   'hub.grant': { required: { hub: slugCheck, cell: streamCheck, rosterPrev: hashCheck } },
-  'hub.revoke': { required: { hub: slugCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck } },
-  'cell.create': { required: { cell: streamCheck, rosterPrev: hashCheck }, optional: { epoch: epochCheck, grant: hashCheck } },
+  'hub.revoke': { required: { hub: slugCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck, ...ACCESS_FIELDS } },
+  'cell.create': { required: { cell: streamCheck, rosterPrev: hashCheck }, optional: { epoch: epochCheck, grant: hashCheck, ...ACCESS_FIELDS } },
   // basis (D-40) on cell.rekey is accepted only once positions@1 is required (33.1-03 gates it); no access decision reads it.
-  'cell.rekey': { required: { cell: streamCheck, epoch: epochCheck, reason: oneOf(CELL_REKEY_REASONS), rosterPrev: hashCheck }, optional: { grant: hashCheck, basis: basisProblem } },
+  'cell.rekey': { required: { cell: streamCheck, epoch: epochCheck, reason: oneOf(CELL_REKEY_REASONS), rosterPrev: hashCheck }, optional: { grant: hashCheck, basis: basisProblem, ...ACCESS_FIELDS } },
+  'cell.access.commit': { required: { rosterPrev: hashCheck, ...ACCESS_FIELDS } },
   'lead.handover': { required: { to: slugCheck, reason: oneOf(HANDOVER_REASONS), rosterPrev: hashCheck } },
   'roster.choose': { required: { chosen: hashCheck, rosterPrev: hashCheck } },
   'deputy.name': { required: { member: slugCheck, rosterPrev: hashCheck } },

@@ -18,6 +18,8 @@ export const KNOWN_REPLICA_FEATURES: readonly string[] = Object.freeze(['cells@1
 
 /** Post-quantum cell keys (33.2 D-05): known only where the runtime passes cell-wrap/v2's start-up probe (probeWrapV2). */
 export const WRAP_V2_FEATURE = 'wrap@2';
+// Implemented in stages. Hosts do not announce this capability until managed grants and ingress cutover are available.
+export const CELL_ACCESS_FEATURE = 'cell-access@1';
 
 /**
  * The features this build folds on this runtime: KNOWN_REPLICA_FEATURES, plus wrap@2 when the probe passed. The caller runs probeWrapV2 once at

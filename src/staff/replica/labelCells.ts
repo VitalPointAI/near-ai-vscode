@@ -24,6 +24,7 @@ import { grantHash, newEpochKey, sealLabel } from '../../domain/replica/cellKeys
 import { earlierEpochGrants, wrapsFor } from '../../domain/replica/grantPages';
 import { SEALED_OVERHEAD, sealBlob } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
+import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
 import { kindFamily } from '../../domain/replica/kinds';
 import { MAX_STATE_BYTES } from '../../domain/replica/kindSchemas/doc';
 import {
@@ -39,6 +40,7 @@ import type { ProductTextOutput } from '../../domain/replica/textFold';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { MEMBERSHIP_REFUSALS, append, cellOrderHook, clearedDevices, clearedFor, gateOf, headOf, writerProblem } from './membership';
 import type { CellInfo, Gate, SharedProjectHost } from './membership';
+import { giveManagedSupplemental } from './managedSupplemental';
 import { isProjectRefused } from './replicaProject';
 import type { ReplicaProject } from './replicaProject';
 import { SWITCH_FIRST_TEXT, formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
@@ -163,6 +165,11 @@ async function giveCell(shared: SharedProjectHost, roster: RosterState, cell: st
   const { project } = shared;
   const writers = clearedDevices(roster, info, position, gate).filter((writer) => writer !== project.deviceWriter && !skip.has(writer)
     && deviceAt(roster.members, writer, position)?.kind === 'person');
+  if (roster.requiredFrom.has(CELL_ACCESS_FEATURE)) {
+    return epochs.length === 1 ?
+      giveManagedSupplemental(project, roster, info, writers, shared.routing, new Date(gate.context.now)) :
+      { granted: [], waiting: writers };
+  }
   const formats = epochs.map((item) => ({ ...item, format: formatFor(roster, info, item.foundedAt, shared.routing) }));
   if (formats.some((item) => item.format === 'switch-first')) return { granted: [], waiting: writers };
   const granted: string[] = [];

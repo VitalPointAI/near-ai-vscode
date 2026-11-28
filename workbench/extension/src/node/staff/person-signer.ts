@@ -46,11 +46,13 @@ export interface PersonSigner {
   /** The raw Ed25519 public key, base64url. */
   readonly publicKey: string;
   sign(bytes: Buffer, options?: PersonSignOptions): Promise<string | PersonSignRefused>;
+  canSignAction?(action: string, payload: Uint8Array): boolean;
 }
 
 /** What the signer asks before it signs for an action: may this action id sign now? */
 export interface ActionGate {
   authorize(action: string): boolean;
+  authorizePayload?(action: string, payload: Uint8Array): boolean;
 }
 
 /** One value the person confirms, labelled. A date is formatted by the backend; every value is shown quoted. */
@@ -77,12 +79,16 @@ export interface StepUpToken {
 }
 
 export interface PendingActions extends ActionGate {
+  authorizePayload(action: string, payload: Uint8Array): boolean;
   /** A new pending action: the request id goes to the browser, the nonce into the step-up address only. */
-  beginAction(payload: Uint8Array, summary: ActionSummary): { requestId: string; nonce: string };
+  beginAction(payload: Uint8Array, summary: ActionSummary, attachment?: unknown): { requestId: string; nonce: string };
   /** The summary of a pending, unexpired action, for its page; undefined otherwise. */
   summaryOf(nonce: string): ActionSummary | undefined;
   /** Called only by the return route. True when the token was bound to this nonce's action. */
   bindStepUp(nonce: string, token: StepUpToken): boolean;
+  /** Access a server-only attachment while a review is pending or bound. */
+  reviewAttachment(requestId: string): unknown;
+  cancelReview(requestId: string): void;
   /** The action id, once, for a bound action and the same payload; undefined otherwise. */
   resumeAction(requestId: string, payload: Uint8Array): string | undefined;
 }
@@ -108,6 +114,7 @@ interface ActionRecord {
   readonly payload: string;
   readonly summary: ActionSummary;
   readonly begunAt: number;
+  attachment?: unknown;
   state: ActionState;
   authTime?: number;
   boundAt?: number;
@@ -136,11 +143,16 @@ export function createPendingActions(options: PendingActionOptions): PendingActi
     return undefined;
   };
 
+  const resumed = (action: string): ActionRecord | undefined => {
+    const record = find((item) => item.id === action && item.state === 'resumed');
+    return record !== undefined && record.authTime === options.latestAuthTime() ? record : undefined;
+  };
+
   return {
-    beginAction(payload, summary) {
+    beginAction(payload, summary, attachment) {
       prune();
       for (const [id, record] of actions) if (record.state !== 'resumed') actions.delete(id);
-      const record: ActionRecord = { id: randomId(), requestId: randomId(), nonce: randomId(), payload: payloadHash(payload), summary, begunAt: clock.now(), state: 'pending' };
+      const record: ActionRecord = { id: randomId(), requestId: randomId(), nonce: randomId(), payload: payloadHash(payload), summary, begunAt: clock.now(), state: 'pending', attachment };
       actions.set(record.id, record);
       return { requestId: record.requestId, nonce: record.nonce };
     },
@@ -159,16 +171,22 @@ export function createPendingActions(options: PendingActionOptions): PendingActi
       record.boundAt = clock.now();
       return true;
     },
+    reviewAttachment(requestId) {
+      return find((record) => record.requestId === requestId && record.state !== 'resumed')?.attachment;
+    },
+    cancelReview(requestId) {
+      const record = find((item) => item.requestId === requestId && item.state !== 'resumed');
+      if (record !== undefined) actions.delete(record.id);
+    },
     resumeAction(requestId, payload) {
       const record = find((item) => item.requestId === requestId && item.state === 'bound');
       if (record === undefined || record.payload !== payloadHash(payload)) return undefined;
       record.state = 'resumed';
+      record.attachment = undefined;
       return record.id;
     },
-    authorize(action) {
-      const record = find((item) => item.id === action && item.state === 'resumed');
-      return record !== undefined && record.authTime === options.latestAuthTime();
-    },
+    authorize: (action) => resumed(action) !== undefined,
+    authorizePayload: (action, payload) => resumed(action)?.payload === payloadHash(payload),
   };
 }
 
@@ -195,6 +213,7 @@ export const ACTION_STEP_UP_TEXT = {
 
 /** One fixed action line per kind. A kind not listed gets ACTION_STEP_UP_TEXT.defaultLine. */
 export const ACTION_LINES: Readonly<Record<string, string>> = Object.freeze({
+  'member.remove': 'You are about to remove a person from this shared work.',
   'position.create': 'You are about to create a position.',
   'position.update': 'You are about to change a position.',
   'position.disestablish': 'You are about to close a position.',
@@ -208,6 +227,7 @@ export const ACTION_LINES: Readonly<Record<string, string>> = Object.freeze({
   'posting.return': 'You are about to return a person to their own position.',
   'posting.end': 'You are about to end a person\'s time in a position.',
   'posting.cancel': 'You are about to cancel a placement.',
+  'cell.rekey.finish': 'You are about to finish changing the key for this part of your shared work.',
   'cell.rekey.staged': 'You are about to prepare a key change.',
   'project.mode': 'You are about to change how this shared work is run.',
 });
@@ -264,5 +284,5 @@ export function personSigner(keyService: Pick<KeyService, 'sign'>, publicKey: st
     return matches ? signature.toString('base64url') : { refused: PERSON_SIGNER_TEXT.mismatch };
   }
 
-  return { fingerprint: signerFingerprint(publicKey), publicKey, sign };
+  return { fingerprint: signerFingerprint(publicKey), publicKey, sign, canSignAction: (action, payload) => actions?.authorizePayload?.(action, payload) === true };
 }

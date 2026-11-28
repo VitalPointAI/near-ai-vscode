@@ -15,6 +15,7 @@ import { staticRosterView } from '../domain/replica/rosterView';
 import type { RosterView } from '../domain/replica/rosterView';
 import { FULL_REPLAY_SENTENCE, RESTORING_SENTENCE, syncOnce } from '../staff/replica/hubSync';
 import type { HubMemory, SyncLocal, SyncTransport } from '../staff/replica/hubSync';
+import type { ManagedHandoff } from '../staff/replica/managedGrantDelivery';
 import { HubTransportError } from '../staff/replica/hubTransport';
 import type { AppendAnswer, AppendBatch, EntriesPage, HubHeads } from '../staff/replica/hubTransport';
 import { epochKey, fixedSigner, streamId } from './helpers/replicaWorld';
@@ -153,6 +154,51 @@ function scripted(script: Script, hub = HUB.writer): SyncTransport & { calls: st
 
 const own = (): SealedEntry[] => writerLog(2, LEAD);
 const ok = (batch: AppendBatch): AppendAnswer => ({ project: PROJECT, accepted: batch.entries.map((entry) => entryHash(entry.header)), refused: [], grantsRefused: [], rosterHead: ROSTER, blobsPut: false });
+
+test('normal sync passes only opaque managed addresses to an explicitly configured private route', async () => {
+  const outgoing = 'a'.repeat(64);
+  const incoming = 'b'.repeat(64);
+  const descriptor = { cell: PROJECT, recipient: WRITER.writer, info: { base: true } };
+  const uploaded: unknown[] = [];
+  const received: unknown[] = [];
+  const secretHandoffs: string[] = [];
+  const local = Object.assign(memoryLocal(rosterWith()), {
+    managed: {
+      seal: async (input: ManagedHandoff) => {
+        assert.deepEqual(input, descriptor);
+        return { handle: outgoing, packet: 'outgoing ciphertext' };
+      },
+      stage: async (wrapped: unknown) => {
+        received.push(wrapped);
+        return true;
+      }
+    }
+  });
+  const options = { now: () => NOW, managed: {
+    offers: async () => [descriptor],
+    pending: async () => [incoming, incoming, 'invalid-address'],
+    published: async (_input: ManagedHandoff, handle: string) => { secretHandoffs.push(handle); },
+    accepted: async (handle: string) => { secretHandoffs.push(handle); }
+  } };
+  const legacy = scripted({});
+  const waiting = await syncOnce(legacy, local, memoryOf(), options);
+  assert.equal(Reflect.get(waiting, 'managed'), 'waiting');
+  assert.deepEqual(received, []);
+  assert.deepEqual(secretHandoffs, []);
+
+  const route = {
+    put: async (...opaque: unknown[]) => { uploaded.push(opaque); return true; },
+    get: async (...opaque: unknown[]) => {
+      assert.deepEqual(opaque, [incoming]);
+      return 'incoming ciphertext';
+    }
+  };
+  const online = await syncOnce(Object.assign(scripted({}), { managedRoute: route }), local, memoryOf(), options);
+  assert.equal(Reflect.get(online, 'managed'), 'complete');
+  assert.deepEqual(uploaded, [[outgoing, 'outgoing ciphertext']]);
+  assert.deepEqual(received, [{ handle: incoming, packet: 'incoming ciphertext' }]);
+  assert.deepEqual(secretHandoffs.sort(), [outgoing, incoming].sort());
+});
 
 // ---- restoring, needs-update, blob-missing ---------------------------------------------------------------------------------------------------
 

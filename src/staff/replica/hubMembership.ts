@@ -25,7 +25,8 @@
 // secret (reviewJoinRequest, admitJoinRequest) and the six words before anyone is admitted. When the hub cannot be told or reached, everything still
 // works by file, and the sentence says so.
 import { parseClearance } from '../../domain/gate/labels';
-import { REKEY_KEEP_TEXT } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, REKEY_VERIFIED_TEXT } from '../../domain/replica/cellKeys';
+import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
 import { earlierEpochGrants } from '../../domain/replica/grantPages';
 import { SWITCH_FIRST_TEXT, formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
 import type { WrapCell } from './wrapPlan';
@@ -38,13 +39,13 @@ import type { RosterState } from '../../domain/replica/roster';
 import type { FoldResult } from '../../domain/replica/fold';
 import { clearanceProblem } from '../../domain/replica/kindSchemas/roster';
 import { baseCellHeldProducts, readLegacyCellLabel } from '../../domain/replica/productCells';
-import { epochsAt } from '../../domain/replica/rosterCells';
+import { epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, devicesOfMemberAt, hubAt } from '../../domain/replica/rosterMembers';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
 import { term } from '../../domain/org/terms';
 import { isRecord } from '../../domain/team/validate';
 import { multiUserNoticeLines } from '../../domain/staff/multiUser';
-import { MEMBERSHIP_REFUSALS, append, cellsAt, clearedFor, finishRekeys, gateOf, headOf, inviteToProject, unfinishedRekeys, writerProblem } from './membership';
+import { MEMBERSHIP_REFUSALS, append, cellsAt, clearedFor, finishRekeys, gateOf, headOf, inviteToProject, unfinishedRekeys, withPendingRekeyMessage, writerProblem } from './membership';
 import type { Gate, InviteInput, MembershipResult, SharedProjectHost } from './membership';
 import { HubTransport, HubTransportError, enrolmentRequest } from './hubTransport';
 import type { HubTransportOptions } from './hubTransport';
@@ -73,7 +74,7 @@ export const HUB_MEMBERSHIP_REFUSALS = {
   'no-hub': 'This project has no hub admitted, so nothing was changed. Admit your organization\'s hub first.',
   'hub-not-named': 'This project has more than one hub admitted, so say which hub the change is for. Nothing was changed.',
   'hub-unknown': 'That hub is not in this project\'s roster, so nothing was changed. Check the hub and try again.',
-  'hub-revoked': 'That hub was removed from the project, so it is given nothing more and is never admitted again. Nothing was changed.',
+  'hub-revoked': 'That hub was removed from the project and cannot be admitted again. Nothing was changed.',
   'hub-already-admitted': 'This hub is already admitted to the project and holds the roster, so nothing was changed.',
   'hub-file-differs': 'This hub is already in the project with another key or certificate than this hub file names, so nothing was changed. Ask the hub operator which hub file is current.',
   'ceiling-invalid': 'The highest clearance chosen for the hub is not one this project\'s scales know, so the hub was not admitted. Choose a clearance from the project\'s scales.',
@@ -358,8 +359,15 @@ export function grantCellToHub(shared: SharedProjectHost, input: GrantCellToHubI
 
 /** What a revoke says: who was removed, how many cells moved to a new key, and the agreed words on what the hub keeps. */
 function revokeMessage(first: string, rekeyed: readonly string[]): string {
-  const moved = rekeyed.length === 0 ? '' : ` ${rekeyed.length === 1 ? 'One part of the project was' : `${rekeyed.length} parts of the project were`} moved to a new key.`;
+  const moved = rekeyed.length === 0 ? '' : ` ${rekeyed.length === 1 ? 'One part of the project was' : `${rekeyed.length} parts of the project were`} moved to a new key. ${REKEY_VERIFIED_TEXT}`;
   return `${first}${moved} ${REKEY_KEEP_TEXT}`;
+}
+
+/** A broad recovery can finish unrelated changes. Only count cells whose current epoch the named hub held before recovery. */
+function cellsHeldByHub(roster: RosterState, writer: string | undefined): Set<string> {
+  const position = headOf(roster).position;
+  return new Set(writer === undefined ? [] : [...roster.cells.cells.keys()].filter((cell) =>
+    granteesAt(roster.cells, cell, position, () => true)?.includes(writer) === true));
 }
 
 /**
@@ -380,9 +388,16 @@ export function revokeHub(shared: SharedProjectHost, input: { hub?: string } = {
     if (isResult(hub)) {
       // The hub named was revoked already: finish what its revoke left, if anything.
       if (hub.reason !== 'hub-revoked' || input.hub === undefined || await unfinishedRekeys(shared) === 0) return hub;
+      const revokedAt = roster.members.hubs.get(input.hub)?.at(-1)?.until;
+      const writer = revokedAt === undefined ? undefined : devicesOfMemberAt(roster.members, input.hub, revokedAt - 1).find((device) => device.kind === 'hub')?.writer;
+      const held = cellsHeldByHub(roster, writer);
       const finished = await finishRekeys(shared);
-      if (!finished.ok) return finished;
-      return done(revokeMessage(`The removal of the hub (${input.hub}) left unfinished is now finished.`, finished.rekeyed ?? []), { rekeyed: finished.rekeyed ?? [], hub: input.hub });
+      if (!finished.ok) return held.size > 0 && !roster.requiredFrom.has(CELL_ACCESS_FEATURE)
+        ? withPendingRekeyMessage(finished, `The hub (${input.hub}) was already removed.`) : finished;
+      const rekeyed = finished.rekeyed ?? [];
+      const hubRekeys = rekeyed.filter((cell) => held.has(cell));
+      const first = hubRekeys.length > 0 ? `The removal of the hub (${input.hub}) left unfinished is now finished.` : `The hub (${input.hub}) was already removed.`;
+      return done(revokeMessage(first, hubRekeys), { rekeyed, hub: input.hub });
     }
     const gate = gateOf(shared);
     const infos = cellsAt(roster, project.keys, at.position, gate.scales);
@@ -397,13 +412,17 @@ export function revokeHub(shared: SharedProjectHost, input: { hub?: string } = {
       if (!finished.ok) return finished;
       earlier = finished.rekeyed ?? [];
     }
-    const written = await append(shared, 'hub.revoke', { hub: hub.hub });
+    const written = await append(shared, 'hub.revoke', { hub: hub.hub }, undefined,
+      roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? undefined : 'report-saved');
     if (isResult(written)) return written;
+    const held = cellsHeldByHub(written.roster, hub.writer);
     const finished = await finishRekeys(shared);
-    if (!finished.ok && finished.reason !== 'nothing-to-finish') return finished;
+    if (!finished.ok && finished.reason !== 'nothing-to-finish') return held.size > 0 && !written.roster.requiredFrom.has(CELL_ACCESS_FEATURE)
+      ? withPendingRekeyMessage(finished, `The hub (${hub.hub}) was removed.`) : finished;
     const rekeyed = finished.ok ? finished.rekeyed ?? [] : [];
+    const hubRekeys = rekeyed.filter((cell) => held.has(cell));
     const note = earlier.length === 0 ? '' : `A removal or clearance change left unfinished was finished first: ${earlier.length === 1 ? 'one part of the project was' : `${earlier.length} parts of the project were`} moved to a new key. `;
-    return done(`${note}${revokeMessage(`Your organization's hub (${hub.hub}) was removed from the project, and it signs nothing for the project from now on.`, rekeyed)}`, {
+    return done(`${note}${revokeMessage(`Your organization's hub (${hub.hub}) was removed from the project, and it signs nothing for the project from now on.`, hubRekeys)}`, {
       rekeyed: [...earlier, ...rekeyed], hub: hub.hub, writer: hub.writer
     });
   });

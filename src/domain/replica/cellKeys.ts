@@ -191,7 +191,7 @@ export type GrantRead =
   | { ok: true; grant: CellGrant; hash: string; signer: { publicKey: string; writer: string } }
   | { ok: false; reason: GrantRefusal };
 
-function grantProblem(value: unknown): string | undefined {
+export function grantProblem(value: unknown): string | undefined {
   if (!isRecord(value)) return 'not an object';
   const keys = Object.keys(value);
   const paged = keys.includes('pages');
@@ -287,8 +287,10 @@ export function openLabel(epochKey: Buffer, cell: string, epoch: number, sealed:
 
 // ---- rekey planning (D-23) ----
 
-// What the lead is told, in the command result and the confirmation, whenever a rekey leaves someone out (D-23, DESIGN 8.3).
-export const REKEY_KEEP_TEXT = 'They keep what they already received. They will not receive anything new.';
+// What the lead is told about retained work and the pending or verified key change (D-23, DESIGN 8.3).
+export const REKEY_KEEP_TEXT = 'They keep what they already received.';
+export const REKEY_PENDING_TEXT = 'Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.';
+export const REKEY_VERIFIED_TEXT = 'Devices excluded from the new keys cannot read work encrypted with those keys.';
 
 export type RekeyReason = (typeof CELL_REKEY_REASONS)[number];
 
