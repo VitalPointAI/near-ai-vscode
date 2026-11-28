@@ -1499,10 +1499,16 @@ test('managed clearance reduction commits decisions using the lead’s custom sc
     assert.equal(at.hash, pending.hash);
     assert.deepEqual(memberAt(at.roster.members, reduced.member, at.position)?.clearance, downgraded);
     assert.ok(deviceAt(at.roster.members, reduced.writer, at.position));
+    const evidenceDir = path.join(peer.at.root, REPLICA_DIR, 'access-evidence');
+    const priorProofs = readdirSync(evidenceDir).flatMap((name) => {
+      const stored: unknown = JSON.parse(readFileSync(path.join(evidenceDir, name), 'utf8'));
+      return storedAccessProofs(stored, seed.hash);
+    });
     for (const baseline of baselines) {
       const { id, key, proof } = baseline;
       assert.equal(epochAt(at.roster.cells, id, at.position), 1);
       assert.ok(replica.keys.epochKey(id, 1)?.equals(key));
+      assert.ok(priorProofs.some((candidate) => canonicalBytes(candidate).equals(canonicalBytes(proof))));
       assert.equal(managedWriteAllowed(at.roster, id, 1, peer.writer, at.position, NOW, proof), false);
       const contentBlob = sealBlob(key, id, 1, Buffer.from('fictional pending draft'));
       const refused = await replica.appendOwn('doc.client', data, { stream: id, contentBlob });
