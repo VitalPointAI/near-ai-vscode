@@ -17,9 +17,20 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 487);
-  assert.equal(poam.length, 396);
-  assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
+  // Ratchet floor prevents accidental mass deletion without forcing exact-count merge conflicts on parallel branches.
+  assert.ok(gaps.length >= 487, `expected at least 487 gaps, found ${gaps.length}`);
+  assert.ok(poam.length >= 396, `expected at least 396 POA&M items, found ${poam.length}`);
+  const gapIds = new Set(gaps.map((gap) => gap.id));
+  const poamIds = new Set(poam.map((item) => item.id));
+  assert.equal(gapIds.size, gaps.length, 'gap ids must be unique');
+  assert.equal(poamIds.size, poam.length, 'POA&M ids must be unique');
+  for (const gap of gaps) {
+    assert.ok(gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined), gap.id);
+    if (gap.poam !== undefined) assert.ok(poamIds.has(gap.poam), `${gap.id} references missing POA&M ${gap.poam}`);
+  }
+  for (const item of poam) {
+    assert.ok(gapIds.has(item.gap), `POA&M ${item.id} references missing gap ${item.gap}`);
+  }
 });
 // Every gap names the lowest level where it matters and whether it blocks production (the road to production page groups by both).
 test('a gap without its level or production flag, or with a level outside the fixed list, is refused', () => {

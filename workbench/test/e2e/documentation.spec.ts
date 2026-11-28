@@ -1,6 +1,7 @@
 // The architecture illustration and README screenshots are bundled images. The architecture flows remain searchable text,
 // follow the Workbench theme, and load no remote resources. The container suite runs this against the built image.
 import { expect, test, type Page } from '@playwright/test';
+import { waitForGetStartedTab } from './wait-for-get-started';
 
 const RAW = ['![', '<figure', '<img', '```mermaid', 'flowchart LR', 'SystemArchitecture'];
 const MISSION_HUB_STEP = 'Mission hub validates sealed changes';
@@ -36,8 +37,7 @@ test('bundled figures and architecture flows render offline and remain usable ac
     if (new URL(url).origin !== origin) elsewhere.push(url);
   });
 
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+  await waitForGetStartedTab(page);
   const decline = page.getByRole('button', { name: 'No, I don\'t trust the authors' });
   await decline.waitFor({ timeout: 30_000 }).then(() => decline.click(), () => undefined);
   await runCommand(page, 'SovAI: Documentation');

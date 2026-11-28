@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { waitForGetStartedTab } from './wait-for-get-started';
 
 const MILESTONE_PREFIX = 'STERLING_HOSTED_STARTUP ';
 const MAX_VALUE = 600_000;
@@ -74,8 +75,7 @@ export async function openHostedWorkbench(page: Page): Promise<void> {
   });
 
   try {
-    await page.goto('/');
-    await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+    await waitForGetStartedTab(page);
     const trust = page.getByRole('button', { name: 'Yes, I trust the authors' });
     await trust.waitFor({ timeout: 15_000 }).then(() => trust.click(), () => undefined);
   } catch (error) {
