@@ -143,3 +143,33 @@ test('a run with too few test-realm users for a stage does not reuse one: the st
   assert.match(result.stages[1].reason, /test-realm users/);
   assert.equal(service.calls(), 50);
 });
+
+test('the local sample reports only completed in-window sessions to per-person accounting', async () => {
+  const clock = fakeClock();
+  const measure = fakeMeasure();
+  const tracked: string[][] = [];
+  const start = clock.now();
+  const [active, idle] = people(2).map(user => `ws-${user}`);
+  const result = await runStages({
+    plan: plan({ stages: [2, 3], burst: 0 }), people: people(3), service: fakeService(clock), clock,
+    measure: { ...measure, steady: async (input) => {
+      tracked.push([...input.active]);
+      const steady = await measure.steady(input);
+      return { ...steady, perPerson: {
+        active: { ...steady.perPerson.active, sessions: input.active.length },
+        idle: { ...steady.perPerson.idle, sessions: input.sessions.length - input.active.length },
+      } };
+    } },
+    localSamples: [
+      { sessionName: active, finishedAt: start },
+      { sessionName: active, finishedAt: start + 1 },
+      { sessionName: idle, finishedAt: start + 60_000 },
+      { sessionName: 'outside-stage', finishedAt: start + 1 },
+    ],
+  });
+  assert.equal(tracked.length, 2);
+  assert.equal(tracked[0].length, 1);
+  assert.deepEqual(tracked[1], [idle]);
+  const figures = result.stages.map(stage => [stage.perPerson.active.sessions, stage.perPerson.idle.sessions]);
+  assert.deepEqual(figures, [[1, 1], [1, 2]]);
+});

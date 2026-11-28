@@ -25,6 +25,7 @@
   "securityOfficers": ["5f7c2a1e-0b3d-4c6e-8a9f-1b2c3d4e5f60"],
   "exchangeOfficers": ["kc-test-exchange-officer"],
   "releaseAuthorities": ["kc-test-release-authority"],
+  "supply": { "roles": ["build", "deploy"], "approvers": ["7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f", "8d2e3f4a-5b6c-4d7e-9f80-1b2c3d4e5f6a"], "policy": {} },
   "hubs": [
     { "name": "hub-a", "publicAddress": "hub-a.site.example:30843", "nodePort": 30843, "storage": "20Gi" }
   ],

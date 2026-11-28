@@ -7212,6 +7212,181 @@
       "poam": "g561",
       "remediation": "Workbench staff setup has been checked in Canadian English and French, including unchanged project scope and cancellation. A qualified Canadian French reviewer must verify the terminology and instructions. Record equivalent workflows and outputs for remaining Canadian Workbench surfaces before declaring full LANG-01 acceptance.",
       "title": "Canadian Workbench language coverage needs qualified review"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "48.3",
+      "controls": [
+        "sa-10",
+        "sr-03",
+        "sr-05",
+        "sc-07",
+        "sa-09"
+      ],
+      "id": "G517",
+      "ownerRole": "owner",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Until the runner move, every build input is checked against your organization's signed approved lists before it is used (48.3-14 to 48.3-18), the approved bytes are fetched from the public origins by hash, and HQ re-verifies every release before any site receives it (48.3-08). The CI `npm audit` steps send the dependency list to npmjs until then. 48.3-23 to 48.3-25 move builds and publication to self-hosted runners in Canada and make GHCR optional; if the owner answers \"wait\" at 48.3-23, this row becomes a dated POA&M item there instead of closing in this phase. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-05, D-30. Sovereignty: software, switch-off.",
+      "title": "Builds and release publication still run on GitHub-hosted runners in the US, fetch approved inputs from public origins and pass our images through GHCR"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "ia-02",
+        "ia-05",
+        "cp-07"
+      ],
+      "id": "G518",
+      "ownerRole": "maintainers",
+      "poam": "g518",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Verdaccio has only community sign-on plugins and no native high availability. It serves public packages only; per-reader accounts get their passwords from OpenBao; the account `promotion` alone publishes; builds fail closed when it is down; and its storage can be rebuilt from Harbor's approved npm sets. Review a sign-on plugin, after its own fit check, or a replacement registry. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-25. Sovereignty: software, switch-off.",
+      "title": "The npm registry signs readers in with its own accounts, not your organization's sign-on, and has no high availability"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.3",
+      "controls": [
+        "cm-08",
+        "sa-10",
+        "sr-04"
+      ],
+      "id": "G523",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "48.3-12 checks the CycloneDX SBOMs syft writes against the 2026 joint Minimum Elements for an SBOM (co-issued by the Canadian Centre for Cyber Security) and turns on every field syft can produce; a field it cannot produce is reported to the owner. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-31, D-33. Sovereignty: software.",
+      "title": "Our SBOMs are not yet checked field by field against the 2026 Minimum Elements for an SBOM"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "ra-05.02",
+        "sr-03",
+        "sr-05"
+      ],
+      "id": "G519",
+      "ownerRole": "owner",
+      "poam": "g519",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The daily Grype database is downloaded only by the gather host, checked against Anchore's listing checksum and signed with your organization's site key before any scanner uses it. Building it with grype-db and vunnel at HQ is the option for independence, after its own fit check (vunnel had a SUS legitimacy verdict on 2026-11-25). Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-07, D-26. Sovereignty: software.",
+      "title": "The vulnerability database is built by Anchore in the US; your organization checks and signs it but does not build it"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sr-04",
+        "sr-11",
+        "si-07"
+      ],
+      "id": "G520",
+      "ownerRole": "maintainers",
+      "poam": "g520",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The intake verifies and records npm provenance where it exists and treats provenance present on the previous approved version and absent now as a review flag. Maven artefacts are checked only by the SHA-256 recorded at intake, because Maven Central's checksum files come from the same server. Add PGP signature checks for Maven with a reviewed publisher keyring, and a provenance minimum when coverage allows. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-16, D-21. Sovereignty: software.",
+      "title": "Most dependencies carry no build provenance and Maven publishers' signatures are not checked, so provenance is recorded where present but cannot be required"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "si-02",
+        "cm-03",
+        "sr-11"
+      ],
+      "id": "G521",
+      "ownerRole": "owner",
+      "poam": "g521",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "A withdrawal reaches a site with the next signed refresh, raises `SupplyWithdrawnRunning` and is listed in the change and impact record. No admission rule blocks it, so a disconnected site never stops a running service on its own. Your organization's authorizing official accepts this or asks for an admission deny list. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-08, D-29. Sovereignty: software.",
+      "title": "A withdrawn artefact keeps running at a site until its change board acts (owner decision Q8)"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sr-12",
+        "si-12",
+        "au-11"
+      ],
+      "id": "G522",
+      "ownerRole": "owner",
+      "poam": "g522",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Nothing in your organization's software registry is deleted automatically: refused items stay in quarantine, withdrawn items stay where they are, and tag retention and garbage collection stay off. Approved versions referenced by a supported release are always kept. A retention policy for refused and old quarantined items is drafted for the owner's approval, and any deletion follows it under the owner's rule to ask before deleting. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-11, D-35. Sovereignty: software.",
+      "title": "No retention policy yet: nothing in the software registry is deleted, so refused and old items accumulate"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sr-04",
+        "sr-11",
+        "si-07"
+      ],
+      "id": "G524",
+      "ownerRole": "owner",
+      "poam": "g524",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The signing host holds the site key and has no internet. It re-derives integrity, registry signatures, install scripts, licences, SBOMs, scans and malware matches from the bytes themselves, so a compromised gather host can misstate only publish time, provenance and publisher. Your organization's authorizing official accepts this, or a second independent source for those facts is added. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-14. Sovereignty: software.",
+      "title": "Facts only the connected gather host can see (publish time, provenance, publisher) reach the signing host as unsigned claims"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-09",
+        "sa-09.08",
+        "sa-10",
+        "sr-05",
+        "sc-07"
+      ],
+      "id": "G525",
+      "ownerRole": "owner",
+      "poam": "g525",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "After 48.3-23 to 48.3-25, builds run and publish in Canada, but the repository, pull requests, workflow definitions and job dispatch stay on github.com, and two network paths stay open by design: `npm ci` in image builds reaches your organization's npm registry at HQ over the network (inside HQ), and runner machines reach GitHub's published address ranges to take jobs. A source host and CI control plane at HQ is the remaining step, after its own research and fit check. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-30, D-33. Sovereignty: software, switch-off.",
+      "title": "Source code and the CI control plane stay on GitHub (US) after the runner move, and two network paths remain"
     }
   ]
 }

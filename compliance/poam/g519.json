@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ra-05.02",
+    "sr-03",
+    "sr-05"
+  ],
+  "gap": "G519",
+  "id": "g519",
+  "milestones": [
+    {
+      "title": "Owner decision on building the database at HQ",
+      "targetDate": "2027-05-31"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "The daily database is checked against Anchore's listing checksum and signed with your organization's site key before use. Decide whether to build it at HQ with grype-db and vunnel, after their fit check.",
+  "title": "The vulnerability database is built by Anchore in the US; your organization checks and signs it but does not build it"
+}

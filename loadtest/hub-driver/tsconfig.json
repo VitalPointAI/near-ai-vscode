@@ -1,0 +1,9 @@
+{
+  "extends": "../../hub/tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "allowImportingTsExtensions": true,
+    "typeRoots": ["../../hub/node_modules/@types"]
+  },
+  "include": ["*.ts", "../../hub/src/store/node-sqlite-database.d.ts"]
+}
