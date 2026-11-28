@@ -227,6 +227,7 @@ test('Get Started switches Canadian language live through User Settings and keep
   const welcome = page.locator('.sterling-welcome');
   const shellUrl = page.url();
   const original = await welcome.elementHandle();
+  await expect(welcome.getByRole('button', { name: 'Open local Resource Inventory', exact: true })).toBeVisible();
   await welcome.getByRole('button', { name: 'Pause hero animation' }).click();
 
   const selection = await openLanguageSetting(page);
@@ -251,7 +252,7 @@ test('Get Started switches Canadian language live through User Settings and keep
     await declineWorkspaceTrust(reopened);
     const reopenedWelcome = reopened.locator('.sterling-welcome');
     const expectActionsFit = async (): Promise<void> => {
-      const actions = reopenedWelcome.locator('.sterling-actions');
+      const actions = reopenedWelcome.locator('.sterling-hero .sterling-actions');
       await expect(actions).toBeVisible();
       expect(await actions.evaluate((node) => {
         const bounds = node.getBoundingClientRect();
@@ -264,6 +265,24 @@ test('Get Started switches Canadian language live through User Settings and keep
     };
     await expect(reopenedWelcome.getByRole('button', { name: 'Configurer Sterling' })).toBeVisible();
     await expectActionsFit();
+    const inventory = reopenedWelcome.getByRole('button', { name: 'Ouvrir l’inventaire local des ressources', exact: true });
+    await expect(inventory).toBeVisible();
+    expect(await inventory.evaluate((button) => {
+      const bounds = button.closest('.sterling-destinations')!.getBoundingClientRect();
+      const control = button.getBoundingClientRect();
+      return control.left >= bounds.left - 1 && control.right <= bounds.right + 1 &&
+        button.scrollWidth <= button.clientWidth + 1;
+    })).toBe(true);
+    await inventory.focus();
+    await inventory.press('Enter');
+    await expect(currentTab(reopened)).toHaveText('Resource Inventory');
+    const inventoryView = reopened.locator('.sterling-resource-inventory');
+    await expect(inventoryView.getByText('Trust this workspace to view its inventory.', { exact: true })).toBeVisible();
+    await expect(inventoryView.getByRole('heading', { name: 'Resources', exact: true })).toBeHidden();
+    await expect(inventoryView.getByText('Fictional workshop kit', { exact: true })).toHaveCount(0);
+    await reopened.getByRole('navigation', { name: 'Raccourcis Sterling' })
+      .getByRole('button', { name: 'Premiers pas', exact: true }).click();
+    await expect(currentTab(reopened)).toHaveText('Premiers pas');
     const reopenedSelection = await openLanguageSetting(reopened);
     await expect(reopenedSelection).toContainText('Français (Canada)');
     await pickLanguage(reopenedSelection, 'ArrowUp', 'English (Canada)');
@@ -272,6 +291,7 @@ test('Get Started switches Canadian language live through User Settings and keep
     await rail(reopened).getByRole('button', { name: 'Get Started', exact: true }).click();
     await expect(currentTab(reopened).filter({ hasText: /^Get Started$/ })).toBeVisible();
     await expect(reopenedWelcome.getByRole('button', { name: 'Set up Sterling' })).toBeVisible();
+    await expect(reopenedWelcome.getByRole('button', { name: 'Open local Resource Inventory', exact: true })).toBeVisible();
     await expectActionsFit();
   } finally {
     await otherContext.close();
