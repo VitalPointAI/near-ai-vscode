@@ -12,6 +12,7 @@ import { ThemeService } from '@theia/core/lib/browser/theming.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { BaseWidget, Panel } from '@theia/core/lib/browser/widgets/widget.js';
 import { sterlingComplianceCommand } from './sterling-compliance-module.js';
+import { sterlingContextGraphCommand } from './sterling-context-graph-module.js';
 import { sterlingDocumentationCommand } from './sterling-documentation-module.js';
 import { defaultSterlingLocale, observeSterlingLocale, sterlingLanguagePreference, sterlingMessages, type SterlingLocale, type SterlingMessage } from './sterling-locale.js';
 import { readActiveWorkArea } from './sterling-work-area-files.js';
@@ -35,6 +36,7 @@ const railActions: ReadonlyArray<{ readonly label: SterlingMessage; readonly ico
   { label: 'agentActivity', icon: 'pulse', command: 'nearAi.openAgentActivity' },
   { label: 'governance', icon: 'law', command: 'nearAi.policy.open' },
   { label: 'dataManagement', icon: 'database' },
+  { label: 'contextGraph', icon: 'type-hierarchy', command: sterlingContextGraphCommand.id },
   { label: 'modelFactory', icon: 'circuit-board' },
   { label: 'compliance', icon: 'shield', command: sterlingComplianceCommand.id },
   { label: 'documentation', icon: 'book', command: sterlingDocumentationCommand.id }
@@ -326,6 +328,7 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     const applyLocale = (locale: SterlingLocale): void => {
       copy = sterlingMessages[locale];
       openWelcome.label = copy.started;
+      sterlingContextGraphCommand.label = copy.contextGraph;
       shortcuts.lang = locale;
       shortcuts.setAttribute('aria-label', copy.shortcuts);
       railActions.forEach(({ label, command }, index) => {
