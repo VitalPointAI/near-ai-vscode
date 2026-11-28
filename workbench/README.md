@@ -24,6 +24,36 @@ Use `docker stop sterling-workbench` and `docker start sterling-workbench` to st
 
 The container runs as user `10001` in group `0`; only its home `/home/sterling` and workspace `/home/sterling/workspace` are writable. Its runtime holds only the Node binary and production dependencies: the Theia CLI, bundlers, compilers and the browser test tools stay in the build stage. The examples are synthetic. The workbench has no host workspace mounts, provider credentials, or agent run controls.
 
+## View a local infrastructure planning report
+
+Put one report at `.planning/.near-ai/resource-inventory.snapshot.json` in a trusted workspace. Open **Resource Management**, then **Open resource inventory**, or select **Resource Inventory** in the command palette. In a workspace with several roots, choose the folder that holds the report.
+
+Use fictional, public or otherwise approved non-sensitive planning metadata. Each workspace folder has one snapshot file. Keep an existing stock or public catalogue snapshot in its own folder when you also need an infrastructure report.
+
+```json
+{
+  "schemaVersion": 2,
+  "kind": "infrastructure",
+  "sourceId": "example-lab",
+  "source": "Example lab planning report",
+  "generatedAt": "2026-11-28T00:00:00Z",
+  "resources": [
+    {
+      "id": "example-worker",
+      "name": "Example worker",
+      "category": "standalone-compute",
+      "owner": "Example lab",
+      "capability": "GPU compute",
+      "capacity": 0,
+      "capacityUnit": "devices",
+      "asOf": "2026-11-27T12:00:00Z"
+    }
+  ]
+}
+```
+
+Record categories are `standalone-compute`, `cluster-compute`, `inference`, `storage` and `registry`. Use UTC timestamps. You can omit owner, capability and observation time. Set both capacity and its unit to report a quantity, or omit both when capacity is unknown. A report carries up to 1,200 rows and fits in 512 KiB. The view reads this file locally. It does not discover or sync resources, verify availability or permissions, or change a work-area record.
+
 An air-gapped build mirrors the digest-pinned base images through the builder's registry-mirror setting and points npm at a registry mirror with `--build-arg NPM_REGISTRY=<url>`.
 
 ## Develop and test

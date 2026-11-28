@@ -38,6 +38,33 @@ export interface InventorySnapshot {
   resources: InventoryRecord[];
 }
 
+export const infrastructureCategories = {
+  'standalone-compute': 'Standalone compute',
+  'cluster-compute': 'Cluster compute',
+  inference: 'Inference',
+  storage: 'Storage',
+  registry: 'Registry'
+} as const;
+
+export interface InfrastructureRecord {
+  id: string;
+  name: string;
+  category: keyof typeof infrastructureCategories;
+  owner?: string;
+  capability?: string;
+  capacity?: number;
+  capacityUnit?: string;
+  asOf?: string;
+}
+
+export interface InfrastructureReport {
+  kind: 'infrastructure';
+  sourceId: string;
+  source: string;
+  generatedAt: string;
+  resources: InfrastructureRecord[];
+}
+
 /** Stable identifier passed to a native work-area association action. */
 export interface InventoryResourceReference {
   readonly sourceId: string;
@@ -123,6 +150,57 @@ export function parseInventorySnapshot(text: string): InventorySnapshot | undefi
     }) => ({ id, name, category, quantity, unit, status, asOf, assetDid, usagePolicyRef, stockNumber, description, imageRef, imageDigest,
       sourceRef, lifecycle, reviewNote, archived }))
   };
+}
+
+const infrastructureEnvelopeKeys = new Set(['schemaVersion', 'kind', 'sourceId', 'source', 'generatedAt', 'resources']);
+const infrastructureRowKeys = new Set(['id', 'name', 'category', 'owner', 'capability', 'capacity', 'capacityUnit', 'asOf']);
+
+function infrastructureRecord(value: unknown): value is InfrastructureRecord {
+  return record(value) && Object.keys(value).every(key => infrastructureRowKeys.has(key))
+    && id(value.id) && label(value.name)
+    && typeof value.category === 'string' && Object.hasOwn(infrastructureCategories, value.category)
+    && (value.owner === undefined || label(value.owner))
+    && (value.capability === undefined || label(value.capability))
+    && (value.asOf === undefined || timestamp(value.asOf))
+    && (value.capacity === undefined
+      ? value.capacityUnit === undefined
+      : typeof value.capacity === 'number' && Number.isSafeInteger(value.capacity)
+        && value.capacity >= 0 && label(value.capacityUnit, 32));
+}
+
+/** A local planning report carries only reported fields and supplies no stock reference or mission authority. */
+export function parseInfrastructureReport(text: string): InfrastructureReport | undefined {
+  if (text.length > inventorySizeLimit || new TextEncoder().encode(text).length > inventorySizeLimit) return undefined;
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return undefined; }
+  if (!record(value) || !Object.keys(value).every(key => infrastructureEnvelopeKeys.has(key))
+    || value.schemaVersion !== 2 || value.kind !== 'infrastructure'
+    || !id(value.sourceId) || !label(value.source) || !timestamp(value.generatedAt)
+    || !Array.isArray(value.resources) || value.resources.length > 1200 || !value.resources.every(infrastructureRecord)) return undefined;
+  if (new Set(value.resources.map(item => item.id)).size !== value.resources.length) return undefined;
+  return { kind: value.kind, sourceId: value.sourceId, source: value.source, generatedAt: value.generatedAt, resources: value.resources };
+}
+
+/** Coalesce ordinary reads. A final link check waits for them and then starts a new current read. */
+export async function readInventoryOnce<T>(
+  source: { readTask?: Promise<void> }, current: () => boolean, read: () => Promise<T>,
+  present: (result: T) => void, fresh = false
+): Promise<void> {
+  while (source.readTask) {
+    await source.readTask;
+    if (!fresh || !current()) return;
+  }
+  if (!current()) return;
+  const task = (async () => {
+    const result = await read();
+    if (current()) present(result);
+  })();
+  source.readTask = task;
+  try {
+    await task;
+  } finally {
+    if (source.readTask === task) source.readTask = undefined;
+  }
 }
 
 /** This identifier names a record in a published namespace. It contains no workspace paths or credentials. */
