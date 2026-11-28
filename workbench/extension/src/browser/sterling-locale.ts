@@ -51,7 +51,7 @@ export function observeSterlingLocale(
 }
 
 const english = {
-  aboutTitle: 'About SovAI',
+  aboutTitle: 'About Sterling Sov AI',
   aboutVersion: 'Version {version}',
   aboutVersionUnavailable: 'Version unavailable',
   aboutClose: 'Close',
@@ -95,7 +95,7 @@ export type SterlingMessage = keyof typeof english;
 export const sterlingMessages: Record<SterlingLocale, Readonly<Record<SterlingMessage, string>>> = {
   'en-CA': english,
   'fr-CA': {
-    aboutTitle: 'À propos de SovAI',
+    aboutTitle: 'À propos de Sterling Sov AI',
     aboutVersion: 'Version {version}',
     aboutVersionUnavailable: 'Version indisponible',
     aboutClose: 'Fermer',
