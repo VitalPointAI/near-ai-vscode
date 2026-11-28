@@ -3,14 +3,17 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { cpus, platform, release } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium } from 'playwright';
+import { chromium } from '@playwright/test';
 import {
   expectedFixtureGraphs, fixtureCitations, fixtureCorpus, fixtureReaders,
   fixtureVisibleCorpora, openFixtureCitation, projectFixtureGraph,
-} from '../../dist/test/fixtures/contextGraph/evidenceFixture.js';
+} from '../../../src/test/fixtures/contextGraph/evidenceFixture.ts';
 
 const origin = 'https://context-graph.fixture.invalid';
-const fixtures = new URL('./fixtures/context-graph/', import.meta.url);
+// From workbench/dist/test/container/*.js (bundled) or workbench/test/container/*.mjs (source):
+const fixtures = import.meta.url.includes('/dist/test/container/')
+  ? new URL('../../../test/fixtures/context-graph/', import.meta.url)
+  : new URL('../fixtures/context-graph/', import.meta.url);
 const files = {
   '/': ['explorer.html', 'text/html; charset=utf-8'],
   '/explorer.css': ['explorer.css', 'text/css; charset=utf-8'],
