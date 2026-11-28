@@ -55,11 +55,11 @@ test('the rail shortcuts and the Get Started work-area cards are present and ope
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
   assert.equal(await sharedSnapshot(), beforeLanguageJourney, 'User language changes leave the shared preference files byte-for-byte intact.');
   if (!bundled) {
-    assert.match(result.stdout, /\b4 passed\b/);
+    assert.match(result.stdout, /\b5 passed\b/);
     assert.match(result.stdout, /\b3 skipped\b/, 'the development image skips the release webviews, Team Studio staff setup and work-area creation');
     return;
   }
-  assert.match(result.stdout, /\b7 passed\b/);
+  assert.match(result.stdout, /\b8 passed\b/);
   // On disk: one new work-area-<hex> folder in the workspace and nothing else, holding only the marker and its .gitignore, with the kind
   // and the title the person typed.
   const listing = await mustRun('docker', ['exec', name, 'node', '-e', `

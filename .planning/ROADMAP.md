@@ -1806,6 +1806,7 @@ Plans:
   3. Every answer's citations open the exact source span, and the answer carries its high-water label and is routed by it. (KB-02, KB-06)
   4. Entity pages show a customer or project across sources; a merge of two entities is a proposal with undo, and model-written relations run only on priority items under the spend governor, each backed by a verified quote. (KB-03, KB-04, KB-05)
   5. With your organization's opt-in for a scale, a person sees only that an item exists, its steward and a request-access button, and only for items whose discovery description a person approved; with it off (the default), nothing shows. (KB-15)
+  6. The right-side Context Graph action opens the same native landing in English and French. With a governed workspace data source, people can explore the authorized graph by strategic, operational or tactical detail, then narrow it by area of interest, activity, responsibility and time. Citations reopen the source version and span the reader can access.
 **Research flags**: Mosaic and Splink licences and dependency trees; pgvector recall at low clearance.
 **Plans:** 0 plans
 **UI hint**: yes
@@ -1823,6 +1824,7 @@ Plans:
   2. Model-written SQL that tries to set its own clearance is refused, and every question shows the SQL it ran. (KB-10)
   3. A report fails verification after any underlying figure changes. (KB-12)
   4. Suggested insights appear with no setup, each with its query; the graph explorer and timeline replay ("as known at T") work within saved scopes and say when a view was cut at its cap; and a label-change preview shows who would gain or lose access before a label changes. (KB-11, KB-13, KB-14)
+  5. People can save a graph view and subscribe to changes they are authorized to see. A workspace owner can publish a versioned mission context. Human and delegated agent workflows resolve that same definition under current membership, source access and clearance. Hidden changes generate no observable update, and revocation suppresses queued delivery and clears stale evidence.
 **Research flags**: Standard patterns documented in the research; plan without a research step.
 **Plans:** 0 plans
 **UI hint**: yes

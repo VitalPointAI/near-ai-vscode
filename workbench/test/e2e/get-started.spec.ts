@@ -4,10 +4,11 @@
 // by test/container/get-started.test.ts against the image, opened at 127.0.0.1 as the owner opens it.
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-const railLabels = ['Get Started', 'Portfolio', 'Chat', 'Team Studio', 'Agent Activity', 'Standing Orders', 'Data Management', 'Model Factory',
+const railLabels = ['Get Started', 'Portfolio', 'Chat', 'Team Studio', 'Agent Activity', 'Standing Orders', 'Data Management', 'Context Graph', 'Model Factory',
   'Compliance', 'Documentation'];
 const plannedLabels = ['Data Management', 'Model Factory'];
-const nativeShortcuts = [['Portfolio', 'Portfolio Room'], ['Compliance', 'Compliance'], ['Documentation', 'Documentation'], ['Get Started', 'Get Started']];
+const nativeShortcuts = [['Portfolio', 'Portfolio Room'], ['Context Graph', 'Context Graph'], ['Compliance', 'Compliance'],
+  ['Documentation', 'Documentation'], ['Get Started', 'Get Started']];
 const cards = [['Capability Development', 'capability-development'], ['Exercises & Training', 'training'], ['Planning', 'operations'],
   ['Resource Management', 'resources']];
 
@@ -204,6 +205,28 @@ test('the rail carries every shortcut, the planned ones disabled, and the native
   }
 });
 
+test('Context Graph landing opens by keyboard as one native tab', async ({ page }) => {
+  await openGetStarted(page);
+  const graph = rail(page).getByRole('button', { name: 'Context Graph', exact: true });
+  await expect(graph).toBeVisible({ timeout: 5_000 });
+  await graph.press('Enter');
+  const landing = page.locator('#sterling-context-graph');
+  const englishHeading = landing.getByRole('heading', { name: 'Context Graph', exact: true });
+  await expect(currentTab(page)).toHaveText('Context Graph');
+  await expect(landing).toHaveAttribute('lang', 'en-CA');
+  await expect(englishHeading).toBeFocused();
+  await expect(landing.getByRole('status')).toHaveText('Context Graph is unavailable. No governed graph source is connected.');
+  const documentation = landing.getByRole('button', { name: 'Open Documentation', exact: true });
+  await expect(landing.getByRole('button')).toHaveCount(1);
+  await page.keyboard.press('Tab');
+  await expect(documentation).toBeFocused();
+  await documentation.press('Enter');
+  await expect(currentTab(page)).toHaveText('Documentation');
+  await graph.press('Enter');
+  await expect(englishHeading).toBeFocused();
+  await expect(page.locator('#theia-main-content-panel .lm-TabBar-tabLabel', { hasText: /^Context Graph$/ })).toHaveCount(1);
+});
+
 test('Get Started shows the setup actions, and each work-area card opens its own page', async ({ page }) => {
   await openGetStarted(page);
   const welcome = page.locator('.sterling-welcome');
@@ -281,6 +304,16 @@ test('Get Started switches Canadian language live through User Settings and keep
     await expect(inventoryView.getByText('Trust this workspace to view its inventory.', { exact: true })).toBeVisible();
     await expect(inventoryView.getByRole('heading', { name: 'Resources', exact: true })).toBeHidden();
     await expect(inventoryView.getByText('Fictional workshop kit', { exact: true })).toHaveCount(0);
+    const landing = reopened.locator('#sterling-context-graph');
+    const frenchRail = reopened.getByRole('navigation', { name: 'Raccourcis Sterling' });
+    const frenchGraph = frenchRail.getByRole('button', { name: 'Graphe contextuel', exact: true });
+    await frenchGraph.press('Space');
+    await expect(currentTab(reopened).filter({ hasText: /^Graphe contextuel$/ })).toBeVisible();
+    await expect(landing).toHaveAttribute('lang', 'fr-CA');
+    await expect(landing.getByRole('heading', { name: 'Graphe contextuel', exact: true })).toBeFocused();
+    await expect(landing.getByRole('status')).toHaveText('Le graphe contextuel est indisponible. Aucune source de données régie n’est connectée.');
+    await expect(landing.getByRole('button', { name: 'Ouvrir la documentation', exact: true })).toBeVisible();
+    await expect(reopened.locator('#theia-main-content-panel .lm-TabBar-tabLabel', { hasText: /^Graphe contextuel$/ })).toHaveCount(1);
     await reopened.getByRole('navigation', { name: 'Raccourcis Sterling' })
       .getByRole('button', { name: 'Premiers pas', exact: true }).click();
     await expect(currentTab(reopened)).toHaveText('Premiers pas');
