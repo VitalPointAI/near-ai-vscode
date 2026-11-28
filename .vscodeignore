@@ -1,5 +1,6 @@
 .vscode/**
 .planning/**
+.scratch/**
 .codex/**
 .claude/**
 .agents/**
