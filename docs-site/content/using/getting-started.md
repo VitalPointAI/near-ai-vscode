@@ -9,6 +9,9 @@ The **Sterling workbench** runs on your computer in a container. Open it in your
 The release image includes Eclipse Theia and the SovAI extension. The release build uses the VSIX
 to bundle the extension into the image, so workstation setup requires only the container image.
 
+See [Recommended hardware and configuration](./deployment-hardware.md) to choose a workstation,
+hub, or site setup.
+
 ## Run the Sterling workbench image
 
 The image is a **local preview** for one person on one computer. It has no sign-in of its own and
@@ -33,23 +36,43 @@ no Docker changes. If your shell says `node` is missing, install the supported N
 node scripts/launch-local-workbench.mjs --check
 ```
 
-To start the Workbench, pass the exact approved image reference for the platform the check reports.
-The current `sterling-image.txt` supplies the Linux x86-64 release. A signed Linux ARM64 release image
-is pending.
+The released standalone image includes no local keyring or connection to your organization's secret
+store. You can use Documentation and trusted local Resource Inventory. Profiles that rely on saved
+credentials and the active Standing Orders need a durable store. If you need those features, ask
+your administrator about a configured Workbench. The launcher's `--repair` can retrieve only the
+approved Workbench image by digest. For the planned organization setup, see
+[Hosting for many people](../architecture/overview.mdx#hosting-for-many-people-planned-not-yet-released).
+
+On the [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases), open the approved
+release and copy the image reference from `sterling-image.txt`. The current file points to the
+Linux x86-64 image. A signed Linux ARM64 release image is pending.
+
+On a fresh workstation, use `--repair` so the launcher can download that exact image if needed.
+Replace the example value of `IMAGE` with the reference you copied.
 
 ```bash
 IMAGE='ghcr.io/vitalpointai/near-ai-vscode@sha256:REPLACE_WITH_RELEASE_DIGEST'
-node scripts/launch-local-workbench.mjs --image "$IMAGE"
+node scripts/launch-local-workbench.mjs --image "$IMAGE" --repair
 ```
 
-The launcher checks the host architecture, runtime and image before starting a container. The image
-must already be local. Add `--repair` to allow it to fetch that exact digest if it is missing. If the
-launcher reports a Docker install, upgrade or access requirement, resolve it through your host's
-administrator or software manager. Open the URL the launcher prints after the health check
-succeeds, then [set up your first project](#set-up-your-first-project).
+Open the URL the launcher prints after the health check succeeds, then
+[set up your first project](#set-up-your-first-project). If the launcher reports a Docker install,
+upgrade or access requirement, resolve it through your administrator or software manager.
 
-To stop the Workbench, run `docker stop sterling-local-workbench`. To start it again, rerun the
-same launcher command with the same image digest. It reuses the container and workspace volume.
+Stop the Workbench on the same local Docker engine the launcher uses.
+
+```bash
+(
+  unset DOCKER_CONTEXT DOCKER_HOST DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH \
+    DOCKER_API_VERSION DOCKER_DEFAULT_PLATFORM
+  docker --host unix:///var/run/docker.sock stop sterling-local-workbench
+)
+```
+
+To restart it or launch with an image that is already available locally, set `IMAGE` to the same
+approved reference and run
+`node scripts/launch-local-workbench.mjs --image "$IMAGE"`. The launcher reuses the container and
+its workspace volume when they already exist.
 
 ### Start manually
 
@@ -93,10 +116,15 @@ create the container.
 The workbench opens the Sterling Get Started page for the Canadian Defence Edition, or the page of
 the work area you open. Get Started has **Set up Sterling**, **Open Chat** and **Explore a sample
 agent team**, which opens read-only Team Studio samples, and a card for each Defence work area:
-Capability Development, Exercises & Training, Planning and Resource Management. From the right
-sidebar you can open:
+Capability Development, Exercises & Training, Planning and Resource Management.
 
-- **Get Started**, **Portfolio**, **Team Studio**, **Agent Activity** and **Governance**;
+Choose **Open local Resource Inventory** below the cards, or **SovAI: Resource Inventory** in the
+Command Palette. The view reads an existing `.planning/.near-ai/resource-inventory.snapshot.json`
+from the selected trusted local workspace folder.
+
+From the right sidebar you can open:
+
+- **Get Started**, **Portfolio**, **Team Studio**, **Agent Activity** and **Standing Orders**;
 - **Chat**, which slides the chat drawer open and closed;
 - **Documentation**, the guides bundled with the image, which you can search without a network;
 - **Compliance**, which shows control states only from an evidence bundle checked for the same
@@ -105,12 +133,11 @@ sidebar you can open:
 The SovAI extension is also inside, so **SovAI: Set Up a New Profile** and the other SovAI
 commands are in the Command Palette.
 
-The workspace opens at `/home/sterling/workspace`. The local preview has no secret store.
-Profiles that need a saved API key cannot finish setup here. The planned hosted workbench uses
-your organization's secret store.
+The workspace opens at `/home/sterling/workspace`. See the [launcher check](#use-the-local-launcher)
+for the standalone image’s secret storage limits.
 
 Hosting the workbench for many people, with sign-in, at your organization's own sites is planned
-and not yet released. See [Hosting for many people](../architecture/overview.md#hosting-for-many-people-planned-not-yet-released).
+and not yet released. See [Hosting for many people](../architecture/overview.mdx#hosting-for-many-people-planned-not-yet-released).
 
 ## Optional hub for shared staff projects
 

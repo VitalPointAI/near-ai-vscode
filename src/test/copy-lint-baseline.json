@@ -248,7 +248,7 @@
   "src/team/gitTransport.ts": {
     "bare-team": 1
   },
-  "workbench/extension/src/browser/sterling-welcome-module.ts": {
+  "workbench/extension/src/browser/sterling-locale.ts": {
     "bare-team": 1
   },
   "workbench/extension/src/browser/sterling-work-areas-module.ts": {

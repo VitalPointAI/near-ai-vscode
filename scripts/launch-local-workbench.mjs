@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { stat, statfs } from 'node:fs/promises';
 import { get } from 'node:http';
-import { basename, resolve } from 'node:path';
+import { basename, isAbsolute, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual, parseArgs, promisify } from 'node:util';
@@ -114,6 +114,7 @@ const host = {
   nodeVersion: process.versions.node,
   env: process.env,
   statSocket: async (path) => (await stat(path)).isSocket(),
+  statfs,
   async docker(args, env, timeout) {
     try {
       const { stdout, stderr } = await runFile('docker', args, { env, encoding: 'utf8', timeout });
@@ -185,6 +186,32 @@ async function checkPrerequisites(deps) {
   return { docker, architecture };
 }
 
+async function describeDockerStorage(encodedRoot, readStatfs) {
+  const unavailable = 'Docker data-root filesystem space is unavailable.';
+  if (!encodedRoot || typeof readStatfs !== 'function') return unavailable;
+
+  let stats;
+  try {
+    const dataRoot = JSON.parse(encodedRoot);
+    if (typeof dataRoot !== 'string' || !isAbsolute(dataRoot) || /[\x00-\x1f\x7f]/.test(dataRoot)) return unavailable;
+    stats = await readStatfs(dataRoot, { bigint: true });
+  } catch {
+    return unavailable;
+  }
+
+  const { frsize, bsize, bavail } = stats ?? {};
+  const allocationUnit = frsize === undefined || frsize === 0n ? bsize : frsize;
+  if (typeof allocationUnit !== 'bigint' || allocationUnit <= 0n || typeof bavail !== 'bigint' || bavail < 0n) {
+    return unavailable;
+  }
+  const bytes = allocationUnit * bavail;
+  const gibibyte = 2n ** 30n;
+  const hundredths = (bytes * 100n + gibibyte / 2n) / gibibyte;
+  const decimal = String(hundredths % 100n).padStart(2, '0').replace(/0+$/, '');
+  const gib = decimal ? `${hundredths / 100n}.${decimal}` : String(hundredths / 100n);
+  return `Docker data-root filesystem visible to the launcher has ${gib} GiB available (${bytes} bytes). Other mounts may differ.`;
+}
+
 export async function launchLocalWorkbench({ image, repair = false, check = false }, deps = host) {
   if (check && (image !== undefined || repair)) throw new Error('Use --check on its own, without --image or --repair.');
   if (!check && (typeof image !== 'string' || !imagePattern.test(image))) {
@@ -192,7 +219,26 @@ export async function launchLocalWorkbench({ image, repair = false, check = fals
   }
   const { docker, architecture } = await checkPrerequisites(deps);
   const platform = `linux/${architecture}`;
-  if (check) return `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`;
+  if (check) {
+    const prerequisites = `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`;
+    const result = await docker(['info', '--format', '{{.NCPU}} {{.MemTotal}}\n{{json .DockerRootDir}}'], 3000);
+    const [capacityLine = '', ...rootLines] = result.code === 0 ? result.stdout.trimEnd().split('\n') : [];
+    const fields = /^([1-9]\d{0,15}) ([1-9]\d{0,15})$/.exec(capacityLine);
+    const cpuCount = Number(fields?.[1]);
+    const memoryBytes = Number(fields?.[2]);
+    let capacity = 'Docker CPU and memory readings are unavailable.';
+    if (Number.isSafeInteger(cpuCount) && Number.isSafeInteger(memoryBytes)) {
+      const memory = new Intl.NumberFormat('en', { maximumSignificantDigits: 3 }).format(memoryBytes / 2 ** 30);
+      const cpus = cpuCount === 1 ? 'CPU' : 'CPUs';
+      capacity = `Docker reports ${cpuCount} logical ${cpus} and ${memory} GiB total memory.`;
+    }
+    const storage = await describeDockerStorage(rootLines.length === 1 ? rootLines[0] : undefined, deps.statfs);
+    const secretStorage = 'The released standalone Workbench has no local keyring or organization secret store. '
+      + 'Saved credentials and active Standing Orders are unavailable. '
+      + 'You can still use Workbench features that do not need saved credentials. '
+      + 'Ask your administrator about a Workbench with a configured secret store.';
+    return [prerequisites, capacity, storage, secretStorage].join('\n');
+  }
 
   async function checked(step, ...args) {
     const result = await docker(args, args[0] === 'pull' ? 300_000 : 30_000);

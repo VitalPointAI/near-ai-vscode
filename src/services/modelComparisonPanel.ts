@@ -38,6 +38,7 @@ interface Gathered { state: PageState; active?: ActiveProvider; models: ModelInf
 
 let panel: vscode.WebviewPanel | undefined;
 let post: (message: Record<string, unknown>) => void = () => undefined;
+let startPending = false;
 /** A comparison keeps running when the tab is closed; reopening the tab shows it. */
 let running: { runId: string; abort: AbortController; saved: SavedRun; done: number; total: number; current?: { model: string; task: string; run: number } } | undefined;
 let tasksLoaded: Promise<BenchmarkTask[]> | undefined;
@@ -159,7 +160,21 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
         switch (message.type) {
           case 'ready': case 'refresh': await refresh(); break;
           case 'plan': await sendEstimate(context, auth, message); break;
-          case 'start': await start(context, auth, message, (saved) => { shown = saved; }); break;
+          case 'start': {
+            if (running) {
+              post({ type: 'error', text: 'A comparison is already running. Cancel it first to start another.' });
+              break;
+            }
+            // The first request owns preparation and confirmation. Repeated clicks add no work.
+            if (startPending) break;
+            startPending = true;
+            try {
+              await start(context, auth, message, (saved) => { shown = saved; });
+            } finally {
+              startPending = false;
+            }
+            break;
+          }
           case 'cancel': running?.abort.abort('You cancelled the comparison.'); break;
           case 'open-run': {
             const saved = await storeFor(context).load(message.id);
@@ -236,7 +251,6 @@ async function sendEstimate(context: vscode.ExtensionContext, auth: AuthService,
 const money = (usd: number) => `$${usd < 0.01 && usd > 0 ? usd.toFixed(4) : usd.toFixed(2)}`;
 
 async function start(context: vscode.ExtensionContext, auth: AuthService, picked: Selection, show: (saved: SavedRun) => void): Promise<void> {
-  if (running) { post({ type: 'error', text: 'A comparison is already running. Cancel it first to start another.' }); return; }
   if (isEmergencyStopped()) { post({ type: 'error', text: 'Emergency stop is on, so nothing runs. Run SovAI: Resume first.' }); return; }
   const { gathered, tasks, plan, estimate, problem } = await planFor(context, auth, picked);
   const active = gathered.active;
@@ -265,12 +279,12 @@ async function start(context: vscode.ExtensionContext, auth: AuthService, picked
   const abort = new AbortController();
   running = { runId, abort, saved, done: 0, total: plan.toRun };
   const stopListener = onDidChangeEmergencyStop((engaged) => { if (engaged) abort.abort('Emergency stop is on.'); });
-  const account = spendAccountOf(active.provider.client);
-  const host = gateHost;
-  await account?.ledger.refresh();
   const reportNow = () => post({ type: 'report', ...reportView(saved, gathered.models, gathered.roles) });
-  reportNow();
   try {
+    const account = spendAccountOf(active.provider.client);
+    const host = gateHost;
+    await account?.ledger.refresh();
+    reportNow();
     const outcome = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Comparing models', cancellable: true }, async (progress, token) => {
       token.onCancellationRequested(() => abort.abort('You cancelled the comparison.'));
       return runComparison({

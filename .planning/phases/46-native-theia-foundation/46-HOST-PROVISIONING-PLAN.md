@@ -31,8 +31,16 @@ The owner deferred all macOS setup and development until Linux ARM64 works, incl
 </objective>
 
 <context>
-The existing launcher checks Linux x86-64, Node.js 26.13.1 or later in the Node.js 26 series, and a local Linux amd64 Engine 28 or later. It can fetch an exact approved Workbench image. Native ARM64 build and release verification are separate prerequisites. This draft permits review and planning only. Package application, device trials, and Mac support each require the applicable evidence below.
+The existing launcher checks Linux x86-64 or ARM64, Node.js 26.13.1 or later in the Node.js 26 series, and a local Linux Docker Engine 28 or later that matches the host architecture. It can fetch an exact approved Workbench image. A signed published Linux ARM64 image remains a separate prerequisite for routine ARM64 setup. This draft permits review and planning only. Package application, device trials, and Mac support each require the applicable evidence below.
 </context>
+
+## Approved artifacts at setup and update
+
+Every workstation install or update must verify the exact SHA-256 digests your organization approved. This applies to a standalone Workbench, an administrator adding a workstation through a hub, and same-machine setup when it installs software. It covers container images, installers, prerequisite packages and the complete set of dependencies the operation will install or update.
+
+Before changing the workstation, verify that each artifact is approved for that operation and that the bytes to be applied match the approved digest. A tag or version can help locate the artifact. The verification and apply steps must use the same immutable artifact. If approval is missing, the architecture differs, or the bytes do not match, stop and tell the user which artifact needs attention. Show the current approved version and keep the existing workspace and working installation available when preparing an update. Complete readiness checks on the replacement before making it the active version.
+
+The local launcher already accepts an operator-supplied exact image digest and verifies the image and platform. Organization-managed approval lookup, Add Workstation, managed package installation and update activation each need their own execution plan and verification. The existing same-machine guide expects an administrator-prepared, approved local hub image for development. An installer that acquires or updates the hub image must verify its approved digest at apply time.
 
 <tasks>
 

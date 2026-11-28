@@ -11,10 +11,12 @@ import { FileOperationError, FileOperationResult } from '@theia/filesystem/lib/c
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service.js';
 import { WorkspaceTrustService } from '@theia/workspace/lib/browser/workspace-trust-service.js';
 import {
-  inventoryDirectory, inventoryFileName, inventoryImageSizeLimit, inventoryMediaDirectory, inventoryReference,
-  inventorySizeLimit, inventoryStatuses, parseInventorySnapshot
+  infrastructureCategories, inventoryDirectory, inventoryFileName, inventoryImageSizeLimit, inventoryMediaDirectory, inventoryReference,
+  inventorySizeLimit, inventoryStatuses, parseInfrastructureReport, parseInventorySnapshot, readInventoryOnce
 } from '../common/sterling-resource-inventory.js';
-import type { InventoryLinkRequest, InventoryRecord, InventorySnapshot } from '../common/sterling-resource-inventory.js';
+import type { InfrastructureRecord, InfrastructureReport, InventoryLinkRequest, InventoryRecord, InventorySnapshot } from '../common/sterling-resource-inventory.js';
+import { saveResourceCatalogue } from './sterling-resource-catalogue.js';
+import type { PresentedCatalogue } from './sterling-resource-catalogue.js';
 import './sterling-portfolio.css';
 import './sterling-resource-inventory.css';
 
@@ -30,7 +32,24 @@ interface Connection {
   root: URI;
   file: URI;
   etag?: string;
+  presentedCatalogue?: PresentedCatalogue;
   readTask?: Promise<void>;
+}
+
+type DisplaySnapshot = InventorySnapshot | InfrastructureReport;
+type DisplayRecord = InventoryRecord & Pick<InfrastructureRecord, 'owner' | 'capability' | 'capacity' | 'capacityUnit'>;
+type InventoryReadResult = { error: string } | { snapshot: DisplaySnapshot; content: PresentedCatalogue };
+
+function infrastructure(snapshot: DisplaySnapshot): snapshot is InfrastructureReport {
+  return 'kind' in snapshot;
+}
+
+function recordKey(snapshot: DisplaySnapshot, record: DisplayRecord): string {
+  return infrastructure(snapshot) ? `${snapshot.sourceId}/${record.id}` : inventoryReference(snapshot, record);
+}
+
+function categoryText(snapshot: DisplaySnapshot, category: string): string {
+  return infrastructure(snapshot) ? infrastructureCategories[category as InfrastructureRecord['category']] : category;
 }
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
@@ -143,6 +162,7 @@ class SterlingResourceInventory extends BaseWidget {
   private readonly search = node('input');
   private readonly category = node('select');
   private readonly state = node('select');
+  private readonly stateFilter = labelled('Reported status', this.state);
   private readonly add = button('Add catalogue entry');
   private readonly archived = node('input');
   private readonly archivedFilter = labelled('Show archived entries', this.archived);
@@ -156,8 +176,8 @@ class SterlingResourceInventory extends BaseWidget {
   private workspaceRevision = 0;
   private connection?: Connection;
   private timer?: ReturnType<typeof setInterval>;
-  private snapshot?: InventorySnapshot;
-  private ordered: InventoryRecord[] = [];
+  private snapshot?: DisplaySnapshot;
+  private ordered: DisplayRecord[] = [];
   private selected?: string;
   private linkRequest?: InventoryLinkRequest;
   private linkAction?: object;
@@ -193,7 +213,7 @@ class SterlingResourceInventory extends BaseWidget {
       option(notReported, 'unreported'));
     this.archived.type = 'checkbox';
     filters.append(labelled('Search resources', this.search), labelled('Category', this.category),
-      labelled('Reported status', this.state), this.archivedFilter);
+      this.stateFilter, this.archivedFilter);
     const layout = node('div', undefined, 'sterling-portfolio-layout');
     const records = node('section');
     records.append(node('h2', 'Resources'), this.add, this.results, this.list, this.more);
@@ -303,15 +323,12 @@ class SterlingResourceInventory extends BaseWidget {
     this.timer = this.connection && this.isVisible ? setInterval(() => void this.read(true), pollSeconds * 1000) : undefined;
   }
 
-  private async read(skipUnchanged: boolean): Promise<void> {
+  private async read(skipUnchanged: boolean, fresh = false, stillLinking = (): boolean => true): Promise<void> {
     const source = this.connection;
-    if (!source || !this.trusted) return;
-    if (source.readTask) return source.readTask;
-    const task = this.readCurrentSource(source, skipUnchanged);
-    source.readTask = task;
-    try { await task; } finally {
-      if (source.readTask === task) source.readTask = undefined;
-    }
+    if (!source) return;
+    const current = (): boolean => !this.isDisposed && this.trusted && this.connection === source && stillLinking();
+    await readInventoryOnce(source, current, () => this.readCurrentSource(source, skipUnchanged, current),
+      result => this.presentRead(source, result), fresh);
   }
 
   private async hasRegularSnapshotParents(source: Connection): Promise<boolean> {
@@ -322,64 +339,80 @@ class SterlingResourceInventory extends BaseWidget {
     return true;
   }
 
-  private async readCurrentSource(source: Connection, skipUnchanged: boolean): Promise<void> {
-    const current = (): boolean => !this.isDisposed && this.trusted && this.connection === source;
-    const localPath = () => this.hasRegularSnapshotParents(source);
-    const fail = (text: string): void => {
-      if (!current()) return;
-      source.etag = undefined;
-      this.setSnapshot(undefined);
-      if (this.status.textContent !== text) this.status.textContent = text;
-      this.status.classList.add('is-warning');
-    };
+  private async readCurrentSource(
+    source: Connection, skipUnchanged: boolean, current: () => boolean
+  ): Promise<InventoryReadResult | undefined> {
     try {
-      if (!await localPath()) { fail('The snapshot path must use regular workspace directories.'); return; }
+      if (!await this.hasRegularSnapshotParents(source)) return { error: 'The snapshot path must use regular workspace directories.' };
       if (!current()) return;
       const before = await this.files.resolve(source.file, { resolveMetadata: true });
       if (!current()) return;
       if (!before.isFile || before.isSymbolicLink || before.size > inventorySizeLimit) {
-        fail('Use a regular workspace file no larger than 512 KB.');
-        return;
+        return { error: 'Use a regular workspace file no larger than 512 KB.' };
       }
       if (skipUnchanged && source.etag === before.etag) return;
       const content = await this.files.read(source.file, { limits: { size: inventorySizeLimit } });
-      if (!await localPath()) { fail('The snapshot directory changed during the read.'); return; }
+      if (!await this.hasRegularSnapshotParents(source)) return { error: 'The snapshot directory changed during the read.' };
       const after = await this.files.resolve(source.file, { resolveMetadata: true });
       if (!current()) return;
       if (!after.isFile || after.isSymbolicLink || after.etag !== before.etag || content.etag !== after.etag) {
-        fail('The snapshot changed while being read. Refresh to try again.');
-        return;
+        return { error: 'The snapshot changed while being read. Refresh to try again.' };
       }
-      const snapshot = parseInventorySnapshot(content.value);
-      if (!snapshot) { fail('The file does not contain a valid resource inventory snapshot.'); return; }
-      source.etag = after.etag;
-      this.setSnapshot(snapshot);
-      this.status.textContent = snapshot.catalogueOnly
-        ? 'Provisional public catalogue. DND verification is pending. Records represent equipment types.'
-        : `Local inventory. Checks for changes every ${pollSeconds} seconds while visible.`;
-      this.status.classList.remove('is-warning');
+      const snapshot = parseInventorySnapshot(content.value) ?? parseInfrastructureReport(content.value);
+      return snapshot ? { snapshot, content } : { error: 'The file does not contain a valid resource inventory snapshot.' };
     } catch (error) {
       const missing = error instanceof FileOperationError && error.fileOperationResult === FileOperationResult.FILE_NOT_FOUND;
-      fail(missing ? `No ${snapshotPath} in the selected workspace.` : 'The snapshot could not be read.');
+      return { error: missing ? `No ${snapshotPath} in the selected workspace.` : 'The snapshot could not be read.' };
     }
   }
 
-  private setSnapshot(snapshot: InventorySnapshot | undefined): void {
+  private presentRead(source: Connection, result: InventoryReadResult | undefined): void {
+    if (!result) return;
+    if ('error' in result) {
+      source.etag = undefined;
+      source.presentedCatalogue = undefined;
+      this.setSnapshot(undefined);
+      if (this.status.textContent !== result.error) this.status.textContent = result.error;
+      this.status.classList.add('is-warning');
+      return;
+    }
+    const { snapshot, content } = result;
+    const cannotLink = infrastructure(snapshot) && Boolean(this.linkRequest);
+    source.etag = content.etag;
+    source.presentedCatalogue = !infrastructure(snapshot) && snapshot.catalogueOnly ? content : undefined;
+    this.setSnapshot(cannotLink ? undefined : snapshot);
+    if (infrastructure(snapshot)) {
+      this.status.textContent = cannotLink
+        ? 'Infrastructure planning reports cannot be linked.'
+        : 'Local infrastructure planning report. Availability and permissions have not been verified.';
+    } else {
+      this.status.textContent = snapshot.catalogueOnly
+        ? 'Provisional public catalogue. DND verification is pending. Records represent equipment types.'
+        : `Local inventory. Checks for changes every ${pollSeconds} seconds while visible.`;
+    }
+    this.status.classList.remove('is-warning');
+  }
+
+  private setSnapshot(snapshot: DisplaySnapshot | undefined): void {
     this.snapshot = snapshot;
-    this.add.hidden = !snapshot?.catalogueOnly || Boolean(this.linkRequest);
-    this.archivedFilter.hidden = !snapshot?.catalogueOnly;
+    const infrastructureReport = Boolean(snapshot && infrastructure(snapshot));
+    const catalogue = Boolean(snapshot && !infrastructure(snapshot) && snapshot.catalogueOnly);
+    this.add.hidden = !catalogue || Boolean(this.linkRequest);
+    this.archivedFilter.hidden = !catalogue;
+    this.stateFilter.hidden = infrastructureReport;
+    this.search.placeholder = infrastructureReport ? 'Name, ID, owner or capability' : 'Name, ID, DID, stock number or policy';
     this.add.disabled = this.editingCatalogue;
     this.content.hidden = !snapshot;
     const selectedCategory = this.category.value;
     this.ordered = snapshot ? [...snapshot.resources].sort((a, b) =>
       a.category.localeCompare(b.category) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)) : [];
     const categories = [...new Set(this.ordered.map(record => record.category))];
-    this.category.replaceChildren(option('All categories', ''), ...categories.map(category => option(category, category)));
+    this.category.replaceChildren(option('All categories', ''), ...categories.map(category => option(snapshot ? categoryText(snapshot, category) : category, category)));
     if (categories.includes(selectedCategory)) this.category.value = selectedCategory;
     this.provenance.replaceChildren();
     if (snapshot) {
-      this.state.disabled = snapshot.catalogueOnly === true;
-      if (snapshot.catalogueOnly) this.state.value = '';
+      this.state.disabled = catalogue || infrastructureReport;
+      if (this.state.disabled) this.state.value = '';
       this.provenance.append(field('Reported source', snapshot.source), field('Export generated', date(snapshot.generatedAt)),
         field('Read locally', date(new Date().toISOString())));
       this.renderResults();
@@ -396,30 +429,35 @@ class SterlingResourceInventory extends BaseWidget {
   private renderResults(): void {
     const snapshot = this.snapshot;
     if (!snapshot) return;
+    const infrastructureReport = infrastructure(snapshot);
     const query = this.search.value.trim().toLocaleLowerCase();
     const matches = this.ordered.filter(record =>
       (!record.archived || this.archived.checked) &&
       (!this.category.value || record.category === this.category.value) &&
       (!this.state.value || (record.status ?? 'unreported') === this.state.value) &&
-      (!query || [record.name, record.id, record.assetDid, record.stockNumber, record.usagePolicyRef, record.description, record.imageRef, record.lifecycle, record.reviewNote]
+      (!query || [record.name, record.id, record.assetDid, record.stockNumber, record.usagePolicyRef, record.description,
+        record.imageRef, record.lifecycle, record.reviewNote, record.owner, record.capability]
         .some(value => value?.toLocaleLowerCase().includes(query))));
     const displayed = matches.slice(0, this.visible);
     this.more.hidden = matches.length <= this.visible;
     this.results.textContent = matches.length ? `Showing ${displayed.length} of ${matches.length} records` :
       snapshot.resources.length ? 'No records match the filters.' : 'The export contains no records.';
-    const chosen = displayed.find(record => inventoryReference(snapshot, record) === this.selected) ?? displayed[0];
-    this.selected = chosen && inventoryReference(snapshot, chosen);
+    const chosen = displayed.find(record => recordKey(snapshot, record) === this.selected) ?? displayed[0];
+    this.selected = chosen && recordKey(snapshot, chosen);
     this.list.replaceChildren(...displayed.map(record => {
       const row = node('li');
       const select = button(record.name);
       select.className = 'sterling-resource-row';
       const reportedStatus = record.status ? inventoryStatuses[record.status] : notReported;
       const catalogueStatus = record.archived ? 'Archived' : record.lifecycle;
-      select.append(node('small', record.category), node('span', snapshot.catalogueOnly ? catalogueStatus : reportedStatus,
-        'sterling-resource-state'));
-      select.setAttribute('aria-pressed', String(inventoryReference(snapshot, record) === this.selected));
+      select.append(node('small', categoryText(snapshot, record.category)));
+      if (!infrastructureReport) {
+        select.append(node('span', snapshot.catalogueOnly ? catalogueStatus : reportedStatus, 'sterling-resource-state'));
+      }
+      select.setAttribute('aria-pressed', String(recordKey(snapshot, record) === this.selected));
       select.addEventListener('click', () => {
-        this.selected = inventoryReference(snapshot, record);
+        if (this.snapshot !== snapshot) return;
+        this.selected = recordKey(snapshot, record);
         this.list.querySelectorAll('button').forEach(item => item.setAttribute('aria-pressed', String(item === select)));
         this.renderDetails(snapshot, record);
       });
@@ -478,11 +516,21 @@ class SterlingResourceInventory extends BaseWidget {
     }
   }
 
-  private renderDetails(snapshot: InventorySnapshot, record?: InventoryRecord): void {
+  private renderDetails(snapshot: DisplaySnapshot, record?: DisplayRecord): void {
     this.releaseImage();
     this.details.hidden = !record;
     this.details.replaceChildren();
     if (!record) return;
+    if (infrastructure(snapshot)) {
+      const data = node('dl', undefined, 'sterling-resource-fields');
+      const capacity = record.capacity === undefined
+        ? 'Unknown' : `${quantityFormatter.format(record.capacity)} ${record.capacityUnit}`;
+      data.append(field('Category', categoryText(snapshot, record.category)), field('Reported owner', record.owner ?? notReported),
+        field('Reported capability', record.capability ?? notReported), field('Reported capacity', capacity),
+        field('Record as of', record.asOf ? date(record.asOf) : notReported));
+      this.details.append(node('h2', record.name), data);
+      return;
+    }
     const reference = inventoryReference(snapshot, record);
     const data = node('dl', undefined, 'sterling-resource-fields');
     data.append(field('Category', record.category));
@@ -552,8 +600,10 @@ class SterlingResourceInventory extends BaseWidget {
 
   private async editCatalogue(record?: InventoryRecord, toggleArchive = false): Promise<void> {
     const source = this.connection;
-    const etag = source?.etag;
-    if (!source || !etag || !this.snapshot?.catalogueOnly || this.linkRequest || this.editingCatalogue) return;
+    const presented = source?.presentedCatalogue;
+    const snapshot = this.snapshot;
+    if (!source || !presented || !snapshot || infrastructure(snapshot) || !snapshot.catalogueOnly
+      || this.linkRequest || this.editingCatalogue) return;
     const current = () => this.trusted && this.connection === source && !this.linkRequest && !this.isDisposed;
     this.editingCatalogue = true;
     this.add.disabled = true;
@@ -569,28 +619,8 @@ class SterlingResourceInventory extends BaseWidget {
         updated = await new CatalogueRecordDialog(draft).open();
       }
       if (!updated || !current()) return;
-      const conflict = 'The catalogue changed. Refresh it before applying your edit again.';
-      if (!await this.hasRegularSnapshotParents(source)) throw new Error(conflict);
-      const before = await this.files.resolve(source.file, { resolveMetadata: true });
-      if (!current() || before.etag !== etag || !before.isFile || before.isSymbolicLink || before.size > inventorySizeLimit) {
-        throw new Error(conflict);
-      }
-      const content = await this.files.read(source.file, { limits: { size: inventorySizeLimit } });
-      const parsed = parseInventorySnapshot(content.value);
-      if (content.etag !== etag || !parsed?.catalogueOnly || !await this.hasRegularSnapshotParents(source)) throw new Error(conflict);
-
-      const raw = JSON.parse(content.value) as InventorySnapshot;
-      const index = record ? raw.resources.findIndex(entry => entry.id === record.id) : -1;
-      if (record && index < 0) throw new Error(conflict);
-      if (index < 0) raw.resources.push(updated);
-      else raw.resources[index] = { ...raw.resources[index], ...updated };
-      const output = JSON.stringify(raw, undefined, 2) + '\n';
-      if (!parseInventorySnapshot(output) || new TextEncoder().encode(output).length > inventorySizeLimit) {
-        throw new Error('The entry exceeds the catalogue limits. Shorten its fields or use a smaller snapshot.');
-      }
-      const latest = await this.files.resolve(source.file, { resolveMetadata: true });
-      if (!current() || latest.etag !== etag || !latest.isFile || latest.isSymbolicLink) throw new Error(conflict);
-      await this.files.write(source.file, output, { etag, mtime: before.mtime });
+      const parsed = await saveResourceCatalogue(this.files, source.file, presented,
+        () => this.hasRegularSnapshotParents(source), current, updated, record);
       if (!current()) return;
       this.selected = inventoryReference(parsed, updated);
       await this.read(false);
@@ -620,10 +650,11 @@ class SterlingResourceInventory extends BaseWidget {
     this.renderDetails(snapshot, record);
     this.linkFeedback.textContent = 'Checking the selected resource…';
     try {
-      await this.read(false);
+      await this.read(false, true, current);
       if (!current()) return;
-      if (this.snapshot?.sourceId !== snapshot.sourceId || this.snapshot.catalogueOnly
-        || !this.snapshot.resources.some(candidate => candidate.id === record.id)
+      const active = this.snapshot;
+      if (!active || infrastructure(active) || active.sourceId !== snapshot.sourceId || active.catalogueOnly
+        || !active.resources.some(candidate => candidate.id === record.id)
         || this.selected !== reference) {
         this.linkFeedback.textContent = 'The selected resource changed. Select a record to try again.';
         return;
@@ -636,7 +667,7 @@ class SterlingResourceInventory extends BaseWidget {
       if (current()) {
         this.linkAction = undefined;
         const active = this.snapshot;
-        if (active) this.renderDetails(active, active.resources.find(item => inventoryReference(active, item) === this.selected));
+        if (active) this.renderDetails(active, active.resources.find(item => recordKey(active, item) === this.selected));
       }
     }
   }

@@ -180,6 +180,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261113-lbo | fix the chat task list not checking off finished tasks | 2026-11-13 | a770848 | [261113-lbo-fix-the-chat-task-list-not-checking-off-](./quick/261113-lbo-fix-the-chat-task-list-not-checking-off-/) |
+| 261127-l27 | Repair generated staff Join nonce refusal | 2026-11-27 | fee0d5930 | [261127-l27-repair-generated-staff-join-nonce-refusa](./quick/261127-l27-repair-generated-staff-join-nonce-refusa/) |
+| 261127-staff-section-selection | Choose staff sections in Team Studio | 2026-11-27 | b9506ce45 | [Staff section selection](./quick/20261127-staff-section-selection/) |
 
 ## Notes
 

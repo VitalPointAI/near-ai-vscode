@@ -1,0 +1,34 @@
+{
+  "revision": 1,
+  "sourceClass": "fictional",
+  "pairs": [
+    {
+      "id": "CA-ADM-01",
+      "en-CA": "The clerk must retain the inventory record for 30 days after closure unless a hold applies. The clerk must not destroy a record under hold. A supervisor may extend the retention period.",
+      "fr-CA": "Le commis doit conserver la fiche d’inventaire pendant 30 jours après la clôture, sauf si elle fait l’objet d’un gel. Il ne doit pas détruire une fiche visée par un gel. Une personne responsable de la supervision peut prolonger la période de conservation.",
+      "exactLiterals": [],
+      "requiredMeaning": ["Retain for 30 days after closure", "Hold overrides the ordinary period", "Destruction is prohibited under hold", "Supervisor may extend the period"]
+    },
+    {
+      "id": "CA-ADM-02",
+      "en-CA": "On March 12, 2027, the storeroom will receive 4 boxes weighing 12.5 kg each. Allow up to $240 CAD for delivery.",
+      "fr-CA": "Le 12 mars 2027, le magasin recevra 4 boîtes pesant chacune 12,5 kg. Prévoyez au plus 240 $ CA pour la livraison.",
+      "exactLiterals": [],
+      "requiredMeaning": ["2027-03-12", "4 boxes", "12.5 kg per box", "CAD 240 maximum for delivery"]
+    },
+    {
+      "id": "CA-ADM-03",
+      "en-CA": "See the source record (DEMO-12, revision 3, section 2). Its exact wording is « Reçu sous réserve ». The sender has yet to confirm the quantity.",
+      "fr-CA": "Consultez le document source (DEMO-12, révision 3, section 2). Le libellé exact est « Reçu sous réserve ». L’expéditeur n’a pas encore confirmé la quantité.",
+      "exactLiterals": ["DEMO-12", "Reçu sous réserve"],
+      "requiredMeaning": ["Revision 3", "Section 2", "The quantity is still unconfirmed by the sender"]
+    },
+    {
+      "id": "CA-ADM-04",
+      "en-CA": "<form aria-label=\"Loan request\"><label for=\"item\">Item number</label><input id=\"item\" name=\"item\" required aria-describedby=\"item-help\"><p id=\"item-help\">Enter the number on the label.</p><button type=\"submit\">Send request</button></form>",
+      "fr-CA": "<form aria-label=\"Demande de prêt\"><label for=\"item\">Numéro de l’article</label><input id=\"item\" name=\"item\" required aria-describedby=\"item-help\"><p id=\"item-help\">Saisissez le numéro indiqué sur l’étiquette.</p><button type=\"submit\">Envoyer la demande</button></form>",
+      "exactLiterals": ["item", "item-help"],
+      "requiredMeaning": ["Form name, field label, help and button are translated", "Required field and label and help associations remain", "Button still submits the request"]
+    }
+  ]
+}

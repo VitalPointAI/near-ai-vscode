@@ -14,6 +14,8 @@ import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
+import { createStaffSetupPreview, type TeamStudioLanguage } from './teamStudioStaffSetup';
+import { setUpStaffTeam } from './staffSetupCommand';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
@@ -138,7 +140,8 @@ async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promis
  * Opens Team Studio, after the one-time move of older teams has finished (0.4.18 review), so the studio never opens on a half-copied library. It
  * returns a promise so a caller (and a test) can await the panel; VS Code ignores a command handler's promise.
  */
-export async function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}, gateHost?: GateHost): Promise<void> {
+export async function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}, gateHost?: GateHost, language?: TeamStudioLanguage): Promise<void> {
+  void language?.refresh();
   // Only an actual move is waited for: with nothing to move this opens in the same tick, as it always did.
   if (teamsMoveInFlight() !== undefined) await whenTeamsMoved();
   if (current) {
@@ -160,6 +163,20 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
   registerLayoutProbe('teams', panel.webview);
   const studio = attachTeamStudio(panel, {
     library, root: rootNow,
+    staffSetupPreview: createStaffSetupPreview({
+      folders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({ root: folder.uri.fsPath, name: folder.name })),
+      pick: async (folders) => (await vscode.window.showQuickPick(
+        folders.map((folder) => ({ label: folder.name, description: folder.root, folder })),
+        { title: language?.current() === 'fr-CA' ? 'Pour quel projet voulez-vous examiner l’état-major?' : 'Which project’s staff would you like to review?' }
+      ))?.folder,
+      libraryDir: library.directory,
+      startSection: async (section, project) => {
+        const file = await setUpStaffTeam({ section, studio: project, chat: sidebar, library, language: language?.current });
+        if (file) await studio.refresh().catch(() => undefined);
+        return Boolean(file);
+      },
+      post: (message) => { void panel.webview.postMessage(message); }
+    }),
     onDidChangeFolder: (listener) => vscode.workspace.onDidChangeWorkspaceFolders(() => listener()),
     gather: () => gatherDirectoryInput(context, auth),
     knowledgeBase: async () => { const root = rootNow(); return Boolean(root && await stat(path.join(root, '.near-kb')).catch(() => undefined)); },
@@ -331,5 +348,22 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
   });
   current = { panel, startWizard: (target) => studio.startWizard(target) };
   if (options.wizard) void studio.startWizard(options.wizard);
-  panel.onDidDispose(() => { current = undefined; }, undefined, context.subscriptions);
+  let disposed = false;
+  const postLocale = () => {
+    if (!disposed && language) void panel.webview.postMessage({ type: 'staff-preview-locale', locale: language.current() });
+  };
+  const updates = language?.subscribe(postLocale);
+  const visibility = language && panel.onDidChangeViewState(({ webviewPanel }) => {
+    if (webviewPanel.visible) postLocale();
+  });
+  const pageMessages = language && panel.webview.onDidReceiveMessage((message: unknown) => {
+    if (message && typeof message === 'object' && 'type' in message && message.type === 'ready') postLocale();
+  });
+  panel.onDidDispose(() => {
+    disposed = true;
+    updates?.dispose();
+    visibility?.dispose();
+    pageMessages?.dispose();
+    current = undefined;
+  }, undefined, context.subscriptions);
 }

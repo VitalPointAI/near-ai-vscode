@@ -1,8 +1,8 @@
 {
   "name": "near-ai-vscode",
-  "displayName": "Sterling Sovereign AI",
+  "displayName": "Sterling Sov AI",
   "description": "AI agents for coding, research, presales, writing, and data work with configurable model providers, Open-GSD workflows, and project controls.",
-  "version": "0.4.39",
+  "version": "0.4.43",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
   "galleryBanner": {
@@ -56,11 +56,16 @@
   "activationEvents": [
     "workspaceContains:.planning/.near-ai/**",
     "onCommand:nearAi.openCyber",
+    "onCommand:nearAi.getSovAiVersion",
     "onCommand:sterling.workAreas.create"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "nearAi.getSovAiVersion",
+        "title": "SovAI version lookup"
+      },
       {
         "command": "nearAi.newChat",
         "title": "New Chat",
@@ -342,24 +347,24 @@
       },
       {
         "command": "nearAi.policy.open",
-        "title": "Policy",
+        "title": "Standing Orders",
         "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.policy.show",
-        "title": "Show Policy",
+        "title": "Show Standing Orders",
         "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.policy.showAsStored",
-        "title": "Show Policy as Stored",
+        "title": "Show Standing Orders as Stored",
         "category": "SovAI"
       },
       {
         "command": "nearAi.policy.reset",
-        "title": "Reset Policy to Defaults",
+        "title": "Reset Standing Orders to Defaults",
         "category": "SovAI"
       },
       {
@@ -1089,6 +1094,10 @@
     },
     "menus": {
       "commandPalette": [
+        {
+          "command": "nearAi.getSovAiVersion",
+          "when": "false"
+        },
         {
           "command": "nearAi.models.exportAiBom",
           "when": "workspaceFolderCount > 0"

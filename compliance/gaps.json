@@ -7159,6 +7159,18 @@
       "poam": "g552",
       "remediation": "A computer can verify a device revocation before receiving an earlier supplemental grant that gave that device the current cell key. Commit the current key recipients or pending rotations to authenticated history so each computer can verify whether the key is safe for new work. Keep affected writes paused until that proof or a verified rotation arrives, including across partial synchronization.",
       "title": "A computer can lack proof that a revoked device held the current cell key"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-11"
+      ],
+      "id": "G561",
+      "ownerRole": "maintainers",
+      "poam": "g561",
+      "remediation": "Workbench staff setup has been checked in Canadian English and French, including unchanged project scope and cancellation. A qualified Canadian French reviewer must verify the terminology and instructions. Record equivalent workflows and outputs for remaining Canadian Workbench surfaces before declaring full LANG-01 acceptance.",
+      "title": "Canadian Workbench language coverage needs qualified review"
     }
   ]
 }

@@ -13,17 +13,19 @@ import type { PolicySectionId } from '../domain/gate/proposal';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, STALE_DRAFT_TEXT, gateDir, parsePolicyDraft } from '../gate/bundleStore';
 import type { GateHost } from '../gate/host';
+import { NO_SECRET_STORAGE_TEXT } from '../gate/organizationStore';
 import { loadDeviceIdentity } from '../team/identity';
 import type { SecretStorageLike } from './auth';
+import { standingOrdersInstructions } from './gateStatusBar';
 import { openPolicyEditor, openPolicyProposal, registerPolicyEditor } from './policyEditor';
 import type { PolicyChange, PolicyEditorDeps, PolicyEditorState, ProposalOutcome } from './policyEditor';
 
-export const POLICY_APPLIED_TEXT = `Your policy was changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
-export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Open SovAI: Policy and choose Edit my rules first.';
-export const OPEN_FAILED_TEXT = 'SovAI could not open your policy.';
-const APPLY_FAILED_TEXT = 'Nothing was changed: SovAI could not apply your policy draft.';
-const UNTRUSTED_TEXT = 'Nothing was changed: your policy cannot be trusted right now, so it cannot be edited.';
-/** Who proposes a draft, as the page shows it. */
+export const POLICY_APPLIED_TEXT = `Your Standing Orders were changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+export const NO_DRAFT_TEXT = 'There is no draft to apply. Open SovAI: Standing Orders and choose Edit my Standing Orders first.';
+export const OPEN_FAILED_TEXT = 'SovAI could not open your Standing Orders.';
+const APPLY_FAILED_TEXT = 'SovAI could not apply your Standing Orders draft. Nothing was changed.';
+const UNTRUSTED_TEXT = 'SovAI could not verify your Standing Orders. Nothing was changed.';
+/** Origin used in proposal hashes and decision records. */
 const DRAFT_FROM = 'Edit my rules';
 
 /** How the gate's commands reach the policy editor page; a test passes its own. */
@@ -79,6 +81,13 @@ export function policyEditorDeps(host: GateHost, hooks: PolicyEditorHooks): { re
   const stop = host.onDidChange(load);
   const deps: PolicyEditorDeps = {
     state: () => editorStateOf(host, identity?.publicKey),
+    unavailableNotice: () => {
+      const state = host.bundleState();
+      if (state.state === 'valid') return undefined;
+      return state.sentence === NO_SECRET_STORAGE_TEXT
+        ? `${NO_SECRET_STORAGE_TEXT} Ask your administrator to set up a secret store, then reopen the workbench.`
+        : state.sentence || undefined;
+    },
     // One key path for the narrowing table: the section, then the key, any [id] read as [] (41-02).
     directionOf: (section, key, before, after) => narrowingOf(`${section}.${key}`.replace(/\[[^\]]*\]/g, '[]'), before, after, host.policyLayers().effective?.labels.scales),
     applyPersonal: async (next, baseHash) => {
@@ -126,7 +135,7 @@ export async function discardDraft(globalStorageDir: string): Promise<void> {
 }
 
 function warn(message: string): void {
-  void Promise.resolve(vscode.window.showWarningMessage(message)).catch(() => undefined);
+  void Promise.resolve(vscode.window.showWarningMessage(standingOrdersInstructions(message))).catch(() => undefined);
 }
 
 /**

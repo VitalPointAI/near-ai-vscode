@@ -25,8 +25,9 @@
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url, verifySignature } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { MAX_PAYLOAD_BYTES, signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
+import { MAX_PAYLOAD_BYTES, PayloadError, signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
 import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../team/signedPayload';
+import { findSecrets } from '../team/secrets';
 import { isRecord } from '../team/validate';
 import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, entryHash, parseHeaderShape, writerIdOf } from './entry';
 import type { EntryHeader, SealedBlob, SealedEntry } from './entry';
@@ -296,13 +297,24 @@ export function readInvite(file: unknown, now: Date): InviteRead {
 // kem: the joining device's post-quantum public keys; the request carries them, bound by the same signer, only when the invitation requires wrap@2.
 export interface BuildJoinRequestInput { name: string; x25519: string; now: Date; member?: string; kem?: KemPublicKeys }
 
+function freshJoinNonce(): string {
+  // Public randomness can resemble a secret. Redraw before building the signed payload.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const nonce = randomBytes(JOIN_NONCE_BYTES).toString('base64url');
+    if (findSecrets({ nonce }).length === 0) return nonce;
+  }
+  throw new PayloadError('The join request was not made. Please try again.');
+}
+
 // Signs a join request with the joining device for the invite it read. The X25519 binding signature is made by the same signer. The nonce is drawn
 // fresh here, after the invite was read, which is what makes the safety code cost a second preimage (safetyCode.ts).
 export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, input: BuildJoinRequestInput): SignedPayload<JoinRequestPayload> {
   const writer = writerIdOf(signer.publicKey);
+  const nonce = freshJoinNonce();
+  const binding = signer.sign(x25519BindingBytes(input.x25519, writer));
   const withKem = input.kem !== undefined && (invite.requires ?? []).includes(KEM_JOIN_FEATURE);
   const kem = withKem ? signKemBinding(input.kem as KemPublicKeys, writer, (bytes) => signer.sign(bytes)) : undefined;
-  const payload = joinPayloadFor(signer.publicKey, invite, input, signer.sign(x25519BindingBytes(input.x25519, writer)), kem);
+  const payload = joinPayloadFor(signer.publicKey, invite, input, nonce, binding, kem);
   return signPayload(signer, 'staff-join-request', payload, { now: () => input.now });
 }
 
@@ -310,6 +322,7 @@ export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, i
 // the post-quantum binding when the invitation asks for it, and the request; the first refusal comes back as it is and nothing more is signed.
 export async function buildJoinRequestAsync(signer: AnySigner, invite: InvitePayload, input: BuildJoinRequestInput): Promise<SignedPayload<JoinRequestPayload> | SignRefused> {
   const writer = writerIdOf(signer.publicKey);
+  const nonce = freshJoinNonce();
   const binding = await signer.sign(x25519BindingBytes(input.x25519, writer));
   if (typeof binding !== 'string') return { refused: String(binding.refused) };
   let kem: KemBinding | undefined;
@@ -318,13 +331,13 @@ export async function buildJoinRequestAsync(signer: AnySigner, invite: InvitePay
     if (typeof sig !== 'string') return { refused: String(sig.refused) };
     kem = { p256: input.kem.p256, mlkem768: input.kem.mlkem768, sig };
   }
-  return signPayloadAsync(signer, 'staff-join-request', joinPayloadFor(signer.publicKey, invite, input, binding, kem), { now: () => input.now });
+  return signPayloadAsync(signer, 'staff-join-request', joinPayloadFor(signer.publicKey, invite, input, nonce, binding, kem), { now: () => input.now });
 }
 
-// The join request's content, with the nonce drawn fresh here, after the invite was read: that is what makes the safety code cost a second preimage.
-function joinPayloadFor(publicKey: string, invite: InvitePayload, input: BuildJoinRequestInput, x25519Sig: string, kem: KemBinding | undefined): JoinRequestPayload {
+// The shared join fields use the same fresh nonce in the payload and its MAC.
+function joinPayloadFor(publicKey: string, invite: InvitePayload, input: BuildJoinRequestInput, nonce: string, x25519Sig: string, kem: KemBinding | undefined): JoinRequestPayload {
   const member = input.member ?? invite.forMember;
-  const fields: JoinMacFields = { invite: invite.invite, genesisHash: invite.genesisHash, name: input.name, publicKey, x25519: input.x25519, nonce: randomBytes(JOIN_NONCE_BYTES).toString('base64url') };
+  const fields: JoinMacFields = { invite: invite.invite, genesisHash: invite.genesisHash, name: input.name, publicKey, x25519: input.x25519, nonce };
   if (member !== undefined) fields.member = member;
   const payload: JoinRequestPayload = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519, x25519Sig, nonce: fields.nonce, mac: joinMac(invite.secret, fields) };
   if (member !== undefined) payload.member = member;

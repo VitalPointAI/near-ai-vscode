@@ -2,7 +2,7 @@ import { stampTeam } from '../agent/teamUpdate';
 import { inspect } from 'node:util';
 import { projectType } from '../agent/projectTypes';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,10 +17,11 @@ import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
 import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cloneNameProblem, savedTeamName, TEAM_NAME_MAX, KEPT_WIZARD_TEXT, takenTeamNames, teamNameClash, optimiseTarget, parseStudioMessage, reviewDraft, startingPointDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
+import { createStaffSetupPreview, createTeamStudioLocale } from '../services/teamStudioStaffSetup';
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { JPEG, jpegOfSize, png, SVG, WEBP, webpOfSize } from './iconFixtures';
 import { iconVariation, ICON_VARIATIONS, teamIconPrompt, withIconReference } from '../agent/teamIcon';
-import { buildDashboard, type DashboardTeam } from '../domain/teamDashboard';
+import { buildDashboard, projectIdentity, type DashboardTeam } from '../domain/teamDashboard';
 import type { ActivitySessionSummary } from '../domain/activity';
 import { withTeamRating } from '../agent/teamFrontMatter';
 
@@ -716,7 +717,7 @@ async function runPage(extra: Record<string, unknown> = {}, options: { state?: u
   const sandbox = vm.createContext({ ...extra, document: doc, window: { addEventListener: (type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); else windowEvents.set(type, [...(windowEvents.get(type) ?? []), listener]); } }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))), getState: () => webviewState.value, setState: (value: unknown) => { webviewState.value = JSON.parse(JSON.stringify(value)); } }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Number, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
   vm.runInContext(await readFile(SCRIPT, 'utf8'), sandbox, { timeout: 1000 });
   const byLabel = (label: string) => doc.body.all().find((node) => node.tagName === 'button' && (node.getAttribute('aria-label') === label || (!node.getAttribute('aria-label') && node.textContent === label)));
-  return { doc, posts, webviewState, fireWindow: (type: string) => (windowEvents.get(type) ?? []).forEach((listener) => listener({ data: undefined })), dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
+  return { doc, posts, webviewState, fireWindow: (type: string, extra: Record<string, unknown> = {}) => (windowEvents.get(type) ?? []).forEach((listener) => listener({ data: undefined, ...extra })), dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
 }
 
 /** The number of the page's last starting-point request, which the host's reply carries back (PR #75 review: replies are matched by it). */
@@ -2343,6 +2344,38 @@ test('message parsing: use-team and the builder path take exact keys and known v
   ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
 });
 
+test('host: replacing a project team clears only that project’s kept state after a folder switch', async () => {
+  const h = await harness();
+  const otherRoot = path.join(path.dirname(h.root), 'other-project');
+  const firstFile = TeamLibrary.projectTeamFile(h.root);
+  const otherFile = TeamLibrary.projectTeamFile(otherRoot);
+  await mkdir(path.dirname(firstFile), { recursive: true });
+  await mkdir(path.dirname(otherFile), { recursive: true });
+  await writeFile(firstFile, teamMarkdown(draft({ name: 'First project' })));
+  const otherTeam = teamMarkdown(draft({ name: 'Other project' }));
+  await writeFile(otherFile, otherTeam);
+  const replacement = await h.library.create('Web team', HANDWRITTEN);
+  const firstKey = 'project:' + await projectIdentity(h.root);
+  const otherKey = 'project:' + await projectIdentity(otherRoot);
+  const at = '2026-11-21T12:00:00.000Z';
+  const otherRating = { at, rating: 5 };
+  const otherRoleTest = { at, members: 1, tested: 1, score: 80 };
+  let ratings: unknown = { [firstKey]: { at, rating: 2 }, [otherKey]: otherRating };
+  let roleTests: unknown = { [firstKey]: { at, members: 1, tested: 1, score: 40 }, [otherKey]: otherRoleTest };
+  h.deps.ratings = { get: () => ratings, set: async (value) => { ratings = value; } };
+  h.deps.roleTests = { get: () => roleTests, set: async (value) => { roleTests = value; } };
+  h.deps.choose = async () => {
+    h.setRoot(otherRoot, false);
+    return 'Use as is';
+  };
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team', discard: true });
+  assert.equal(await readFile(firstFile, 'utf8'), await readFile(replacement, 'utf8'));
+  assert.equal(await readFile(otherFile, 'utf8'), otherTeam);
+  assert.deepEqual(ratings, { [otherKey]: otherRating });
+  assert.deepEqual(roleTests, { [otherKey]: otherRoleTest });
+});
+
 test('host: Use as is with a project open makes the team this project\'s team with no name asked, and replacing one asks first and keeps the old one in the history', async () => {
   const h = await harness();
   const web = await h.library.create('Web team', HANDWRITTEN);
@@ -3883,15 +3916,402 @@ test('page: sort by Most used, Recently run, Rating or Name, filter to Needs att
 test('page: the toolbar: New team opens the builder\'s first screen; Optimise all teams, Import and Refresh ask the host; no project-team button there', async () => {
   const page = await dashboardPage();
   const toolbar = page.doc.body.all().find((node) => node.className === 'toolbar')!;
-  assert.deepEqual(toolbar.all().filter((node) => node.tagName === 'button').map((node) => node.textContent), ['New team', 'Optimise all teams', 'Set up a staff team', 'Import…', 'Refresh']);
+  assert.deepEqual(toolbar.all().filter((node) => node.tagName === 'button').map((node) => node.textContent), ['New team', 'Optimise all teams', 'Set up staff', 'Import…', 'Refresh']);
   for (const [label, type] of [['Import…', 'import'], ['Refresh', 'refresh']] as const) { page.byLabel(label)!.click(); assert.equal(page.posts.at(-1)!.type, type); }
-  page.byLabel('Set up a military staff team (J2 intelligence or J5 plans) for this project\'s doctrine profile')!.click();
-  assert.equal(page.posts.at(-1)!.type, 'staff-setup');
+  const staffSetup = page.byLabel('Set up staff');
+  assert.ok(staffSetup, 'the staff setup action uses its visible text as its accessible name');
+  staffSetup.click();
+  assert.equal(page.posts.at(-1)!.type, 'staff-preview-open');
+  page.byLabel('Leave setup')!.click();
   page.byLabel('Test every team and set each member model from what the tests found, after asking about the cost')!.click();
   assert.equal(page.posts.at(-1)!.type, 'optimise-all');
   page.byLabel('New team')!.click();
   assert.equal(page.doc.getElementById('step-heading')!.textContent, 'How do you want to start?');
   assert.ok(page.byLabel('Use an existing team') && page.byLabel('Create a new team') && page.byLabel('Recommend a team for me'));
+});
+
+test('host: profile-first chooser inspects every level without passing scope to legacy setup', async () => {
+  const h = await harness();
+  const messages: Array<Record<string, any>> = [];
+  const legacy: unknown[][] = [];
+  const preview = createStaffSetupPreview({ folders: () => [{ root: h.root, name: 'Office project' }], pick: async () => undefined,
+    libraryDir: path.join(h.root, 'library'), post: message => { messages.push(message); }, startSection: async () => assert.fail('inspection must not start setup') });
+  Object.assign(h.deps, { staffSetupPreview: preview });
+  h.deps.setUpStaffTeam = async (...args: unknown[]) => { legacy.push(args); };
+  await h.send({ type: 'staff-preview-open', request: 1 });
+  const getView = () => messages.at(-1)!;
+  const initial = getView();
+  assert.equal(initial.project, 'Office project');
+  assert.deepEqual(initial.profiles, ['us-joint', 'us-army', 'nato', 'canada']);
+  assert.ok(initial.rows.every((row: { code?: string }) => !row.code));
+  const choose = async (field: string, choice: string, session = getView().session) =>
+    h.send({ type: 'staff-preview-select', request: 1, session, field, choice });
+  await choose('level', 'l3');
+  assert.equal(getView(), initial);
+  await choose('profile', 'canada');
+  assert.notEqual(getView().session, initial.session);
+  assert.deepEqual(getView().levels, ['l4', 'l3', 'l2', 'l1', 'l0']);
+  for (const level of getView().levels) {
+    const previous = getView();
+    await choose('level', level);
+    assert.equal(getView().organizationLevel, level);
+    assert.notEqual(getView().session, previous.session);
+  }
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, undefined);
+  await choose('level', 'l3');
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, 'G4');
+  await choose('profile', 'us-army');
+  assert.equal(getView().organizationLevel, undefined);
+  await choose('level', 'l3');
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, 'S-4');
+  await choose('profile', 'us-joint');
+  await choose('level', 'l1');
+  const joint = getView();
+  await h.send({ type: 'staff-preview-legacy', request: 1, session: joint.session });
+  assert.equal(getView(), joint, 'an inspected profile cannot open legacy setup');
+  await choose('level', 'l0');
+  assert.equal(getView().organizationLevel, 'l0');
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, 'J-4');
+  await choose('level', 'l2', joint.session);
+  assert.equal(getView().organizationLevel, 'l0', 'an L1 selection cannot be reused after selecting L0');
+  await h.send({ type: 'staff-preview-back', request: 1, session: getView().session });
+  assert.equal(getView().profile, undefined);
+  assert.equal(getView().legacySetup, true);
+  await h.send({ type: 'staff-preview-continue', request: 1, session: getView().session, section: 'j4' });
+  preview.invalidate();
+  await choose('level', 'l2');
+  assert.equal(getView().error, 'projectChanged');
+  await h.send({ type: 'staff-setup', organizationLevel: 'l0', profile: 'us-joint' });
+  assert.deepEqual(legacy, []);
+  await h.send({ type: 'staff-preview-leave', request: 1 });
+  await h.send({ type: 'staff-setup' });
+  assert.deepEqual(legacy, [[]], 'the unchanged native route receives no inspected scope');
+  assert.equal(existsSync(path.join(h.root, '.planning', '.near-ai', 'project.json')), false);
+});
+
+test('page: profile-first staff preview changes scope and language without starting setup', async () => {
+  const page = await dashboardPage();
+  const entry = () => page.byLabel('Set up staff')!;
+  entry().click();
+  const first = page.posts.at(-1)!;
+  page.byLabel('Leave setup')!.click();
+  assert.equal(page.doc.activeElement, entry());
+  entry().click();
+  const { request } = page.posts.at(-1)!;
+  const content = {
+    type: 'staff-preview-state', request, session: 'initial', project: 'Library project', legacySetup: true,
+    profiles: ['us-army', 'canada'], levels: [], rows: [{ id: 'j4' }, { id: 'j3', status: 'legacyUnresolved', team: 'Library coordination' }]
+  };
+  page.dispatch({ ...content, request: first.request });
+  assert.doesNotMatch(page.text(), /Library project/);
+  page.dispatch(content);
+  assert.match(page.text(), /Logistics/);
+  assert.match(page.text(), /Library coordination/);
+  assert.doesNotMatch(page.text(), /G4|J4|L3 Brigade/);
+  page.byLabel('NATO (Canadian terms)')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-select', request, session: 'initial', field: 'profile', choice: 'canada' });
+  const profile = { ...content, legacySetup: false, session: 'profile', previousSession: 'initial', profile: 'canada', levels: ['l4', 'l3', 'l2', 'l1', 'l0'] };
+  page.dispatch(profile);
+  const brigade = () => page.doc.getElementById('staff-level-l3')!;
+  brigade().click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-select', request, session: 'profile', field: 'level', choice: 'l3' });
+  page.dispatch({ ...profile, session: 'stale', previousSession: 'initial', organizationLevel: 'l0' });
+  assert.equal(page.doc.getElementById('staff-level-l0')!.getAttribute('aria-pressed'), 'false');
+  page.dispatch({ ...profile, session: 'brigade', previousSession: 'profile', organizationLevel: 'l3', rows: [{ id: 'j4', code: 'G4' }] });
+  assert.equal(page.doc.activeElement, brigade());
+  assert.match(page.text(), /G4 Logistics/);
+  assert.equal(brigade().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.doc.getElementById('staff-preview-continue'), null);
+  assert.equal(page.byLabel('Open existing staff setup'), undefined);
+  const before = page.posts.length;
+  page.dispatch({ type: 'staff-preview-locale', locale: 'fr-CA' });
+  assert.match(page.text(), /Niveau organisationnel.*G4 Logistique/);
+  assert.equal(page.doc.activeElement, brigade());
+  assert.equal(brigade().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.posts.length, before);
+  page.fireWindow('keydown', { key: 'Escape', preventDefault: () => undefined });
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request });
+  assert.equal(page.doc.activeElement, page.byLabel('Configurer l’état-major'));
+  page.byLabel('Configurer l’état-major')!.click();
+  const reopened = page.posts.at(-1)!.request;
+  page.dispatch({ ...content, request: reopened });
+  page.byLabel('Ouvrir la configuration existante')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-legacy', request: reopened, session: 'initial' });
+});
+
+test('page: Staff setup selects only chosen sections and continues one at a time on fresh previews', async () => {
+  const page = await dashboardPage();
+  const entry = () => page.byLabel('Set up staff')!;
+  const next = () => page.doc.getElementById('staff-preview-continue')!;
+  const section = (id: string) => page.doc.getElementById('staff-section-' + id);
+  const handoffs = () => page.posts.filter((message) => message.type === 'staff-preview-continue');
+  entry().click();
+  const first = page.posts.at(-1)!;
+  page.byLabel('Leave setup')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request: first.request });
+  assert.equal(page.doc.activeElement, entry());
+  entry().click();
+  const { request } = page.posts.at(-1)!;
+  const content = {
+    legacy: true, project: 'Library project', profile: 'nato-ca', level: 'tactical',
+    rows: [
+      { id: 'j4', template: true, status: 'available' },
+      { id: 'j5', template: true, status: 'available' },
+      { id: 'j3', template: true, status: 'linked', team: 'Library operations' },
+      { id: 'j2', template: true, status: 'unverified' },
+      { id: 'j9', template: false, status: 'noTemplate' }
+    ]
+  };
+  const preview = { type: 'staff-preview-state', session: 'first-session', ...content };
+  page.dispatch({ ...preview, request: first.request });
+  assert.doesNotMatch(page.text(), /Library project/);
+  page.dispatch({ ...preview, request });
+  assert.match(page.text(), /Library project.*NATO\/Canadian.*Tactical/);
+  assert.match(page.text(), /Library operations/);
+  assert.match(page.text(), /Civil-military cooperation/);
+  assert.equal(section('j3'), null, 'a linked team is shown but cannot be overwritten from this picker');
+  assert.equal(section('j9'), null, 'a section without a template cannot enter the selection');
+  assert.equal(section('j2')!.disabled, false, 'a missing compatible link can proceed to the existing guarded review');
+  assert.match(page.text(), /The linked agent team could not be verified/);
+  assert.equal(page.doc.getElementById('staff-scope-section'), null);
+  assert.equal(page.doc.getElementById('staff-scope-complete'), null);
+  assert.equal(section('j4')!.getAttribute('aria-pressed'), 'false');
+  assert.equal(section('j5')!.getAttribute('aria-pressed'), 'false');
+  assert.equal(next().disabled, true);
+  next().click();
+  assert.equal(handoffs().length, 0);
+
+  section('j5')!.click();
+  section('j4')!.click();
+  assert.equal(section('j4')!.getAttribute('aria-pressed'), 'true');
+  assert.equal(section('j5')!.getAttribute('aria-pressed'), 'true');
+  next().click();
+  assert.deepEqual(handoffs(), [{ type: 'staff-preview-continue', request, session: 'first-session', section: 'j4' }]);
+  const rows = content.rows.map((row) => row.id === 'j4' ? { ...row, status: 'linked', team: 'New logistics' } : row);
+  const result = { type: 'staff-preview-result', request, applied: true, preview: { ...content, session: 'second-session', rows } };
+  page.dispatch({ ...result, session: 'wrong-session' });
+  assert.doesNotMatch(page.text(), /New logistics/);
+  page.dispatch({ ...result, session: 'first-session' });
+  assert.match(page.text(), /New logistics/);
+  assert.equal(section('j4'), null);
+  assert.equal(section('j5')!.getAttribute('aria-pressed'), 'true');
+  assert.equal(handoffs().length, 1, 'an editor confirmation must not start the next section');
+  next().click();
+  assert.deepEqual(handoffs()[1], { type: 'staff-preview-continue', request, session: 'second-session', section: 'j5' });
+
+  let escapeHandled = false;
+  page.fireWindow('keydown', { key: 'Escape', preventDefault: () => { escapeHandled = true; } });
+  assert.equal(escapeHandled, true);
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request });
+  assert.equal(page.doc.activeElement, entry());
+});
+
+test('page: a Canadian language change preserves the staff preview, focused section and one pending decision', async () => {
+  const page = await dashboardPage();
+  page.byLabel('Set up staff')!.click();
+  const request = page.posts.at(-1)!.request;
+  const content = { legacy: true, project: 'Project Écho', profile: 'nato-ca', level: 'tactical', rows: [
+    { id: 'j4', code: 'G4', template: true, status: 'available', decisionRole: true },
+    { id: 'j9', code: 'G9', template: false, status: 'noTemplate' }
+  ] };
+  page.dispatch({ type: 'staff-preview-state', request, session: 'host-session', ...content });
+  const selected = () => page.doc.getElementById('staff-section-j4')!;
+  const next = () => page.doc.getElementById('staff-preview-continue')!;
+  selected().click();
+  assert.equal(page.doc.activeElement, selected());
+  const before = page.posts.length;
+
+  page.dispatch({ type: 'staff-preview-locale', locale: 'fr-CA' });
+  assert.match(page.text(), /Aperçu de la configuration de l’état-major.*Project Écho.*G4 Logistique/);
+  assert.equal(selected().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.doc.activeElement, selected());
+  assert.equal(page.posts.length, before);
+  assert.match(next().textContent, /Poursuivre/);
+  next().click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-continue', request, session: 'host-session', section: 'j4' });
+
+  page.dispatch({ type: 'staff-preview-locale', locale: 'en-CA' });
+  assert.match(page.text(), /Continue in the editor’s setup questions/);
+  assert.equal(page.posts.length, before + 1);
+  page.dispatch({ type: 'staff-preview-result', request, session: 'host-session', applied: false, preview: { ...content, session: 'retry-session' } });
+  assert.equal(page.doc.activeElement, selected());
+  assert.equal(selected().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.posts.length, before + 1, 'cancellation does not retry on its own');
+  next().click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-continue', request, session: 'retry-session', section: 'j4' });
+  page.byLabel('Leave setup')!.click();
+  assert.equal(page.doc.activeElement, page.byLabel('Set up staff'));
+});
+
+test('host: late native language replies and disposed listeners cannot change Studio state', async () => {
+  const pending: Array<(value: unknown) => void> = [];
+  const locale = createTeamStudioLocale(() => new Promise(resolve => pending.push(resolve)));
+  const updates: string[] = [];
+  const subscription = locale.subscribe(value => { updates.push(value); });
+  const old = locale.refresh();
+  const current = locale.refresh();
+  pending[1]('fr-CA');
+  await current;
+  pending[0]('en-CA');
+  await old;
+  assert.equal(locale.current(), 'fr-CA');
+  assert.deepEqual(updates, ['fr-CA']);
+
+  const invalid = locale.refresh();
+  subscription.dispose();
+  pending[2]({ locale: 'fr-CA' });
+  await invalid;
+  assert.equal(locale.current(), 'en-CA');
+  assert.deepEqual(updates, ['fr-CA']);
+});
+
+test('host: Staff setup preview scopes the latest pick and holds a substituted project directory', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'staff-preview-'));
+  const first = { root: path.join(base, 'first'), name: 'First project' };
+  const second = { root: path.join(base, 'second'), name: 'Second project' };
+  const projectJson = path.join(second.root, '.planning', '.near-ai', 'project.json');
+  await mkdir(first.root);
+  await mkdir(path.dirname(projectJson), { recursive: true });
+  const projectBytes = JSON.stringify({ staff: { profile: 'nato-ca', level: 'tactical', teams: { j4: 'library-logistics' } } });
+  await writeFile(projectJson, projectBytes);
+  const library = path.join(base, 'library');
+  await mkdir(library);
+  const teamFile = path.join(library, 'library-logistics.md');
+  const teamBytes = teamMarkdown(draft({ name: 'Library logistics' }));
+  await writeFile(teamFile, teamBytes);
+  const picks: Array<(value: typeof first | undefined) => void> = [];
+  const posted: unknown[] = [];
+  const preview = createStaffSetupPreview({
+    folders: () => [first, second], pick: () => new Promise((resolve) => picks.push(resolve)),
+    libraryDir: library, post: (message) => { posted.push(message); }, startSection: async () => false
+  });
+  const open = (request: number) => preview.receive({ type: 'staff-preview-open', request });
+  await preview.receive({ type: 'staff-preview-open', request: 1, root: second.root });
+  assert.equal(picks.length, 0, 'a webview path is refused');
+  const stale = open(1);
+  await preview.receive({ type: 'staff-preview-leave', request: 1 });
+  const current = open(2);
+  const locale = createTeamStudioLocale(async () => 'fr-CA');
+  await locale.refresh();
+  assert.equal(locale.current(), 'fr-CA');
+  assert.equal(picks.length, 2, 'the language change leaves the pending picker in place');
+  picks[1](second);
+  await current;
+  picks[0](first);
+  await stale;
+  assert.equal(posted.length, 1);
+  assert.match(JSON.stringify(posted[0]), /Second project.*"legacySetup":true.*Library logistics/);
+  assert.doesNotMatch(JSON.stringify(posted[0]), /First project|library-logistics\.md/);
+  await open(2);
+  assert.equal(picks.length, 2, 'the current request is accepted once');
+  const wrong = open(3);
+  picks[2]({ root: base, name: 'Outside' });
+  await wrong;
+  assert.doesNotMatch(JSON.stringify(posted), /Outside/);
+  const beforeSwitch = open(4);
+  preview.invalidate();
+  picks[3](first);
+  await beforeSwitch;
+  assert.doesNotMatch(JSON.stringify(posted), /First project/);
+
+  const substitute = open(5);
+  await rename(second.root, path.join(base, 'second-original'));
+  await mkdir(path.dirname(projectJson), { recursive: true });
+  await writeFile(projectJson, projectBytes);
+  picks[4](second);
+  await substitute;
+  assert.doesNotMatch(JSON.stringify(posted.filter((entry: any) => entry.request === 5)), /Library logistics/);
+  assert.equal(await readFile(projectJson, 'utf8'), projectBytes);
+  assert.equal(await readFile(teamFile, 'utf8'), teamBytes);
+  preview.reset();
+  const restored = open(1);
+  assert.equal(picks.length, 6, 'a restarted webview may start its request count again');
+  preview.dispose();
+  picks[5](first);
+  await restored;
+  assert.doesNotMatch(JSON.stringify(posted), /First project/);
+});
+
+test('host: Staff setup admits only one current section handoff and invalidates it on a folder change', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'staff-preview-continue-'));
+  const primary = await mkdtemp(path.join(tmpdir(), 'staff-preview-primary-'));
+  const posted: Array<{ request: number; session?: string }> = [];
+  let pending: (() => void) | undefined;
+  const calls: Array<{ section: string; selection: { root: string; isCurrent(): boolean; isPrimary(): boolean } }> = [];
+  const deps = {
+    folders: () => [{ root: primary, name: 'Primary project' }, { root, name: 'Selected project' }],
+    pick: async () => ({ root, name: 'Selected project' }),
+    libraryDir: path.join(root, 'library'),
+    post: (message: { request: number; session?: string }) => { posted.push(message); },
+    startSection: async (section: string, selection: { root: string; isCurrent(): boolean; isPrimary(): boolean }) => {
+      calls.push({ section, selection });
+      await new Promise<void>((resolve) => { pending = resolve; });
+      return false;
+    }
+  };
+  const preview = createStaffSetupPreview(deps);
+  await preview.receive({ type: 'staff-preview-open', request: 1 });
+  await preview.receive({ type: 'staff-preview-legacy', request: 1, session: posted[0].session });
+  const intent = { type: 'staff-preview-continue', request: 1, session: posted[1].session, section: 'j4' };
+  await preview.receive({ ...intent, session: 'stale' });
+  await preview.receive({ ...intent, section: 'j9' });
+  await preview.receive({ ...intent, root });
+  assert.equal(calls.length, 0);
+  const first = preview.receive(intent);
+  await preview.receive(intent);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].section, 'j4');
+  assert.equal(calls[0].selection.root, await realpath(root));
+  assert.equal(calls[0].selection.isCurrent(), true);
+  assert.equal(calls[0].selection.isPrimary(), false, 'the legacy handoff preserves the selected non-primary project');
+  preview.invalidate();
+  assert.equal(calls[0].selection.isCurrent(), false);
+  pending!();
+  await first;
+  await preview.receive(intent);
+  assert.equal(calls.length, 1);
+});
+
+test('host: each completed staff handoff offers a fresh nonce for the same physical project', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'staff-preview-reopen-'));
+  const root = path.join(base, 'project');
+  const projectFile = path.join(root, '.planning', '.near-ai', 'project.json');
+  await mkdir(path.dirname(projectFile), { recursive: true });
+  await writeFile(projectFile, JSON.stringify({ staff: { profile: 'us-joint', level: 'operational', teams: { j4: 'j4-us-joint-operational' } } }));
+  const posted: Array<{ request: number; session?: string; preview?: { session: string; project: string }; error?: string }> = [];
+  const calls: Array<{ section: string; root: string }> = [];
+  let substitute = false;
+  const preview = createStaffSetupPreview({
+    folders: () => [{ root, name: 'Selected project' }],
+    pick: async () => undefined,
+    libraryDir: path.join(base, 'library'),
+    post: (message) => { posted.push(message); },
+    startSection: async (section, project) => {
+      assert.equal(project.isCurrent(), true);
+      calls.push({ section, root: project.root });
+      if (substitute) {
+        await rename(root, path.join(base, 'original'));
+        await mkdir(root);
+      }
+      return true;
+    }
+  });
+  await preview.receive({ type: 'staff-preview-open', request: 1 });
+  await preview.receive({ type: 'staff-preview-legacy', request: 1, session: posted[0].session });
+  const first = { type: 'staff-preview-continue', request: 1, session: posted[1].session, section: 'j4' };
+  await preview.receive(first);
+  const reopened = posted.at(-1)!.preview;
+  assert.ok(reopened);
+  assert.equal(reopened.project, 'Selected project');
+  assert.notEqual(reopened.session, first.session);
+  await preview.receive({ ...first, section: 'j5' });
+  assert.deepEqual(calls, [{ section: 'j4', root: await realpath(root) }], 'a completed nonce cannot start another section');
+  substitute = true;
+  await preview.receive({ ...first, session: reopened.session, section: 'j5' });
+  assert.equal(calls.length, 2);
+  assert.equal(posted.at(-1)!.preview, undefined, 'a same-path replacement cannot receive another preview');
+  await preview.receive({ ...first, session: reopened.session });
+  assert.equal(calls.length, 2);
 });
 
 test('page: the "What should this team be able to produce?" box is not on the main page; it is New team > Create a new team > Describe it, and AI drafts it', async () => {

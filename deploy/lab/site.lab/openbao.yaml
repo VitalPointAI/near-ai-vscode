@@ -1,0 +1,24 @@
+# The lab run supplies the token claim on the encrypted static class.
+server:
+  ha:
+    replicas: 1
+  dataStorage:
+    size: 1Gi
+  extraSecretEnvironmentVars:
+    - envName: BAO_HSM_PIN
+      secretName: openbao-hsm-pin
+      secretKey: pin
+  volumes:
+    - name: lab-tokens
+      persistentVolumeClaim:
+        claimName: openbao-lab-tokens
+  volumeMounts:
+    - name: lab-tokens
+      mountPath: /var/lib/softhsm/tokens
+sterling:
+  seal: pkcs11
+  pkcs11:
+    lib: /usr/lib64/softhsm/libsofthsm2.so
+    tokenLabel: OpenBao
+    keyLabel: bao-root-key
+    mechanism: AES_GCM

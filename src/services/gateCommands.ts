@@ -31,7 +31,7 @@ import { setDefaultSessionRoute, setPrivateOnlySetting } from '../gate/sessionMa
 import { labelKeyShown, levelShown, scaleShown, setActiveScaleSource } from '../domain/gate/labelAlgebra';
 import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routing';
 import type { SecretStorageLike } from './auth';
-import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
+import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem, standingOrdersInstructions } from './gateStatusBar';
 import { onReportNoticeChange, reportNoticeStatus, startReportModeNotice } from './reportModeNotice';
 import { setModelRowContext } from './chatBridge';
 import type { GateStatusTimers } from './gateStatusBar';
@@ -65,7 +65,7 @@ export function unlabelledDefaultText(defaultLabel: Label): string {
 
 /** What Edit Policy says beside the draft it opens (D-27, D-41, CLAS-07). */
 export function editPolicyNotice(defaultLabel: Label): string {
-  return `Your policy draft is open. Change it, then choose Apply, or Apply my draft in SovAI: Policy. SovAI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
+  return `Your Standing Orders draft is open. Change it, then choose Apply, or Apply my draft in SovAI: Standing Orders. SovAI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
 }
 
 export const POLICY_SCHEME = 'near-ai-policy';
@@ -78,14 +78,14 @@ export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 export const POLICY_ROUTING_TEXT =
   "This version checks the clearances below when an agent reads a labelled file. Each chat's label decides where its content is sent, by the routing tiers below. Levels that need an attested cloud go to a private NEAR AI Cloud model only over a connection proven to end inside its private hardware; otherwise they stay on this computer.";
 
-export const RESET_CONFIRM_ACTION = 'Reset Policy';
-export const RESET_TITLE = 'Reset your policy to the default?';
+export const RESET_CONFIRM_ACTION = 'Reset Standing Orders';
+export const RESET_TITLE = 'Reset your Standing Orders to the defaults?';
 export const RESET_DETAIL =
-  "This replaces your policy file with the default policy and signs it with this computer's key. Your current file is kept beside it. Anything your policy narrowed is allowed again, up to what your settings allow.";
+  "This replaces your Standing Orders with the defaults and signs them with this computer's key. Your current file is kept beside the new one. Anything your Standing Orders narrowed is allowed again, up to what your settings allow.";
 export const RESET_DETAIL_ORGANIZATION =
-  "This replaces your own settings on this computer with the starting rules and signs them with this computer's key. Your organization's rules stay as they are. Your current file is kept beside the new one.";
-export const RESET_DONE_TEXT = 'Your policy was reset to the default. Your old policy file was kept beside the new one.';
-export const RESET_FAILED_TEXT = 'Nothing was changed: SovAI could not reset your policy.';
+  "This replaces your own settings on this computer with the starting rules and signs them with this computer's key. Your organization's Standing Orders stay as they are. Your current file is kept beside the new one.";
+export const RESET_DONE_TEXT = 'Your Standing Orders were reset to the defaults. Your old file was kept beside the new one.';
+export const RESET_FAILED_TEXT = 'SovAI could not reset your Standing Orders. Nothing was changed.';
 
 export interface GateActivationContext {
   readonly globalStorageUri: { readonly fsPath: string };
@@ -142,7 +142,7 @@ function mcpCeilingLines(ceilings: Readonly<Record<string, Clearance>> | undefin
 }
 
 export function policyDocumentText(state: BundleState | undefined, now: number, layers?: PolicyLayersView): string {
-  const lines: string[] = ['Your SovAI policy', ''];
+  const lines: string[] = ['Your Standing Orders', ''];
   // D-23: who set the rules, only when the layers are known and the policy is usable; D-21: your organization's failure is fixed by its contact, never Reset.
   const organization = layers?.organization;
   if (organization !== undefined && state?.state === 'valid' && policyProblem(state, now, layers) === undefined) {
@@ -152,7 +152,7 @@ export function policyDocumentText(state: BundleState | undefined, now: number, 
   }
   const organizationFailed = layers?.failedLayer === 'organization' && state?.state === 'failed-closed';
   if (state === undefined) {
-    lines.push('SovAI is checking your policy file. Open this view again in a moment.');
+    lines.push('SovAI is checking your Standing Orders. Open this view again in a moment.');
     return lines.join('\n');
   }
   const problem = policyProblem(state, now, layers);
@@ -164,14 +164,14 @@ export function policyDocumentText(state: BundleState | undefined, now: number, 
   const needsUpdate = state.state === 'failed-closed' && (UPDATE_REASONS.has(state.reason) || (state.reason === 'unknown-field' && state.ownPolicy !== true));
   const ownUnknownField = state.state === 'failed-closed' && state.reason === 'unknown-field' && state.ownPolicy === true;
   lines.push(organizationFailed
-    ? `This view only shows your policy. Editing it changes nothing. Your organization's rules need attention: ask ${contactShown(organization?.state === 'failed' ? organization.contacts : undefined)}.`
+    ? `This view only shows your Standing Orders. Editing it changes nothing. Ask ${contactShown(organization?.state === 'failed' ? organization.contacts : undefined)} about your organization's Standing Orders.`
     : usable
-    ? 'This view only shows your policy. Editing it changes nothing. To change your policy, open SovAI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only.'
+    ? 'This view only shows your Standing Orders. Editing it changes nothing. Open SovAI: Standing Orders and choose Edit my Standing Orders to change them. Reset my Standing Orders restores only your own defaults.'
     : ownUnknownField
-      ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of SovAI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, Reset my rules in SovAI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded.'
+      ? 'This view only shows your Standing Orders. Editing it changes nothing. The policy file has a setting this version does not know. If a newer version of SovAI wrote it, update the extension. This computer signed the file. If you changed it by hand, Reset my Standing Orders in SovAI: Standing Orders signs fresh defaults for your own rules and keeps the old file beside it. Your changes are discarded.'
       : needsUpdate
-        ? 'This view only shows your policy. Editing it changes nothing. Your policy file was written for a newer version of SovAI: update the extension. Resetting it would discard every rule it holds.'
-        : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open SovAI: Policy and choose Reset my rules, which resets your own rules only.', '');
+        ? 'This view only shows your Standing Orders. Editing it changes nothing. Update the extension to read Standing Orders written for a newer version of SovAI. Resetting would discard every rule they hold.'
+        : 'This view only shows your Standing Orders. Editing it changes nothing. Open SovAI: Standing Orders and choose Reset my Standing Orders to restore only your own defaults.', '');
   if (!usable || state.state !== 'valid') {
     lines.push('State: not usable, so only reading and planning are allowed');
     // The sentence is its own line when there is one; a state with none adds nothing, not a blank line.
@@ -235,12 +235,12 @@ export function policyDocumentText(state: BundleState | undefined, now: number, 
 /** The fixed words of the Policy step. `policySetupStep` adds what depends on the gate's state. */
 export const POLICY_SETUP_STEP = Object.freeze({
   id: 'policy',
-  label: 'Check your policy',
+  label: 'Check your Standing Orders',
   icon: 'shield',
   command: SHOW_POLICY_COMMAND
 });
 
-const POLICY_STEP_VALID_DETAIL = 'Your policy is signed and valid. You can read it here.';
+const POLICY_STEP_VALID_DETAIL = 'Your Standing Orders are signed and valid. You can read them here.';
 
 /** The step is done when the policy is valid, and shows the status bar's own sentence when it is not (D-13). */
 export function policySetupStep(host: GateHost, now: () => number = () => host.now()): SetupStep {
@@ -315,7 +315,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     context.subscriptions?.push(subscription);
   } catch { /* an editor with no folder events still has the cap (MAX_PROJECT_LOGS) */ }
   void host.start().then((state) => {
-    if (state.state === 'failed-closed') tell(state.sentence);
+    if (state.state === 'failed-closed') tell(standingOrdersInstructions(state.sentence));
   }).catch(() => undefined);
   return host;
 }
@@ -563,14 +563,14 @@ export const ACCEPT_BRANCH_QUESTION = "Use this branch's labels?";
 export const ACCEPT_BRANCH_DETAIL = 'The label file in this project is signed, but it is not the one this computer last checked (for example after switching branches). Using it makes its labels the current ones, signed again with this computer\'s key.';
 
 export const NO_LABELS_WHILE_FAILED_TEXT =
-  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Open SovAI: Policy to see why and what fixes it, then set the label.';
+  'Nothing can be labelled while your Standing Orders cannot be trusted, because a policy in that state holds no clearances. Open SovAI: Standing Orders to see why and what fixes it, then set the label.';
 
 /** Said after the person accepts another branch's signed labels (D-61). */
 export const BRANCH_LABELS_ACCEPTED_TEXT = "This branch's labels are now the ones SovAI checks in this project.";
 
 /** The words of the refusal when the person's own clearance does not cover the label they chose (D-27). */
 export function notYourClearanceText(label: Label): string {
-  return `You cannot set ${labelKeyShown(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance first: open SovAI: Policy and choose Edit my rules. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+  return `You cannot set ${labelKeyShown(label)}: your Standing Orders give you no clearance that covers it, so you could not read what you label. To add a clearance, open SovAI: Standing Orders and choose Edit my Standing Orders. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
 }
 
 /** What Set Label acts on: a project, and a project-relative path in it (a folder ends with `/`, the project itself is the empty path). */
@@ -760,7 +760,7 @@ export async function editPolicy(host: GateHost, globalStorageDir: string, port?
   const state = host.bundleState();
   const personal = host.policyLayers().personal;
   if (state.state !== 'valid' || personal === undefined) {
-    void Promise.resolve(vscode.window.showWarningMessage(`Your policy cannot be edited while it cannot be trusted.${state.state === 'valid' ? '' : ` ${state.sentence}`}`)).catch(() => undefined);
+    void Promise.resolve(vscode.window.showWarningMessage(standingOrdersInstructions(`Your Standing Orders cannot be edited until SovAI can verify them.${state.state === 'valid' ? '' : ` ${state.sentence}`}`))).catch(() => undefined);
     return undefined;
   }
   const files = draftFiles(globalStorageDir);
@@ -827,7 +827,7 @@ export async function resetPolicy(host: GateHost): Promise<boolean> {
       void Promise.resolve(vscode.window.showInformationMessage(RESET_DONE_TEXT)).catch(() => undefined);
       return true;
     }
-    void Promise.resolve(vscode.window.showWarningMessage(result.state.sentence)).catch(() => undefined);
+    void Promise.resolve(vscode.window.showWarningMessage(standingOrdersInstructions(result.state.sentence))).catch(() => undefined);
     return false;
   } catch (error) {
     const message = error instanceof BundleStoreError ? error.message : RESET_FAILED_TEXT;

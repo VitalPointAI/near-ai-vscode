@@ -55,6 +55,7 @@ import { openCyberPanel } from './services/cyberPanel';
 import { cyberPanelService } from './services/cyberService';
 import { registerModelComparison } from './services/modelComparisonPanel';
 import { openTeamStudio } from './services/teamStudioPanel';
+import { createTeamStudioLocale } from './services/teamStudioStaffSetup';
 import { historyItems, LOCKED_DETAIL, threadStoreFor } from './services/threadStore';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
@@ -206,6 +207,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       await setEmergencyStop(false);
       void vscode.window.showInformationMessage('SovAI resumed.');
     }),
+    vscode.commands.registerCommand('nearAi.getSovAiVersion', (...args: unknown[]): string | undefined => {
+      if (args.length !== 0) return undefined;
+      const version: unknown = context.extension.packageJSON.version;
+      return typeof version === 'string' && version.length > 0 && version.length <= 128 ? version : undefined;
+    }),
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
     vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth, sidebar)),
@@ -259,10 +265,13 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerRunReport(context);
   registerResearchVerifiers(context);
   registerStaffScenario(context);
-  registerStaffSetup(context, sidebar);
+  registerStaffSetup(context, { chat: sidebar });
   registerStaffSimulation(context);
   registerStaffImport(context);
-  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
+  const studioLanguage = createTeamStudioLocale(() => vscode.commands.executeCommand('sterling.locale.readUser'));
+  context.subscriptions.push(vscode.commands.registerCommand('nearAi.refreshStudioLanguage', () => studioLanguage.refresh()));
+  void studioLanguage.refresh();
+  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate, studioLanguage));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
   // Project sync (D-17): the commands, the safe moments it runs at, and the status the chat panel's control shows. It runs only once the person has turned it on.

@@ -125,11 +125,17 @@ Plans:
   3. Nothing outside the repository is changed by an agent and no token is asked for or stored: branch protection, environments and secrets are written as exact commands for the person to approve and run, and the step checks afterwards and says what is still missing. (DEVF-03)
   4. Re-running the step on a project that already has part of the kit adds only what is missing and never overwrites the person's own workflow files without showing the difference first. (DEVF-04)
 **Research flags**: Which parts of this repository's kit (`scripts/merge-pr.mjs`, the agent review workflow, `prepare-release`) generalise to other project types; the kit is also the pull-request mode of Team Mode's merge train later (L2).
-**Plans:** 0 plans
+**Plans:** 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 28 to break down)
+- [ ] 28-01-PLAN.md — Software Project Setup tracer, exact preview and safe local file application (wave 1)
+- [ ] 28-02-PLAN.md — Exported CI review, merge, release and human bootstrap workflow (wave 2, depends on 28-01)
+- [ ] 28-03-PLAN.md — Owner setup, effective GitHub evidence and disposable repository acceptance (wave 3, depends on 28-02)
+
+The first profile is a GitHub.com project with an npm lockfile and declared build and test
+commands. Implementation proves local behavior with fixtures. Live protection and publication
+acceptance require the owner-approved disposable target and a distinct reviewer.
 
 ### Phase 29: A cleanup member with a safe CleanUp tool
 **Goal**: The software team tidies what agents leave behind (test output, screenshot folders, temporary mirrors) so it stops filling disk and memory, without ever deleting something important or in use: safety lives in a CleanUp tool and in the gate, not in a prompt.
@@ -141,10 +147,13 @@ Plans:
   3. Nothing is deleted at once: items move to a recoverable quarantine with a manifest, a Restore command brings them back, and a purge happens only after a retention window of about 7 days. (CLEAN-03)
   4. A dry-run list comes first, and the person confirms anything not on the known-disposable list, anything large or of unknown origin, and every permanent purge. (CLEAN-04)
   5. The cleanup member gets only CleanUp and read-only tools (no Bash, no Write), and a disaster test proves each never-touch rule. (CLEAN-05)
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 29 to break down)
+- [ ] 29-01-PLAN.md — Register the cleanup member and preview artifacts with verified provenance.
+- [ ] 29-02-PLAN.md — Enforce never-touch rules and record recoverable quarantine.
+- [ ] 29-03-PLAN.md — Restore artifacts and require separate human approval for permanent purge.
+- [ ] 29-04-PLAN.md — Verify a managed artifact producer and cleanup lifecycle in the built Workbench.
 
 ### Staff collaboration: multi-user staff workspaces (Phases 30 to 35, added 2026-11-19)
 
@@ -867,7 +876,7 @@ Plans:
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
   7. (Added 2026-11-24, owner.) An outside observer signs in to a site with a guest account. It uses a passkey or hardware key only, is created at the lead's request (with the security contact's approval for allied military and industry), has its own OpenBao entity and keys, and never holds an administrator role. At its end date the account is disabled, its sessions are stopped and its entity is disabled without an operator. Nothing is deleted except through the runbook's two-person step. A guest reaches another site only when a signed user export explicitly includes them.
-**Plans:** 25/34 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups: decisions D-70 to D-83 in `47-COMPLIANCE-CONTEXT.md`, planned 2026-11-24 from a compliance audit (owner: obligations the controls require are planned by us; owner decisions a to d applied: separate release and site keys, 3-2-1 off-site copy, 5-year audit retention, RTO 8 h and RPO 24 h), with amendments to 47-16, 47-17 and 47-18; waves revised so plans that edit the same files never share a wave)
+**Plans:** 28/37 plans executed in 13 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups: decisions D-70 to D-83 in `47-COMPLIANCE-CONTEXT.md`, planned 2026-11-24 from a compliance audit (owner: obligations the controls require are planned by us; owner decisions a to d applied: separate release and site keys, 3-2-1 off-site copy, 5-year audit retention, RTO 8 h and RPO 24 h), with amendments to 47-16, 47-17 and 47-18; waves revised so plans that edit the same files never share a wave)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -887,7 +896,10 @@ Plans:
 - [x] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
 - [x] 47-16-PLAN.md: Wave 7 (amended 2026-11-24). Site install script with preflight refusals (now also the time source and the import host clock); node clock files; OpenSearch policies applied; published digests recorded
 - [x] 47-17-PLAN.md: Wave 7 (amended 2026-11-24). Operator runbooks: install (time source, banner, escrow), update, key ceremony (escrow custody), enrolment, recovery, moves, backup and restore, and the new recovery plan
-- [ ] 47-18-PLAN.md: Wave 8 (amended 2026-11-24). Air-gapped lab end-to-end run from the signed bundle, also proving the clock check, the notice, the escrow and the first restore drill
+- [x] 47-35-PLAN.md: Wave 8. Prepare and verify the lab-specific site configuration offline
+- [x] 47-18-RENDER-PREVIEW-PLAN.md: Wave 9. Render the full lab-core release selection offline
+- [x] 47-18-STORAGE-PREFLIGHT-PLAN.md: Wave 10. Check the proposed encrypted lab storage budget against the rendered requests
+- [ ] 47-18-PLAN.md: Wave 11. Air-gapped lab end-to-end run from the signed bundle, also proving the clock check, the notice, the escrow and the first restore drill
 - [x] 47-19-PLAN.md: Wave 6. Guest accounts by hand: the `guests` group and lifecycle attributes only in the realm (no `serves`, `nationality`, `organization`, `security-contacts` group or token claims; approver checked by `SecurityContactCredential`; revised 2026-11-24, owner: credentials), `guests.mjs` create, extend, end, list, the guest path in `enrol.mjs`, OpenBao `guest-expiry` and `guest-removal` policies
 - [ ] 47-20-PLAN.md: Wave 8 (after 47-16 and 47-23). Automatic end at the guest's end date: CronJob with limited access in Keycloak, OpenBao and Kubernetes, the `guest-expiry` image, compliance register (gate path); credentials end on their own at the same date
 - [ ] 47-21-PLAN.md: Wave 8 (after 47-17). Guests per site unless named in a signed user export (`--include-guests`, `guests@1`, target-site check); a guest record carries lifecycle fields and the DID only; the guest accounts runbook
@@ -901,8 +913,8 @@ Plans:
 - [ ] 47-29-PLAN.md: Wave 8. Bundle SBOMs, Grype scans, offline vulnerability database, change and impact record, signed database refreshes (RA-5, RA-5(2), SI-2, CM-4)
 - [ ] 47-30-PLAN.md: Wave 9. Media handling: markings, outbound check, unlisted-file refusal, transfer records, the media runbook (MP-4, MP-5, MP-7, SI-3, AC-4)
 - [ ] 47-31-PLAN.md: Wave 9. Revocation on disable: OpenBao tokens and Theia sessions ended within the site bound when a person is disabled or removed, sharing the guest-expiry mechanism (AC-2(3), AC-2(4), AC-12, IA-4)
-- [ ] 47-32-PLAN.md: Wave 9. The site's release record from the signed release file, with what its user import reads, mounted live in every session; an update never stops a running session; the user export carries `requires` (47-14 amended; version safety, 47 D-66 to 47 D-69)
-- [ ] 47-33-PLAN.md: Wave 10. Off-site copy, required (3-2-1): daily locked copies of the encrypted backups and the audit archive to a second organization site with a signed, chained manifest; signed media for disconnected sites; quarterly drill from the copy (CP-6, CP-9)
+- [ ] 47-32-PLAN.md: Wave 13 (after 47-33’s installer test baseline). The site's release record from the signed release file, with what its user import reads, mounted live in every session; an update never stops a running session; the user export carries `requires` (47-14 amended; version safety, 47 D-66 to 47 D-69)
+- [ ] 47-33-PLAN.md: Wave 12. Off-site copy, required (3-2-1): daily locked copies of the encrypted backups and the audit archive to a second organization site with a signed, chained manifest; signed media for disconnected sites; quarterly drill from the copy (CP-6, CP-9)
 - [x] 47-34-PLAN.md: Wave 8 (added 2026-11-25, owner: G447 option (a) with the officer notice, D-84). Officer-run removal of ended guests' secrets after a passkey step-up, the end records, and the read-only retention check that alerts officers by email and in the workbench
 
 **Tracked follow-up**: Phase 47 guest accounts (planned). A site guest account type for outside observers: the realm-as-code group, the enrolment script's guest path and the runbook entry. Phase 33.1's outside observers (POST-09, 33.1 D-33) are not usable on a real site until it ships; it is planned separately as a Phase 47 plan.
@@ -1681,6 +1693,10 @@ The knowledge base of the paused former v0.5.0 knowledge-base plan returns here 
 | 23 Forecasting | Deferred, intelligence projects only | none |
 | 24 Hardening and release | Carries, extended to the database, caches and model server logs | 101 |
 
+### Canadian English and French
+
+Canadian deployments require a user-switchable English and French experience across the Workbench, setup and administration, plus both language renditions of approved shared products. Add source-linked translation and professional review to published outputs. Evaluate approved local or private translation options through Model Factory and extend the same controls to authorized multilingual document intake. Track the cross-cutting requirements LANG-01 to LANG-03 across Workbench localization, Phase 96 and Phase 98. See [Canadian official-language requirements and sequencing](research/canadian-official-languages.md).
+
 ### Stage A: host and spikes (Phases 85-87)
 
 ### Phase 85: Host and local inference on Strix Halo (L1a), measured
@@ -1902,7 +1918,7 @@ Plans:
 ### Stage E: the model factory (Phases 98-99)
 
 ### Phase 98: Model factory v1, first specialist from chat and run logs
-**Goal**: One specialist goes from proposal card to live for one role, trained on your organization's own machine, matching or beating the incumbent, with rollback tested.
+**Goal**: One specialist goes from proposal card to live for one role, trained on suitable approved hardware from your organization's network, matching or beating the incumbent, with rollback tested. The Model Factory also owns the planned classification and protection adviser's training and fine-tuning.
 **Depends on**: Phase 85 (the host trainer); Phase 74 (contracts). It needs none of Phases 88 to 97, so it runs beside them. Owner decisions 11, 12 and 13.
 **Requirements**: FAC-01, FAC-02, FAC-03, FAC-04, FAC-05, FAC-06, FAC-07, FAC-08, FAC-09
 **Success Criteria** (what must be TRUE):
@@ -1910,8 +1926,8 @@ Plans:
   2. A session below the model's label cannot route to it, and requests fall back to the incumbent while the host is down. (FAC-08)
   3. One click takes a specialist to shadow and a second to canary (auto-promotion off by default), and a rollback restores the previous model in one click with a recorded reason. (FAC-06)
   4. No training job calls any network destination outside the machine it runs on. (FAC-01)
-  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts, and teacher calls follow the label's routing. (FAC-02, FAC-09)
-**Research flags**: The pinned ROCm and PyTorch pairing from Phase 85.
+  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts. If no approved target fits the workload, the proposal shows why it is infeasible. Teacher calls follow the label's routing. (FAC-02, FAC-09)
+**Research flags**: Phase 85 measures the reference ROCm and PyTorch pairing. Check the chosen target's backend, capacity and approval for each workload.
 **Plans:** 0 plans
 **UI hint**: yes
 
@@ -2308,6 +2324,39 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 **Research flags**: Theia AI's agent, skill and MCP formats (they already read `agent.md`, `SKILL.md` and MCP); which of today's webviews to rebuild first.
 **Phases**: TBD.
 
+## Institutional staff support
+
+### Phase 102: Institutional joint staff teams
+
+**Goal**: Provision the institutional joint staff teams in Workbench with
+branch-specific skills, constrained tools and clear human ownership for all
+149 duties in the reviewed blueprint. Support unit L4, brigade L3, division
+L2 and joint L1/L0 profiles for the US, NATO and Canada.
+
+**Depends on**: The staff product and Team Studio foundations, plus publication
+of the reviewed institutional blueprint. Local synthetic development can use
+the exact reviewed blueprint commit while the merge queue is held. Live source,
+delegation and delivery acceptance retain their own prerequisites.
+
+**Success criteria**:
+
+1. A person can provision the institutional Command Group, J3 and J7 teams and
+   run the first fictional decision, action and lessons handoffs through the
+   ordinary Workbench staff experience.
+2. Every J1–J9, Command Group and Special Staff duty has a tested agent
+   contribution, accountable human, draft output and scoped tool contract.
+3. Changes to source authority or review version hold the relevant handoff.
+   Human decision and release remain distinct and verifiable.
+
+See [Phase 102 planning record](https://github.com/VitalPointAI/near-ai-vscode/blob/main/.planning/phases/102-institutional-joint-staff-teams/102-CONTEXT.md)
+for the duty inventory and build order.
+
+Plans:
+- [ ] First synthetic Command Group, J3 and J7 handoffs
+- [ ] J2/J6 stewardship and J5/J9 institutional drafts
+- [ ] J4/J8 ordinary resource and reconciliation workflows
+- [ ] J1/Special Staff administrative support and full profile acceptance
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
@@ -2338,7 +2387,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 45.1. NATO and Five Eyes exchange, part 1 | 2/5 | In Progress 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
 | 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/12 | Planned 2026-11-24 (after 45.1's plans; 45.2-12 waits for a partner's KAS and samples) | - |
 | 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
-| 47. On-premise deployment stack and offline bundle | 25/34 | In Progress 2026-11-23 (beside 46) | - |
+| 47. On-premise deployment stack and offline bundle | 26/35 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 48.2. Live compliance evidence in the workbench | 11/17 | In Progress 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |

@@ -8,7 +8,9 @@ import { after, test } from 'node:test';
 import { Container } from '@theia/core/shared/inversify';
 import { KeyStoreService } from '@theia/core/lib/common/key-store.js';
 import { InMemoryCredentialsProvider, KeyStoreServiceImpl } from '@theia/core/lib/node/key-store-server.js';
-import { SECRET_STORE_TEXT, SecretStoreService, type SecretStoreStatus } from '../extension/src/common/secret-store.ts';
+import {
+  readSecretStoreStatus, SECRET_STORE_TEXT, secretStoreGuidance, SecretStoreGuideSession, SecretStoreService, type SecretStoreStatus
+} from '../extension/src/common/secret-store.ts';
 import { readHostingConfig, type HostedConfig } from '../extension/src/node/hosting-config.ts';
 import { encodeSegment, secretPath } from '../extension/src/node/kv-path.ts';
 import { chooseKeyStore, createOpenBaoKeyStore, createUnavailableKeyStore, type KeyringCandidate, type KeyStore, type SessionSource } from '../extension/src/node/key-stores.ts';
@@ -199,10 +201,84 @@ function keyringWith(load: () => Promise<unknown>): KeyringKeyStoreService {
 
 const noIdentity: SessionSource = { session: () => undefined };
 
+test('an unknown refusal reason gives general recovery without retaining backend text', () => {
+  const reason = 'unrecognized detail from the backend';
+  const result = secretStoreGuidance({ store: 'unavailable', reason });
+  assert.equal(result.choice, 'unavailable', 'an unfamiliar backend reason gets the bounded general recovery');
+  assert.deepEqual(result.confirmed, { store: 'unavailable' });
+  assert.equal(result.automaticallyOpen, true);
+  assert.equal(secretStoreGuidance({ store: 'unavailable' }).choice, 'unavailable');
+});
+
+test('rejected, timed-out and malformed startup checks never open the unavailable guide', async () => {
+  const signal = new AbortController().signal;
+  const failure = await readSecretStoreStatus({ status: async () => { throw new Error('unrecognized detail'); } }, signal);
+  let finish!: (status: SecretStoreStatus) => void;
+  const timedOut = await readSecretStoreStatus({
+    status: () => new Promise(resolve => { finish = resolve; })
+  }, signal, 5);
+  finish({ store: 'unavailable' });
+  assert.equal(failure, undefined);
+  assert.equal(timedOut, undefined);
+  for (const reply of [failure, timedOut, null, {}, { store: 'ready' }]) {
+    const result = secretStoreGuidance(reply);
+    assert.equal(result.choice, 'unknown');
+    assert.equal(result.confirmed, undefined);
+    assert.equal(result.automaticallyOpen, false);
+  }
+});
+
+test('a failed recheck keeps the last confirmed choice until a new supported kind is returned', () => {
+  const previous: SecretStoreStatus = { store: 'unavailable', reason: SECRET_STORE_TEXT.noStore };
+  const stale = secretStoreGuidance(undefined, previous);
+  assert.equal(stale.stale, true, 'a failed check positively marks the previous result as the last confirmation');
+  assert.deepEqual(stale.confirmed, previous);
+  assert.equal(stale.choice, 'noStore');
+  assert.equal(stale.automaticallyOpen, false);
+
+  const newChoice = secretStoreGuidance({ store: 'keyring' }, stale.confirmed);
+  assert.deepEqual(newChoice.confirmed, { store: 'keyring' });
+  assert.equal(newChoice.choice, 'keyring');
+  assert.equal(newChoice.stale, false);
+  assert.equal(newChoice.automaticallyOpen, false);
+});
+
+test('shutdown ends a pending status check and discards a late confirmation', async () => {
+  const controller = new AbortController();
+  let finish!: (status: SecretStoreStatus) => void;
+  const pending = readSecretStoreStatus({
+    status: () => new Promise(resolve => { finish = resolve; })
+  }, controller.signal);
+  controller.abort();
+  finish({ store: 'unavailable' });
+  assert.equal(await pending, undefined);
+});
+
+test('closing the guide while checking keeps the first confirmed unavailable presentation eligible', async () => {
+  const session = new SecretStoreGuideSession();
+  const signal = new AbortController().signal;
+  const unavailable: SecretStoreStatus = { store: 'unavailable', reason: SECRET_STORE_TEXT.noStore };
+  let finish!: (status: SecretStoreStatus) => void;
+  const pending = readSecretStoreStatus({ status: () => new Promise(resolve => { finish = resolve; }) }, signal);
+
+  session.markVisible(); // A manual open while the check is pending showed no confirmed choice.
+  assert.equal(session.automaticallyOpen, false);
+  // The person closes the manual guide before the missing-store confirmation arrives.
+  finish(unavailable);
+  session.accept(await pending);
+  assert.equal(session.automaticallyOpen, true, 'a first confirmation still gets an automatic presentation');
+  session.markVisible();
+  session.accept(unavailable);
+  assert.equal(session.automaticallyOpen, false, 'the guide already showed confirmed unavailability');
+});
+
 test('hosted settings choose the OpenBao store without touching the keyring', async () => {
   let asked = 0;
   const choice = await chooseKeyStore(HOSTED, { identity: noIdentity, keyring: () => { asked += 1; throw new Error('no keyring here'); } });
   assert.equal(choice.kind, 'openbao');
+  const guidance = secretStoreGuidance({ store: choice.kind });
+  assert.equal(guidance.choice, 'openbao', 'hosted selection has its own information without an unavailable warning');
+  assert.equal(guidance.automaticallyOpen, false);
   assert.equal(choice.reason, undefined);
   assert.equal(asked, 0);
   await assert.rejects(choice.store.getPassword('svc', 'acct'), { message: SECRET_STORE_TEXT.notReady });
@@ -215,12 +291,14 @@ test('local settings with a keytar that does not load choose unavailable; saving
     const choice = await chooseKeyStore({ mode: 'local' }, { identity: noIdentity, keyring: () => keyringWith(failing) });
     assert.equal(choice.kind, 'unavailable');
     assert.equal(choice.reason, SECRET_STORE_TEXT.keyringFailed);
+    assert.equal(secretStoreGuidance({ store: choice.kind, reason: choice.reason }).choice, 'keyringFailed', 'keyring failure leads to keyring repair');
     await assert.rejects(choice.store.setPassword('svc', 'acct', SECRET), { message: SECRET_STORE_TEXT.keyringFailed });
     // Even used directly, the override rethrows where Theia's own getKeytar would quietly switch to memory.
     await assert.rejects(keyringWith(failing).setPassword('svc', 'acct', SECRET), { message: SECRET_STORE_TEXT.keyringFailed });
     const missing = Object.assign(new Error("Cannot find module 'keytar'"), { code: 'ERR_MODULE_NOT_FOUND' });
     const absent = await chooseKeyStore({ mode: 'local' }, { identity: noIdentity, keyring: () => keyringWith(() => Promise.reject(missing)) });
     assert.deepEqual([absent.kind, absent.reason], ['unavailable', SECRET_STORE_TEXT.noStore]);
+    assert.equal(secretStoreGuidance({ store: absent.kind, reason: absent.reason }).choice, 'noStore', 'missing integration leads to provisioning');
     assert.equal(memory.uses(), 0, "Theia's in-memory provider was never used");
   } finally {
     memory.restore();
@@ -231,6 +309,9 @@ test('local settings with a keytar that loads and answers choose the keyring, wh
   const keytar = fakeKeytar();
   const choice = await chooseKeyStore({ mode: 'local' }, { identity: noIdentity, keyring: () => keyringWith(async () => keytar) });
   assert.equal(choice.kind, 'keyring');
+  const guidance = secretStoreGuidance({ store: choice.kind });
+  assert.equal(guidance.choice, 'keyring', 'keyring selection has its own information without an unavailable warning');
+  assert.equal(guidance.automaticallyOpen, false);
   await choice.store.setPassword('svc', 'acct', SECRET);
   assert.equal(await choice.store.getPassword('svc', 'acct'), SECRET);
   assert.deepEqual(await choice.store.keys('svc'), ['acct']);

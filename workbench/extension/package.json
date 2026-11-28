@@ -18,6 +18,9 @@
       "frontend": "lib/browser/sterling-welcome-module"
     },
     {
+      "frontend": "lib/browser/sterling-locale-module"
+    },
+    {
       "frontend": "lib/browser/sterling-documentation-module"
     },
     {
@@ -28,6 +31,9 @@
     },
     {
       "frontend": "lib/browser/sterling-work-areas-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-about-module"
     },
     {
       "frontend": "lib/browser/sterling-resource-inventory-module"

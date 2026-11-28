@@ -3,8 +3,9 @@
 // SPEC_STEP:
 //   save         hosted: "Secret probe: Save" shows "Saved"
 //   read         hosted, in a new container: "Secret probe: Read" shows the saved value
-//   unavailable  local mode in the image: the status entry reads "Secrets are unavailable" and saving shows an error, not "Saved"
+//   unavailable  local mode in the image: the guide explains limited mode and the secret probe still cannot save
 import { expect, test, type Page } from '@playwright/test';
+import { openHostedWorkbench } from './hosted-startup';
 
 const STEP = process.env.SPEC_STEP ?? '';
 const PROBE_VALUE = process.env.PROBE_VALUE ?? '';
@@ -19,14 +20,6 @@ test.use({
     : {},
 });
 
-async function openWorkbench(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
-  // Extensions run only in a trusted workspace; answer Theia's question as the person would.
-  const trust = page.getByRole('button', { name: 'Yes, I trust the authors' });
-  await trust.waitFor({ timeout: 15_000 }).then(() => trust.click(), () => undefined);
-}
-
 async function runCommand(page: Page, label: string): Promise<void> {
   await page.keyboard.press('F1');
   const input = page.locator('.quick-input-widget input');
@@ -39,7 +32,7 @@ async function runCommand(page: Page, label: string): Promise<void> {
 const notification = (page: Page, text: RegExp) => page.locator('.theia-notification-list-item', { hasText: text }).first();
 
 test('the secret probe for this step', async ({ page }) => {
-  await openWorkbench(page);
+  await openHostedWorkbench(page);
   if (STEP === 'save') {
     await runCommand(page, 'Secret probe: Save');
     await expect(notification(page, /\bSaved\b/)).toBeVisible({ timeout: 60_000 });
@@ -52,9 +45,65 @@ test('the secret probe for this step', async ({ page }) => {
     return;
   }
   if (STEP === 'unavailable') {
-    await expect(page.locator('#status-bar-sterling-secret-store')).toContainText('Secrets are unavailable', { timeout: 30_000 });
+    const statusEntry = page.getByRole('button', { name: 'Secrets are unavailable' });
+    const guide = page.getByRole('region', { name: 'Set up secret storage' });
+    const heading = guide.getByRole('heading', { name: 'Set up secret storage' });
+    const continueButton = guide.getByRole('button', { name: 'Continue without secret storage' });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await expect(statusEntry).toBeVisible();
+    await expect(guide.getByRole('status')).toHaveText('This Workbench has no usable secret store.');
+    await expect(guide).toContainText('system keyring module or its native binding');
+    await expect(guide).toContainText('approved authenticated OpenBao integration');
+    await expect(guide).toContainText('restart the Workbench backend and reopen this browser tab');
+    await expect(guide).toContainText('You cannot save or retrieve API keys or other credentials for your AI connections.');
+    await expect(guide).toContainText('verify and display the active signed Standing Orders or sign and apply a change');
+    await expect(guide).toContainText('Shared staff projects cannot open in this local mode.');
+    await expect(guide).toContainText('Documentation and trusted local Resource Inventory remain available');
+
+    await continueButton.focus();
+    await page.keyboard.press('Enter');
+    await expect(guide).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Set up Sterling' })).toBeVisible();
+    await expect(statusEntry).toHaveAttribute('tabindex', '0');
+    await statusEntry.focus();
+    await page.keyboard.press('Enter');
+    await expect(heading).toBeFocused();
+    await expect(guide).toHaveCount(1);
+    const checkAgain = guide.getByRole('button', { name: 'Check again' });
+    await checkAgain.focus();
+    await page.keyboard.press('Enter');
+    await expect(checkAgain).toHaveAttribute('aria-disabled', 'false');
+    await expect(checkAgain).toBeFocused();
+    await expect(guide.getByRole('status')).toHaveText('This Workbench has no usable secret store.');
+
+    await continueButton.focus();
+    await page.keyboard.press('Space');
+    await expect(guide).toHaveCount(0);
+    await expect(statusEntry).toBeFocused();
+
+    await page.keyboard.press('F1');
+    const input = page.locator('.quick-input-widget input');
+    await expect(input).toBeVisible();
+    await input.fill('>SovAI: Secret storage setup');
+    await expect(page.locator('.quick-input-list .monaco-list-row', { hasText: 'Secret storage setup' })).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(heading).toBeFocused();
+    await expect(guide).toHaveCount(1);
+    const openGuide = await guide.elementHandle();
+    await statusEntry.press('Enter');
+    await expect(heading).toBeFocused();
+    expect(await openGuide?.evaluate(node => node.isConnected)).toBe(true);
+    await expect(guide).toHaveCount(1);
+    const documentation = guide.getByRole('button', { name: 'Open Documentation' });
+    await documentation.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.lm-TabBar-tab', { hasText: 'Documentation' }).first()).toBeVisible();
+    await continueButton.focus();
+    await page.keyboard.press('Enter');
+    await expect(guide).toHaveCount(0);
+
     await runCommand(page, 'Secret probe: Save');
-    await expect(notification(page, /Not saved/)).toBeVisible({ timeout: 60_000 });
+    await expect(notification(page, /Not saved: .*has no secret store/)).toBeVisible({ timeout: 60_000 });
     await expect(notification(page, /\bSaved\b/)).toHaveCount(0);
     return;
   }

@@ -1,6 +1,6 @@
 # Sterling workbench (Eclipse Theia)
 
-The workbench opens to Sterling Sovereign AI Canadian Defence Edition, on Get Started or, when the open folder is a work area, on that work area's page. Get Started shows the Sterling logo for the active theme, **Set up Sterling**, **Open Chat** and **Explore a sample agent team** (a native Team Studio preview with four packaged samples), and a card for each Defence work area: Capability Development, Exercises & Training, Planning and Resource Management. Each card opens that work area's page, whose **Create …** button creates a new work area folder in the open folder and opens it; creating one needs the bundled SovAI extension, so it works in the release image only. The right sidebar carries shortcuts to Get Started, Portfolio, Chat, Team Studio, Agent Activity, Governance, Compliance and Documentation; Data Management and Model Factory are shown as planned.
+The workbench opens to Sterling Sovereign AI Canadian Defence Edition, on Get Started or, when the open folder is a work area, on that work area's page. Get Started shows the Sterling logo for the active theme, **Set up Sterling**, **Open Chat** and **Explore a sample agent team** (a native Team Studio preview with four packaged samples), and a card for each Defence work area: Capability Development, Exercises & Training, Planning and Resource Management. Each card opens that work area's page, whose **Create …** button creates a new work area folder in the open folder and opens it; creating one needs the bundled SovAI extension, so it works in the release image only. The right sidebar carries shortcuts to Get Started, Portfolio, Chat, Team Studio, Agent Activity, Standing Orders, Compliance and Documentation; Data Management and Model Factory are shown as planned.
 
 It is its own package (`sterling-workbench`, Theia 1.77.0, Node 26.13.1 or later in the 26 line) and its own image: UBI 9 minimal with the upstream Node 26 binary, native addons built on UBI, user `10001:0`, port 3000, `GET /healthz`. It never ships in the VS Code extension.
 
@@ -23,6 +23,36 @@ Use `docker stop sterling-workbench` and `docker start sterling-workbench` to st
 **Publish it on `127.0.0.1` only.** Run locally, the workbench has no sign-in and includes a terminal, so anyone who can reach its port gets a shell as the container's user. Inside the container it listens on `127.0.0.1` by default, which a port mapping cannot reach; `STERLING_LISTEN_HOST=0.0.0.0` makes it listen on every interface so the mapping works, and the safety then comes from `--publish 127.0.0.1:…`. Never use `-p 3000:3000` or publish it on a shared host. Without sign-in in front (no `STERLING_OPENBAO_ADDR`), the image refuses to listen on any address other than loopback until you pass `--env STERLING_PREVIEW_NO_SIGN_IN=accept` to confirm this.
 
 The container runs as user `10001` in group `0`; only its home `/home/sterling` and workspace `/home/sterling/workspace` are writable. Its runtime holds only the Node binary and production dependencies: the Theia CLI, bundlers, compilers and the browser test tools stay in the build stage. The examples are synthetic. The workbench has no host workspace mounts, provider credentials, or agent run controls.
+
+## View a local infrastructure planning report
+
+Put one report at `.planning/.near-ai/resource-inventory.snapshot.json` in a trusted workspace. Open **Resource Management**, then **Open resource inventory**, or select **Resource Inventory** in the command palette. In a workspace with several roots, choose the folder that holds the report.
+
+Use fictional, public or otherwise approved non-sensitive planning metadata. Each workspace folder has one snapshot file. Keep an existing stock or public catalogue snapshot in its own folder when you also need an infrastructure report.
+
+```json
+{
+  "schemaVersion": 2,
+  "kind": "infrastructure",
+  "sourceId": "example-lab",
+  "source": "Example lab planning report",
+  "generatedAt": "2026-11-28T00:00:00Z",
+  "resources": [
+    {
+      "id": "example-worker",
+      "name": "Example worker",
+      "category": "standalone-compute",
+      "owner": "Example lab",
+      "capability": "GPU compute",
+      "capacity": 0,
+      "capacityUnit": "devices",
+      "asOf": "2026-11-27T12:00:00Z"
+    }
+  ]
+}
+```
+
+Record categories are `standalone-compute`, `cluster-compute`, `inference`, `storage` and `registry`. Use UTC timestamps. You can omit owner, capability and observation time. Set both capacity and its unit to report a quantity, or omit both when capacity is unknown. A report carries up to 1,200 rows and fits in 512 KiB. The view reads this file locally. It does not discover or sync resources, verify availability or permissions, or change a work-area record.
 
 An air-gapped build mirrors the digest-pinned base images through the builder's registry-mirror setting and points npm at a registry mirror with `--build-arg NPM_REGISTRY=<url>`.
 

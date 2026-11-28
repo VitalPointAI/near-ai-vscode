@@ -259,6 +259,15 @@ body.theia-dark .sterling-ca {
 
 .sterling-welcome button:focus-visible { outline: 2px solid var(--theia-focusBorder, #4296f2); outline-offset: 3px; }
 .sterling-actions button:focus-visible { outline-color: #b7dbff; }
+.sterling-rail-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .sterling-status { margin: 16px 0 0; color: var(--theia-descriptionForeground); }
 
 .sterling-destinations { margin-top: 30px; }

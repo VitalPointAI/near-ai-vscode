@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Standing Orders is the new name for the policy editor, its Command Palette entries, and its Workbench and status bar shortcuts. The French Workbench shortcut reads **Ordres permanents**.
+
 ### Which models may do what
 
 - **Models are approved for a use.** Every model request is checked against an approval for its
@@ -27,6 +29,55 @@
 - **Export AI Bill of Materials.** **SovAI: Export AI Bill of Materials** writes a CycloneDX 1.6
   list of every model a project used, with its licence, lineage and approval, to
   `.near-ai/state/ai-bom.cdx.json`.
+
+## 0.4.43
+
+This Workbench release adds offline documentation and extends Canadian English and French support.
+
+- Documentation opens published guides, the component catalogue, and both architecture blueprints locally. The blueprints open at full size, and the gap register opens in Compliance.
+- About SovAI shows the running version. About, Get Started, and Team Studio follow your Canadian English or French setting. Enter closes About when the Close button has keyboard focus.
+- Team Studio shows the selected project and its available staff sections before setup.
+- Compliance table headings stay on one line. On narrow screens, the table scrolls within its own area.
+
+## 0.4.42
+
+This Workbench update makes documentation easier to use offline and follows Canadian English and French settings in more places.
+
+- Documentation includes published guides, the component catalogue, and both architecture blueprints. Linked bundled pages open locally, both blueprints open at full size, and the gap register opens in Compliance.
+- About SovAI shows the running version. About, Get Started, and Team Studio follow the Canadian English or French setting. Enter closes About when its Close button has keyboard focus.
+- Team Studio shows the selected project and its available staff sections before setup.
+- Compliance table headings stay on one line. On narrow screens, the table scrolls horizontally within its own area.
+
+## 0.4.41
+
+This maintenance release makes the Linux Workbench easier to start and improves reliability in Team Studio and Compare Models.
+
+- The Linux launcher checks prerequisites, reports CPU, memory and Docker storage, and starts the approved image in your local browser. The setup guides cover first launch, shutdown and running a Workbench and sync hub on the same development machine.
+- A sidebar shortcut that cannot open its page gives you feedback and a retry. Team Studio keeps replacement state with the project being saved when you switch projects.
+- Compare Models starts one comparison at a time. Repeated clicks during setup no longer trigger extra comparisons or cost prompts.
+- The offline on-premises lab configuration preview and the recorded capability checks provide evidence for later evaluation on your own infrastructure. Operational checks remain open.
+- The release build now prepares the pinned hub runtime so its collaboration tests run with the same prerequisites as normal CI.
+
+## 0.4.40
+
+This update makes the Linux Workbench easier to start and improves reliability in Team Studio and Compare Models. It also adds deployment guidance and evidence for teams evaluating Sterling Sovereign AI on their own infrastructure.
+
+### Workbench setup
+
+- The Linux launcher checks prerequisites and starts the Workbench image identified by the approved digest, with a local browser address and an owned workspace.
+- The setup check reports CPU, memory and available space on the filesystem it can inspect at Docker's configured data directory.
+- The documentation covers first launch, shutdown, and running Workbench and the sync hub on one development machine.
+- Workbench offers retry feedback when a sidebar shortcut cannot open its page.
+
+### Working with teams and models
+
+- Team Studio keeps saved replacement state with the project being saved even if the selected project changes.
+- Compare Models starts one comparison at a time. Repeated clicks while it prepares a run no longer create extra starts or cost prompts.
+
+### Deployment and assurance
+
+- The offline on-premises lab has a verified configuration preview. This provides configuration evidence for a future site trial.
+- The repository records capability gate verification and its remaining operational checks, along with updates to the staff collaboration and site control evidence.
 
 ## 0.4.39
 

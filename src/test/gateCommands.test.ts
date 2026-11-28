@@ -14,6 +14,8 @@ import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, INSTALL_LOG_KEY, projectLogKey } from '../gate/decisionLog';
 import { SessionMark } from '../domain/gate/dominance';
 import { GateHost } from '../gate/host';
+import { NO_SECRET_STORAGE_TEXT } from '../gate/organizationStore';
+import type { SecretStorageLike } from '../services/auth';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -50,34 +52,45 @@ function validState(overrides: Partial<Extract<BundleState, { state: 'valid' }>>
 
 test('gateStatusText: valid shows "Policy" with the expiry date in the tooltip and no warning', () => {
   const shown = gateStatusBar.gateStatusText(validState(), Date.parse('2026-11-16T00:00:00.000Z'));
-  assert.equal(shown.text, 'Policy');
-  assert.match(shown.tooltip, /Your policy is signed and valid until 2027-03-04\./);
+  assert.equal(shown.text, 'Standing Orders');
+  assert.match(shown.tooltip, /Your Standing Orders are signed and valid until 2027-03-04\./);
   assert.equal(shown.warning, false);
 });
 
 test('gateStatusText: a policy in its last days reads "renewing" and does not warn', () => {
   const shown = gateStatusBar.gateStatusText(validState({ renewDue: true }), Date.parse('2027-02-20T00:00:00.000Z'));
-  assert.equal(shown.text, 'Policy: renewing');
+  assert.equal(shown.text, 'Standing Orders: renewing');
   assert.match(shown.tooltip, /valid until 2027-03-04/);
   assert.equal(shown.warning, false);
 });
 
-test('gateStatusText: failed closed reads "reading only", carries the bundle\'s own sentence as it is, and warns, for every reason', () => {
+test('gateStatusText: failed closed keeps the cause, updates recognized instructions for display, and warns for every reason', () => {
   for (const reason of Object.keys(BUNDLE_FAILURES) as Array<keyof typeof BUNDLE_FAILURES>) {
     const shown = gateStatusBar.gateStatusText(failedClosed(reason), 0);
-    assert.equal(shown.text, 'Policy: reading only');
-    assert.ok(shown.tooltip.includes(BUNDLE_FAILURES[reason]), reason);
+    assert.equal(shown.text, 'Standing Orders: reading only');
+    assert.ok(shown.tooltip.includes(gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES[reason])), reason);
     assert.equal(shown.warning, true);
     assert.ok(!shown.tooltip.includes(EM_DASH));
   }
 });
 
+test('Standing Orders display changes known instructions and preserves unrelated error text', () => {
+  const known = BUNDLE_FAILURES['bad-signature'];
+  const shown = gateStatusBar.gateStatusText(failedClosed('bad-signature'), 0);
+  assert.match(shown.tooltip, /Your policy file was changed outside SovAI\. Open SovAI: Standing Orders and choose Reset my Standing Orders/);
+  assert.match(known, /Open SovAI: Policy and choose Reset my rules/);
+  const unrelated = 'The response contained the fields "SovAI: Policy", "Edit my rules", and "Reset my rules".';
+  assert.equal(gateStatusBar.standingOrdersInstructions(unrelated), unrelated);
+  const warning = gateStatusBar.gateStatusText({ state: 'failed-closed', reason: 'malformed', sentence: unrelated }, 0);
+  assert.ok(warning.tooltip.startsWith(unrelated));
+});
+
 test('gateStatusText: a state that says valid but has passed its end reads as expired, and a check that has not finished reads "checking"', () => {
   const late = gateStatusBar.gateStatusText(validState(), Date.parse('2027-03-04T05:06:07.000Z'));
   assert.equal(late.warning, true);
-  assert.ok(late.tooltip.includes(BUNDLE_FAILURES.expired));
+  assert.ok(late.tooltip.includes(gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES.expired)));
   const waiting = gateStatusBar.gateStatusText(undefined, 0);
-  assert.equal(waiting.text, 'Policy: checking');
+  assert.equal(waiting.text, 'Standing Orders: checking');
   assert.equal(waiting.warning, false);
 });
 
@@ -88,11 +101,11 @@ test('registerGate creates the status bar item nearAi.gate with its command, and
   const items = stub.statusBarItems.slice(before).filter((item) => item.id === 'nearAi.gate');
   assert.equal(items.length, 1);
   const item = items[0] as (typeof items)[number];
-  assert.equal(item.name, 'SovAI Policy');
+  assert.equal(item.name, 'SovAI Standing Orders');
   assert.equal(item.command, 'nearAi.policy.show');
   assert.equal(item.priority, 49);
   assert.equal(item.visible, true);
-  assert.equal(item.text, 'Policy');
+  assert.equal(item.text, 'Standing Orders');
   assert.equal(item.backgroundColor, undefined);
 });
 
@@ -106,9 +119,86 @@ test('a policy file that was changed shows "Policy: reading only" with the bundl
   assert.equal(second.state.state, 'failed-closed');
   const item = barFor(before);
   assert.equal(item.id, 'nearAi.gate');
-  assert.equal(item.text, 'Policy: reading only');
-  assert.ok(item.tooltip.includes(BUNDLE_FAILURES['bad-signature']));
+  assert.equal(item.text, 'Standing Orders: reading only');
+  assert.ok(item.tooltip.includes(gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES['bad-signature'])));
   assert.equal((item.backgroundColor as { id: string }).id, 'statusBarItem.warningBackground');
+});
+
+test('Standing Orders explains a failed trust check without changing its recorded reason', async (t) => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-no-secrets-'));
+  const { Uri, window } = stub.vscode as typeof import('vscode');
+  type PanelState = { title: string; notice?: string; sections: unknown[]; actions: unknown[]; pageActions: unknown[] };
+  const posted: PanelState[] = [];
+  let close: (() => void) | undefined;
+  let closeWindow = async (): Promise<void> => undefined;
+  Object.assign(Uri, { joinPath: (base: { fsPath: string }, ...parts: string[]) => Uri.file(path.join(base.fsPath, ...parts)) });
+  Object.assign(window, { createWebviewPanel: (_type: string, title: string) => ({
+    title,
+    webview: {
+      cspSource: 'vscode-resource:',
+      asWebviewUri: (uri: unknown) => uri,
+      postMessage: async (message: PanelState) => { posted.push(message); return true; },
+      onDidReceiveMessage: () => undefined
+    },
+    onDidChangeViewState: () => undefined,
+    onDidDispose: (listener: () => void) => { close = listener; },
+    dispose: () => { close?.(); }
+  }) });
+  t.after(async () => {
+    await closeWindow();
+    Reflect.deleteProperty(Uri, 'joinPath');
+    Reflect.deleteProperty(window, 'createWebviewPanel');
+  });
+  const open = async (secrets: SecretStorageLike) => {
+    await closeWindow();
+    posted.length = 0;
+    const context = { ...createFakeContext(storage, secrets), extensionUri: Uri.file(storage) };
+    const host = gateCommands.registerGate(context as never, { notify: () => undefined });
+    closeWindow = async () => {
+      for (const item of context.subscriptions) item.dispose();
+      await host.flush();
+    };
+    await stub.commands.get(gateCommands.OPEN_POLICY_COMMAND)?.();
+    const panel = posted.at(-1);
+    assert.ok(panel, 'the installed Governance command posted to the real Policy Editor');
+    return { host, panel };
+  };
+
+  const bundle = path.join(gateDir(storage), POLICY_BUNDLE_FILE);
+  const refused = () => Promise.reject(new Error('This workbench has no secret store.'));
+  let storeAttempts = 0;
+  const unavailable = await open({ get: refused, store: () => { storeAttempts += 1; return refused(); }, delete: refused });
+  const state = unavailable.host.bundleState();
+  assert.equal(state.state, 'failed-closed');
+  assert.equal(state.state === 'failed-closed' && state.sentence, NO_SECRET_STORAGE_TEXT);
+  assert.equal(unavailable.host.policyLayers().effective, undefined);
+  assert.deepEqual([unavailable.panel.sections, unavailable.panel.actions, unavailable.panel.pageActions], [[], [], []]);
+  await assert.rejects(unavailable.host.reset(), /could not use its signing key/);
+  assert.equal(storeAttempts, 0);
+  assert.equal(existsSync(bundle), false);
+
+  const secrets = new MemorySecrets();
+  const ready = await open(secrets);
+  assert.equal(ready.host.bundleState().state, 'valid');
+  assert.ok(ready.panel.sections.length > 0);
+  assert.equal(ready.panel.notice, undefined);
+
+  const tampered = (await readFile(bundle, 'utf8')).replace('"Restricted"', '"Restricteb"');
+  await writeFile(bundle, tampered);
+  const invalid = await open(secrets);
+  assert.equal(invalid.host.bundleState().state, 'failed-closed');
+  assert.deepEqual([invalid.panel.sections, invalid.panel.actions, invalid.panel.pageActions], [[], [], []]);
+  assert.equal(await readFile(bundle, 'utf8'), tampered);
+  const unavailableReason = "This computer's secret storage is not available to SovAI, so only reading and planning run. No rules from your organization are set up here.";
+  const invalidReason = 'Your policy file was changed outside SovAI. Open SovAI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.';
+  await invalid.host.flush();
+  const loadReasons = (await installRecordsOf(storage)).filter((record) => record.api.operation === 'policy.load').map((record) => record.status_detail);
+  assert.ok(loadReasons.includes(unavailableReason));
+  assert.ok(loadReasons.includes(invalidReason));
+  assert.equal(unavailable.panel.notice, `${unavailableReason} Ask your administrator to set up a secret store, then reopen the workbench.`);
+  assert.equal(unavailable.panel.title, 'Your Standing Orders');
+  assert.equal(ready.panel.title, 'Your Standing Orders');
+  assert.match(invalid.panel.notice ?? '', /Open SovAI: Standing Orders and choose Reset my Standing Orders/);
 });
 
 test('Show Policy opens a read-only document with the hash, the self-declared clearance text, the scales caveat and the "what is live" line above the scales, clearances and routing', async () => {
@@ -158,17 +248,17 @@ test('Show Policy for a policy that failed shows the sentence, says only reading
   stub.shownDocuments.length = 0;
   await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = (stub.shownDocuments[0] as { text: string }).text;
-  assert.ok(text.includes(BUNDLE_FAILURES['bad-signature']));
+  assert.ok(text.includes(gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES['bad-signature'])));
   assert.match(text, /only reading and planning/);
   assert.ok(!text.includes('bundleVersion'));
 });
 
 test('policyDocumentText for a policy that failed is exactly the title, the note, the state line and the sentence, with no blank line after the sentence', () => {
-  const sentence = BUNDLE_FAILURES['bad-signature'];
+  const sentence = gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES['bad-signature']);
   const expected = [
-    'Your SovAI policy',
+    'Your Standing Orders',
     '',
-    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open SovAI: Policy and choose Reset my rules, which resets your own rules only.',
+    'This view only shows your Standing Orders. Editing it changes nothing. Open SovAI: Standing Orders and choose Reset my Standing Orders to restore only your own defaults.',
     '',
     'State: not usable, so only reading and planning are allowed',
     sentence
@@ -184,21 +274,21 @@ test('S6: Show Policy for a policy written for a newer version says to update an
   for (const reason of ['needs-update', 'unknown-field', 'unsupported-version', 'vocabulary-unknown'] as const) {
     const text = gateCommands.policyDocumentText(failedClosed(reason), 0);
     assert.match(text, /update the extension/i, reason);
-    assert.ok(!/Reset my rules/.test(text), reason);
+    assert.ok(!/Reset my Standing Orders/.test(text), reason);
     assert.match(text, /State: not usable, so only reading and planning are allowed/);
   }
-  assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset my rules/);
+  assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset my Standing Orders/);
 });
 
 test('S6 (PR #143 review): an unknown setting in the person\'s own policy names both ways on, update or Reset with what it discards; another signer\'s never offers Reset', () => {
   const own = gateCommands.policyDocumentText({ ...failedClosed('unknown-field'), ownPolicy: true }, 0);
   assert.match(own, /If a newer version of SovAI wrote it, update the extension/);
-  assert.match(own, /Reset my rules in SovAI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded/);
+  assert.match(own, /Reset my Standing Orders in SovAI: Standing Orders signs fresh defaults for your own rules and keeps the old file beside it\. Your changes are discarded/);
   const other = gateCommands.policyDocumentText(failedClosed('unknown-field'), 0);
   assert.match(other, /update the extension/);
-  assert.ok(!/Reset my rules/.test(other));
+  assert.ok(!/Reset my Standing Orders/.test(other));
   // A policy written for a newer version is never offered Reset, even the person's own.
-  assert.ok(!/Reset my rules/.test(gateCommands.policyDocumentText({ ...failedClosed('needs-update'), ownPolicy: true }, 0)));
+  assert.ok(!/Reset my Standing Orders/.test(gateCommands.policyDocumentText({ ...failedClosed('needs-update'), ownPolicy: true }, 0)));
 });
 
 test('policyDocumentText lists each MCP server\'s label ceiling, and says when none is set (WP-GATE)', () => {
@@ -222,13 +312,13 @@ test('policyDocumentText lists each MCP server\'s label ceiling, and says when n
 
 test('policyDocumentText is pure: the same state gives the same text, and a check that has not finished says so', () => {
   assert.equal(gateCommands.policyDocumentText(failedClosed('missing'), 0), gateCommands.policyDocumentText(failedClosed('missing'), 99));
-  assert.match(gateCommands.policyDocumentText(undefined, 0), /checking your policy file/);
+  assert.match(gateCommands.policyDocumentText(undefined, 0), /checking your Standing Orders/);
 });
 
 test('the commands are contributed in package.json with the SovAI category', async () => {
   const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   const show = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.policy.show');
-  assert.deepEqual([show?.title, show?.category], ['Show Policy', 'SovAI']);
+  assert.deepEqual([show?.title, show?.category], ['Show Standing Orders', 'SovAI']);
   assert.equal(existsSync(path.join(__dirname, '..', '..', 'package.json')), true);
 });
 
@@ -275,7 +365,7 @@ test('Reset Policy to Defaults is a modal that says what happens, and a confirm 
   const asked = stub.notificationActions[0] as unknown[];
   assert.deepEqual(asked[0], { modal: true, detail: gateCommands.RESET_DETAIL });
   assert.deepEqual(asked.slice(1), [gateCommands.RESET_CONFIRM_ACTION]);
-  assert.match(gateCommands.RESET_DETAIL, /Your current file is kept beside it/);
+  assert.match(gateCommands.RESET_DETAIL, /Your current file is kept beside the new one/);
   assert.match(gateCommands.RESET_DETAIL, /up to what your settings allow/);
   assert.ok(!gateCommands.RESET_DETAIL.includes(EM_DASH));
   assert.deepEqual(stub.notifications.slice(1).map((entry) => [entry.level, entry.message]), [['info', gateCommands.RESET_DONE_TEXT]]);
@@ -293,7 +383,7 @@ test('Reset Policy to Defaults is a modal that says what happens, and a confirm 
   assert.equal(reset[0]?.authorizations[0]?.policy.name, 'policy.reset');
   assert.equal(records.filter((record) => record.api.operation === 'policy.load').length, 1, 'the failed start was recorded too');
   const bar = stub.statusBarItems.filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
-  assert.equal(bar.text, 'Policy');
+  assert.equal(bar.text, 'Standing Orders');
 });
 
 test('Reset with no folder open records policy.reset in the install-level log, and the start is on that record too', async () => {
@@ -387,15 +477,15 @@ test('the Policy setup step is added through registerSetupStep, is done when the
   const step = setupSteps.SETUP_STEPS.find((entry) => entry.id === 'policy');
   assert.ok(step, 'registered');
   const policy = step as import('../services/setupSteps').SetupStep;
-  assert.deepEqual([policy.label, policy.icon, policy.command], ['Check your policy', 'shield', 'nearAi.policy.show']);
+  assert.deepEqual([policy.label, policy.icon, policy.command], ['Check your Standing Orders', 'shield', 'nearAi.policy.show']);
   const ctx = { root: '.', setting: () => undefined, facts: {} };
   assert.equal(await policy.isDone(ctx), false);
-  assert.equal(policy.detail, BUNDLE_FAILURES['bad-signature']);
+  assert.equal(policy.detail, gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES['bad-signature']));
   const bar = stub.statusBarItems.filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
   assert.ok(bar.tooltip.includes(policy.detail), 'the status bar carries the same sentence');
   const menu = await setupSteps.buildSetupMenu(setupSteps.SETUP_STEPS.filter((entry) => entry.id === 'policy'), ctx);
   assert.equal(menu[0]?.done, false);
-  assert.equal(menu[0]?.detail, BUNDLE_FAILURES['bad-signature']);
+  assert.equal(menu[0]?.detail, policy.detail);
   resetNotifications();
   stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
   await stub.commands.get('nearAi.policy.reset')?.();
@@ -412,7 +502,7 @@ test('SETUP_STEPS itself is not edited: the policy step is in the registry only 
 test('the reset command is contributed in package.json with the SovAI category and no em-dash in either title', async () => {
   const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   const reset = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.policy.reset');
-  assert.deepEqual([reset?.title, reset?.category], ['Reset Policy to Defaults', 'SovAI']);
+  assert.deepEqual([reset?.title, reset?.category], ['Reset Standing Orders to Defaults', 'SovAI']);
   for (const entry of manifest.contributes.commands.filter((item) => item.command.startsWith('nearAi.policy.'))) assert.ok(!entry.title.includes(EM_DASH));
 });
 
@@ -445,16 +535,16 @@ test('the registered status bar changes by itself when the policy enters its ren
   const state = await host.state();
   assert.equal(state.state, 'valid');
   const bar = stub.statusBarItems.slice(before).filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
-  assert.equal(bar.text, 'Policy');
+  assert.equal(bar.text, 'Standing Orders');
   assert.equal(queue.size, 1, 'one timer is waiting for the next change');
   const expires = Date.parse((state as Extract<BundleState, { state: 'valid' }>).expiresAt);
   advanceTo(expires - 30 * DAY - 1);
-  assert.equal(bar.text, 'Policy');
+  assert.equal(bar.text, 'Standing Orders');
   advanceTo(expires - 30 * DAY);
-  assert.equal(bar.text, 'Policy: renewing');
+  assert.equal(bar.text, 'Standing Orders: renewing');
   advanceTo(expires);
-  assert.equal(bar.text, 'Policy: reading only');
-  assert.ok(bar.tooltip.includes(BUNDLE_FAILURES.expired));
+  assert.equal(bar.text, 'Standing Orders: reading only');
+  assert.ok(bar.tooltip.includes(gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES.expired)));
   assert.equal(queue.size, 0);
 });
 
@@ -473,10 +563,10 @@ test('a policy that has ended is not shown as valid again when the clock is set 
   const expires = Date.parse((state as Extract<BundleState, { state: 'valid' }>).expiresAt);
   nowMs = expires + DAY;
   assert.equal(await step.isDone(ctx), false);
-  assert.ok(step.detail.includes(BUNDLE_FAILURES.expired));
+  assert.ok(step.detail.includes(gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES.expired)));
   nowMs = start + 10 * DAY;
   assert.equal(await step.isDone(ctx), false, 'a clock set back does not make the ended policy valid');
-  assert.ok(step.detail.includes(BUNDLE_FAILURES.expired));
+  assert.ok(step.detail.includes(gateStatusBar.standingOrdersInstructions(BUNDLE_FAILURES.expired)));
   assert.equal(host.bundleState().state, 'failed-closed');
 });
 
