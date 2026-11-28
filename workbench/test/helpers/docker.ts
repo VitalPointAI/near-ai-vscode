@@ -26,9 +26,9 @@ const ownContainers = new Set<string>();
 let ownImage: string | undefined;
 let image: Promise<string> | undefined;
 
-export function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<Result> {
+export function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string; signal?: AbortSignal } = {}): Promise<Result> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd ?? repoRoot, env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd: options.cwd ?? repoRoot, env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'], signal: options.signal, killSignal: options.signal ? 'SIGKILL' : 'SIGTERM' });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
@@ -87,7 +87,7 @@ export async function runContainer(name: string, args: string[]): Promise<Result
 export const containerName = (name: string): string => `sterling-workbench-test-${suffix}-${name}`;
 
 /** Waits until the container reports healthy through /healthz on the published address, or fails with its logs. */
-export async function waitHealthy(name: string, url: string, timeoutMs = 120_000): Promise<void> {
+export async function waitHealthy(name: string, url: string, timeoutMs = 120_000, failureMessage?: () => string): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -98,6 +98,7 @@ export async function waitHealthy(name: string, url: string, timeoutMs = 120_000
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
+  if (failureMessage !== undefined) assert.fail(failureMessage());
   const logs = await run('docker', ['logs', containerName(name)]);
   assert.fail(`The workbench did not answer /healthz within ${timeoutMs / 1000} s.\n${logs.stdout.slice(-4000)}\n${logs.stderr.slice(-4000)}`);
 }

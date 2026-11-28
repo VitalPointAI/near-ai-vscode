@@ -5,6 +5,7 @@
 //   mismatch  someone else's headers: the entry reads "Sign-in check failed" and the notification gives the person-mismatch reason
 //   retry     the right person's headers in a new browser: choose Retry, and the entry goes away
 import { expect, test, type Page } from '@playwright/test';
+import { openHostedWorkbench } from './hosted-startup';
 
 const STEP = process.env.SPEC_STEP ?? '';
 const ENTRY = '#status-bar-sterling-session-identity';
@@ -19,14 +20,6 @@ test.use({
   },
 });
 
-async function openWorkbench(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
-  // Theia asks whether to trust the new workspace and makes the page inert until answered; answer it as the person would.
-  const trust = page.getByRole('button', { name: 'Yes, I trust the authors' });
-  await trust.waitFor({ timeout: 15_000 }).then(() => trust.click(), () => undefined);
-}
-
 async function runCommand(page: Page, label: string): Promise<void> {
   await page.keyboard.press('F1');
   const input = page.locator('.quick-input-widget input');
@@ -36,7 +29,7 @@ async function runCommand(page: Page, label: string): Promise<void> {
 }
 
 test('the session view for this step', async ({ page }) => {
-  await openWorkbench(page);
+  await openHostedWorkbench(page);
   if (STEP === 'active') {
     // The view polls every 5 s while the check runs; two rounds later there is still no entry.
     await page.waitForTimeout(11_000);
