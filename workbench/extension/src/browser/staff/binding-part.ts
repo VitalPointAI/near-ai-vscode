@@ -10,6 +10,7 @@ import {
   StaffBindingContribution, StaffBindingEvents, StaffBoundUndoRedoHandler, StaffEditorSource, type SourceEditor, type SourceModel,
 } from './binding-contribution.js';
 import type { BoundTextModel } from './monaco-bound-document.js';
+import type { Decoration } from './remote-cursors.js';
 
 interface Disposable { dispose(): void }
 
@@ -25,10 +26,29 @@ interface MonacoEditorLike {
   isFocused(): boolean;
   readonly onFocusChanged: (listener: (focused: boolean) => void) => Disposable;
   readonly onDispose: (listener: () => void) => Disposable;
-  getControl(): { updateOptions(options: { readOnly: boolean; readOnlyMessage?: { value: string } }): void };
+  getControl(): {
+    updateOptions(options: { readOnly: boolean; readOnlyMessage?: { value: string } }): void;
+    /** ICodeEditor.deltaDecorations (33-29). */
+    deltaDecorations(oldIds: string[], next: Decoration[]): string[];
+    /** ICodeEditor.onDidChangeCursorSelection: the primary selection, from where it started to where the caret is. */
+    onDidChangeCursorSelection(listener: (event: { readonly selection: MonacoSelection }) => void): Disposable;
+  };
+}
+
+interface MonacoSelection {
+  readonly selectionStartLineNumber: number;
+  readonly selectionStartColumn: number;
+  readonly positionLineNumber: number;
+  readonly positionColumn: number;
+}
+
+/** ITextModel.getOffsetAt. */
+interface OffsetModel {
+  getOffsetAt(position: { lineNumber: number; column: number }): number;
 }
 
 const models = new WeakMap<object, SourceModel>();
+const editors = new WeakMap<object, SourceEditor>();
 
 function sourceModel(document: NonNullable<MonacoEditorLike['document']> & { textEditorModel: BoundTextModel }): SourceModel {
   let model = models.get(document);
@@ -52,13 +72,26 @@ function sourceEditor(widget: EditorWidget): SourceEditor | undefined {
   const editor = widget.editor as unknown as MonacoEditorLike;
   const document = editor.document;
   if (document?.textEditorModel === undefined || typeof editor.getControl !== 'function') return undefined;
-  return {
+  // One wrapper per editor, so the binding and the cursors (33-29) see the same object for it.
+  const known = editors.get(editor);
+  if (known !== undefined) return known;
+  const made: SourceEditor = {
     model: sourceModel(document as NonNullable<MonacoEditorLike['document']> & { textEditorModel: BoundTextModel }),
     isFocused: () => editor.isFocused(),
     setReadOnly: (readOnly, message) => editor.getControl().updateOptions({ readOnly, ...(readOnly && message !== undefined ? { readOnlyMessage: { value: message } } : {}) }),
     onFocusChanged: (listener) => editor.onFocusChanged(listener),
     onDispose: (listener) => editor.onDispose(listener),
+    decorations: { deltaDecorations: (oldIds, next) => editor.getControl().deltaDecorations(oldIds, next) },
+    onSelection: (listener) => editor.getControl().onDidChangeCursorSelection(({ selection }) => {
+      const model = document.textEditorModel as unknown as OffsetModel;
+      listener(
+        model.getOffsetAt({ lineNumber: selection.selectionStartLineNumber, column: selection.selectionStartColumn }),
+        model.getOffsetAt({ lineNumber: selection.positionLineNumber, column: selection.positionColumn }),
+      );
+    }),
   };
+  editors.set(editor, made);
+  return made;
 }
 
 /** The browser part of the editor binding (33-25): the channel's client and proxy, the editors of this tab, and the undo and redo routing. */

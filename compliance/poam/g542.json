@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-03",
+    "ia-11",
+    "sa-11"
+  ],
+  "gap": "G542",
+  "id": "g542",
+  "milestones": [
+    {
+      "phase": "33",
+      "title": "Plan the native decision entry points and prove decision confirmation, contest and stale-dialog refusal in two browsers"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Expose the submit and first-decision flow while enforcing the configured decider role and fresh person-key confirmation. Run the two-browser checks in 33-30 Task 3 against the built workbench image. Record all three results before closing the gap.",
+  "title": "Native staff decision authorization still needs two-browser acceptance"
+}

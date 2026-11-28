@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-04",
+    "ia-11",
+    "sa-11"
+  ],
+  "gap": "G544",
+  "id": "g544",
+  "milestones": [
+    {
+      "phase": "33",
+      "title": "Repeat the six locally passing two-browser cases in CI on the combined branch"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Use the focused container test that passed locally on 2026-11-25. Verify its six browser cases on the combined branch in CI before closing G544. The native decision acceptance remains tracked in G542.",
+  "title": "Native staff browser checks await combined CI verification"
+}

@@ -1,6 +1,8 @@
 // Phase 33 plan 25: what the binding tests share. A text model with the members of Monaco's ITextModel the binding uses (Monaco's own model does
 // not load under the Node test runner: its modules import CSS), the browser contribution wired to the backend service in one process, and a shared
-// project of two people from the live world with one product. Fictional exercise data only.
+// project of two people from the live world with one product. 33-29 adds presence: fake editors carry Monaco's decorations and selection events,
+// each tab runs the cursors and Show Who Wrote This, and presence posts are relayed between two people as the hub's frames. Fictional exercise data
+// only.
 import 'reflect-metadata';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -15,13 +17,15 @@ import { diffEdit, StaffBindingServer, type StaffBindingClient } from '../../ext
 import {
   StaffBindingContribution, StaffBindingEvents, StaffEditorSource, type SourceEditor, type SourceModel,
 } from '../../extension/src/browser/staff/binding-contribution.ts';
+import { StaffRemoteCursors, type Decoration, type DecorationTarget } from '../../extension/src/browser/staff/remote-cursors.ts';
+import { StaffWhoWroteThis, WhoWroteThisPicker, type PickerRow } from '../../extension/src/browser/staff/who-wrote-this.ts';
 import type { BoundTextModel, ModelContentChange, ModelRange } from '../../extension/src/browser/staff/monaco-bound-document.ts';
 import { REPLICA_DIR } from '../../../src/domain/staff/multiUser.ts';
 import { staffProductPath } from '../../../src/domain/staff/writeLimits.ts';
 import { clientIdOf } from '../../../src/domain/replica/clientIds.ts';
 import { createLocalDoc, docText, localInsert, snapshotOf } from '../../../src/domain/replica/doc.ts';
 import { appendProductEntry, proposeVersion } from '../../../src/staff/replica/labelCells.ts';
-import { carryThroughFake, createLiveWorld, type LiveDevice, type LiveWorld } from '../../../src/test/helpers/liveWorld.ts';
+import { carryThroughFake, createLiveWorld, type FakeTimers, type LiveDevice, type LiveWorld } from '../../../src/test/helpers/liveWorld.ts';
 import { fileURLToPath } from 'node:url';
 
 // The tests that use this helper are bundled into dist/test/, so the workbench is two folders up from the running file.
@@ -122,10 +126,30 @@ export class FakeTextModel implements BoundTextModel {
 
 // ---- a tab: the contribution with fake editors ----------------------------------------------------------------------------------------------------
 
+/** Monaco's deltaDecorations on one editor: the decorations shown now, by id. */
+export class FakeDecorations implements DecorationTarget {
+  public readonly shown = new Map<string, Decoration>();
+  private next = 1;
+
+  deltaDecorations(old: string[], next: Decoration[]): string[] {
+    for (const id of old) this.shown.delete(id);
+    return next.map((decoration) => {
+      const id = `d${this.next++}`;
+      this.shown.set(id, decoration);
+      return id;
+    });
+  }
+
+  all(): Decoration[] { return [...this.shown.values()]; }
+}
+
 export interface FakeEditor extends SourceEditor {
   focused: boolean;
   readOnly: boolean;
   readOnlyMessage?: string;
+  readonly decorations: FakeDecorations;
+  /** The person moves the selection (offsets into the model). */
+  select(anchor: number, head: number): void;
 }
 
 export class FakeSourceModel implements SourceModel {
@@ -167,12 +191,15 @@ export class FakeSourceModel implements SourceModel {
 }
 
 export function fakeEditor(model: SourceModel): FakeEditor {
+  const selections = new Set<(anchor: number, head: number) => void>();
   const editor: FakeEditor = {
-    model, focused: false, readOnly: false,
+    model, focused: false, readOnly: false, decorations: new FakeDecorations(),
     isFocused: () => editor.focused,
     setReadOnly: (readOnly, message) => { editor.readOnly = readOnly; editor.readOnlyMessage = readOnly ? message : undefined; },
     onFocusChanged: () => ({ dispose: () => undefined }),
     onDispose: () => ({ dispose: () => undefined }),
+    onSelection: (listener) => { selections.add(listener); return { dispose: () => { selections.delete(listener); } }; },
+    select: (anchor, head) => { for (const listener of [...selections]) listener(anchor, head); },
   };
   return editor;
 }
@@ -181,7 +208,12 @@ export function fakeEditor(model: SourceModel): FakeEditor {
 export class FakeTab {
   public readonly contribution: StaffBindingContribution;
   public readonly events: StaffBindingEvents;
+  public readonly cursors: StaffRemoteCursors;
+  public readonly whoWroteThis: StaffWhoWroteThis;
   public readonly warnings: string[] = [];
+  public readonly infos: string[] = [];
+  /** What Show Who Wrote This listed, each time it showed its list. */
+  public readonly picked: Array<{ title: string; rows: PickerRow[] }> = [];
   public choice: string | undefined;
   private readonly created: Array<(editor: SourceEditor) => void> = [];
   private closeConnection: (() => void) | undefined;
@@ -191,12 +223,21 @@ export class FakeTab {
     container.bind(StaffBindingServer).toConstantValue(service);
     container.bind(StaffBindingEvents).toSelf().inSingletonScope();
     container.bind(StaffEditorSource).toConstantValue({ all: () => [], onCreated: (listener: (editor: SourceEditor) => void) => { this.created.push(listener); return { dispose: () => undefined }; } });
-    container.bind(MessageService).toConstantValue({ warn: async (text: string) => { this.warnings.push(text); return this.choice; } } as unknown as MessageService);
+    container.bind(MessageService).toConstantValue({
+      warn: async (text: string) => { this.warnings.push(text); return this.choice; },
+      info: async (text: string) => { this.infos.push(text); return undefined; },
+    } as unknown as MessageService);
     container.bind(ContextKeyService).toConstantValue({ createKey: () => ({ set: () => undefined, get: () => false, reset: () => undefined }) } as unknown as ContextKeyService);
     container.bind(StaffBindingContribution).toSelf().inSingletonScope();
+    container.bind(StaffRemoteCursors).toSelf().inSingletonScope();
+    container.bind(WhoWroteThisPicker).toConstantValue({ show: async (title: string, rows: PickerRow[]) => { this.picked.push({ title, rows }); } });
+    container.bind(StaffWhoWroteThis).toSelf().inSingletonScope();
     this.contribution = container.get(StaffBindingContribution);
     this.events = container.get(StaffBindingEvents);
+    this.cursors = container.get(StaffRemoteCursors);
+    this.whoWroteThis = container.get(StaffWhoWroteThis);
     this.contribution.onStart();
+    this.cursors.onStart();
     this.connect();
   }
 
@@ -209,6 +250,7 @@ export class FakeTab {
       onRequestFullText: (doc) => events.onRequestFullText(doc),
       onReadOnly: (doc, readOnly, message) => events.onReadOnly(doc, readOnly, message),
       onNotice: (doc, text) => events.onNotice(doc, text),
+      onPresence: (doc, cursors) => events.onPresence(doc, cursors),
       onDidCloseConnection: (listener) => { this.closeConnection = listener; return { dispose: () => undefined }; },
     };
     this.service.addClient(client as never);
@@ -217,9 +259,10 @@ export class FakeTab {
   /** The connection drops: the backend detaches this tab's documents. */
   drop(): void { this.closeConnection?.(); }
 
-  open(model: SourceModel): FakeEditor {
+  /** Opens an editor; with `wrapperEach`, every part is handed its own wrapper object of the one editor, as Theia's editor source once did. */
+  open(model: SourceModel, options: { wrapperEach?: boolean } = {}): FakeEditor {
     const editor = fakeEditor(model);
-    for (const listener of this.created) listener(editor);
+    for (const listener of this.created) listener(options.wrapperEach === true ? { ...editor } : editor);
     return editor;
   }
 }
@@ -229,7 +272,12 @@ export class FakeTab {
 export class FakeReplicator implements EngineReplicator {
   public status: EngineLiveStatus = { state: 'live', since: 0, findings: [], pulled: 0, pushed: 0 };
   public appended = 0;
+  /** Presence this person's engine sent through the replicator, in order (sealed: a heartbeat or a cursor; leave: a leave). */
+  public readonly posts: Array<{ cell: string; sealed?: string; leave?: true }> = [];
   private readonly listeners: Array<(status: EngineLiveStatus) => void> = [];
+  constructor(public readonly options: { onPresence?: (frame: Record<string, unknown>) => void } = {}) {}
+  async postPresence(cell: string, sealed: string) { this.posts.push({ cell, sealed }); }
+  async leavePresence(cell: string) { this.posts.push({ cell, leave: true }); }
   onStatus(listener: (status: EngineLiveStatus) => void) { this.listeners.push(listener); return { dispose: () => undefined }; }
   async start() { /* nothing */ }
   async stop() { /* nothing */ }
@@ -248,15 +296,20 @@ export interface Person {
   readonly file: string;
 }
 
-export async function personOf(device: LiveDevice): Promise<Person> {
+export async function personOf(device: LiveDevice, timers?: FakeTimers): Promise<Person> {
   let replicator: FakeReplicator | undefined;
   const logs: string[] = [];
+  const clock = timers === undefined ? {} : { now: () => timers.now(), timers };
   const live = new StaffLiveEngine({
-    engine: { ...engine, LiveReplicator: function Made() { replicator = new FakeReplicator(); return replicator; } as never, projectLive: async () => ({ written: [], left: [] }) } as StaffEngine,
+    engine: {
+      ...engine, projectLive: async () => ({ written: [], left: [] }),
+      LiveReplicator: function Made(options: FakeReplicator['options']) { replicator = new FakeReplicator(options); return replicator; } as never,
+    } as StaffEngine,
     roots: async () => [device.at.root], globalStorageDir: device.at.global, secrets: device.at.secrets, log: (line) => logs.push(line),
+    presence: clock,
   });
   await live.start();
-  const service = new StaffBindingService({ live: () => live, engine, log: (line) => logs.push(line) });
+  const service = new StaffBindingService({ live: () => live, engine, log: (line) => logs.push(line), ...clock });
   const file = path.join(device.at.root, ...staffProductPath('j4', PRODUCT).split('/'));
   return { device, live, service, replicator: replicator as FakeReplicator, logs, uri: pathToFileURL(file).toString(), file };
 }
@@ -271,26 +324,32 @@ export interface ProductWorld {
   carry(from: Person, to: Person): Promise<void>;
 }
 
+/** The lead writes the product with SEED as its text and proposes its first version, so its file exists; the product's key group is returned. */
+export async function createProduct(lead: LiveDevice): Promise<{ stream: string }> {
+  const created = await appendProductEntry(lead.host, 'product.create', { product: PRODUCT, section: 'j4', roles: ROLES, title: 'Logistics estimate' }, { label: LABEL });
+  if (!created.ok) throw new Error(created.message);
+  const { roster } = await lead.project.state();
+  const clientId = clientIdOf(roster.members.devices.get(lead.project.deviceWriter)?.[0]?.slot ?? 1, 0);
+  const client = await appendProductEntry(lead.host, 'doc.client', { product: PRODUCT, clientId, actor: { kind: 'person' } });
+  if (!client.ok) throw new Error(client.message);
+  const doc = createLocalDoc(clientId);
+  const update = await appendProductEntry(lead.host, 'doc.update', { product: PRODUCT, update: Buffer.from(localInsert(doc, 0, SEED)).toString('base64url') });
+  if (!update.ok) throw new Error(update.message);
+  const proposed = await proposeVersion(lead.host, { product: PRODUCT, text: docText(doc), header: { kind: 'estimate', label: LABEL, profile: 'j4', level: 'official' }, pins: [], snapshot: snapshotOf(doc) });
+  if (!proposed.ok) throw new Error(proposed.message);
+  return { stream: created.stream };
+}
+
 /**
  * A world of two people sharing one product with a first version (its file is where the projection puts it); `run` gets each person's live engine
  * and binding service. The product is labelled org/Internal, which both are cleared for.
  */
-export async function withProduct(run: (people: ProductWorld) => Promise<void>): Promise<void> {
+export async function withProduct(run: (people: ProductWorld) => Promise<void>, options: { timers?: FakeTimers } = {}): Promise<void> {
   const world = await createLiveWorld({ people: [{ label: 'avery', name: 'Avery Lead' }, { label: 'blake', name: 'Blake Rivers' }] });
   const people: Person[] = [];
   try {
     const [averyDevice, blakeDevice] = world.devices;
-    const created = await appendProductEntry(averyDevice.host, 'product.create', { product: PRODUCT, section: 'j4', roles: ROLES, title: 'Logistics estimate' }, { label: LABEL });
-    if (!created.ok) throw new Error(created.message);
-    const { roster } = await averyDevice.project.state();
-    const clientId = clientIdOf(roster.members.devices.get(averyDevice.project.deviceWriter)?.[0]?.slot ?? 1, 0);
-    const client = await appendProductEntry(averyDevice.host, 'doc.client', { product: PRODUCT, clientId, actor: { kind: 'person' } });
-    if (!client.ok) throw new Error(client.message);
-    const doc = createLocalDoc(clientId);
-    const update = await appendProductEntry(averyDevice.host, 'doc.update', { product: PRODUCT, update: Buffer.from(localInsert(doc, 0, SEED)).toString('base64url') });
-    if (!update.ok) throw new Error(update.message);
-    const proposed = await proposeVersion(averyDevice.host, { product: PRODUCT, text: docText(doc), header: { kind: 'estimate', label: LABEL, profile: 'j4', level: 'official' }, pins: [], snapshot: snapshotOf(doc) });
-    if (!proposed.ok) throw new Error(proposed.message);
+    const created = await createProduct(averyDevice);
     // Each person's live engine holds its own open copy of the project, as in a session: changes go from one engine's copy to the other's.
     const engineSide = (person: Person): LiveDevice => {
       const shared = person.live.shared(person.device.project.projectId);
@@ -306,9 +365,9 @@ export async function withProduct(run: (people: ProductWorld) => Promise<void>):
       await target.putGrants(signed);
       await carryThroughFake(engineSide(from), engineSide(to), created.stream);
     };
-    const avery = await personOf(averyDevice);
+    const avery = await personOf(averyDevice, options.timers);
     people.push(avery);
-    const blake = await personOf(blakeDevice);
+    const blake = await personOf(blakeDevice, options.timers);
     people.push(blake);
     await carry(avery, blake);
     await run({ world, avery, blake, stream: created.stream, carry });
@@ -316,6 +375,22 @@ export async function withProduct(run: (people: ProductWorld) => Promise<void>):
     for (const person of people) await person.live.stop();
     await world.close();
   }
+}
+
+/**
+ * The hub's presence relay between two people: each post `from` made since the last call reaches `to` as a presence frame of that cell, sent by
+ * `from`'s device. Returns how many posts went.
+ */
+export function relayPresence(from: Person, to: Person): number {
+  const posts = from.replicator.posts.splice(0);
+  const writer = from.device.project.deviceWriter;
+  for (const post of posts) {
+    to.replicator.options.onPresence?.({
+      project: from.device.project.projectId, cell: post.cell,
+      devices: post.sealed === undefined ? [] : [{ writer, sealed: post.sealed }], left: post.leave === true ? [writer] : [],
+    });
+  }
+  return posts.length;
 }
 
 /** Lets every pending promise and message run. */

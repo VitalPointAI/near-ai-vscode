@@ -4,15 +4,19 @@ import { MAX_DEPS, writerIdOf } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
 import type { FoldResult } from '../../domain/replica/fold';
 import { MAX_DECISIONS_SEEN, validateVersionsData } from '../../domain/replica/kindSchemas/versions';
-import { replicaVersionHash, VERSION_REFUSALS } from '../../domain/replica/versions';
-import type { Pin, ProductVersions, VersionRefusalReason, VersionView } from '../../domain/replica/versions';
+import { rosterView } from '../../domain/replica/roster';
+import type { RosterState } from '../../domain/replica/roster';
+import { deviceAt, memberAt } from '../../domain/replica/rosterMembers';
+import { certifiedWriter } from '../../domain/replica/sessionKeys';
+import { isOwnerSide, replicaVersionHash, VERSION_REFUSALS } from '../../domain/replica/versions';
+import type { Pin, ProductVersions, VersionRecord, VersionRefusalReason, VersionView } from '../../domain/replica/versions';
 import { LOCKED_RELEASE_STATES, RELEASE_REFUSALS, TERMINAL_RELEASE_STATES } from '../../domain/staff/release';
 import type { GuardVerdict, TradecraftVerdict } from '../../domain/staff/release';
 import { cellLabelTexts, proposeVersion } from './labelCells';
 import type { SharedProjectHost } from './membership';
 import { acceptedUpdates, productOutput } from './productFeed';
 import { ReplicaProjectError } from './replicaProject';
-import type { ReplicaProject } from './replicaProject';
+import type { ProjectState, ReplicaProject } from './replicaProject';
 
 export const CHANGED_WHILE_DECIDING_TEXT = 'Someone else decided this version while you were deciding. Look again.';
 
@@ -27,6 +31,7 @@ export const VERSION_ACT_WORDS = {
   'product-unavailable': 'This product is unavailable for this step.',
   'product-ambiguous': 'More than one shared product has this name. Ask your staff lead to resolve it.',
   'changed-while-deciding': CHANGED_WHILE_DECIDING_TEXT,
+  'decision-role-unavailable': 'Nobody who can see this version holds that decision role right now.',
   'too-many-dependencies': 'This version has too many earlier actions to save this step safely.',
   'cannot-write': 'This step could not be saved. Nothing was written.',
   'text-incomplete': 'The text of this product is not complete on this computer yet, so no version was made. Sync, then try again.',
@@ -46,6 +51,13 @@ type DecisionOptions = { stamp?: string; settle?: boolean };
 type DecideInput = VersionTarget & DecisionOptions & { outcome: 'approve' | 'reject'; reasons: readonly string[] };
 type WithdrawInput = VersionTarget & { reason: string };
 type SupersedeInput = VersionTarget & { byHash: string };
+
+export interface VersionRoomActions {
+  hash: string;
+  number: number;
+  submitRoles: string[];
+  decision?: { stamp: string; settle: boolean };
+}
 
 const REQUIRED_STATE = {
   'version.verdict': undefined,
@@ -118,6 +130,44 @@ export function sharedProductOf(fold: FoldResult, projectId: string, product: st
   return candidates.length > 1 ? refuse('product-ambiguous') : candidates[0];
 }
 
+const DECISION_ROLE = 'decision_for:';
+
+function submitRoles(roster: RosterState, product: ProductVersions, version: VersionRecord, actor: Actor, writer: string): string[] | Refused {
+  if (version.release.state !== 'guard-checked' || version.release.guardCleared !== version.hash) return refuse('wrong-state');
+  const position = roster.positions.length - 1;
+  const head = roster.positions[position];
+  const view = rosterView(roster);
+  const device = certifiedWriter(view, writer, head)?.device ?? writer;
+  const person = deviceAt(roster.members, device, position);
+  if (actor.kind !== 'person' || person?.kind !== 'person' ||
+    !isOwnerSide({ actor, member: person.member, writer, roster: head }, product.section, [version.roles.owner, version.roles.sectionLead], view)) {
+    return refuse('not-owner-or-lead');
+  }
+  const grantees = view.cellGrantees?.(product.stream, head) ?? [];
+  if (!grantees.includes(device)) return refuse('cannot-write');
+  const roles = new Set<string>();
+  for (const grantee of grantees) {
+    const reader = deviceAt(roster.members, grantee, position);
+    if (reader?.kind !== 'person') continue;
+    for (const role of memberAt(roster.members, reader.member, position)?.roles ?? []) {
+      if (role.startsWith(DECISION_ROLE)) roles.add(role.slice(DECISION_ROLE.length));
+    }
+  }
+  return [...roles].sort();
+}
+
+function decisionReady(version: VersionView | undefined, settle: boolean): version is VersionView {
+  return version?.state === 'awaiting-decision' && version.decision.status === (settle ? 'contested' : 'none') &&
+    version.decision.pending.length === 0 && version.decision.held.length === 0;
+}
+
+function holdsDecisionRole(roster: RosterState, writer: string, role: string | undefined): boolean {
+  const position = roster.positions.length - 1;
+  const person = deviceAt(roster.members, writer, position);
+  return role !== undefined && person?.kind === 'person' &&
+    rosterView(roster).hasRole(person.member, DECISION_ROLE + role, roster.positions[position]);
+}
+
 /** Signed actions on the shared version record. The same fold judges local and received writes. */
 export class VersionActs {
   public constructor(private readonly project: ReplicaProject, private readonly actor: Actor, private readonly context?: ProposeContext) {}
@@ -156,6 +206,30 @@ export class VersionActs {
     return decisionStampAt(fold, this.project.projectId, input);
   }
 
+  /** Native actions for the exact versions in an already verified project state. */
+  public roomActions({ fold, roster }: ProjectState, name: string): VersionRoomActions[] {
+    if (this.actor.kind !== 'person') return [];
+    const product = sharedProductOf(fold, this.project.projectId, name);
+    if ('ok' in product) return [];
+    const submitWriter = writerIdOf(this.project.signerOf('version.submit').publicKey);
+    const decisionWriter = writerIdOf(this.project.signerOf('version.decide').publicKey);
+    const actions: VersionRoomActions[] = [];
+    for (const version of product.versions) {
+      const { hash, number } = version;
+      const record = product.records.find((item) => item.hash === hash);
+      if (record === undefined) continue;
+      const choices = submitRoles(roster, product, record, this.actor, submitWriter);
+      if (Array.isArray(choices) && choices.length > 0) {
+        actions.push({ hash, number, submitRoles: choices });
+      }
+      const settle = version.decision.status === 'contested';
+      if (decisionReady(version, settle) && holdsDecisionRole(roster, decisionWriter, version.decisionFor)) {
+        actions.push({ hash, number, submitRoles: [], decision: { stamp: decisionStamp(product, version), settle } });
+      }
+    }
+    return actions;
+  }
+
   public async verdict(input: VerdictInput): Promise<Written | Refused> {
     const data = { product: input.product, hash: input.hash, gate: input.gate, verdict: input.verdict, reasons: input.reasons };
     if (validateVersionsData('version.verdict', data, 'verdict') !== undefined) return refuse('bad-input');
@@ -163,9 +237,17 @@ export class VersionActs {
   }
 
   public async submit(input: SubmitInput): Promise<Written | Refused> {
+    return this.submitVersion(input, false);
+  }
+
+  public async submitForRosterRole(input: SubmitInput): Promise<Written | Refused> {
+    return this.submitVersion(input, true);
+  }
+
+  private async submitVersion(input: SubmitInput, forRosterRole: boolean): Promise<Written | Refused> {
     const data = { product: input.product, hash: input.hash, decisionFor: input.decisionFor };
     if (validateVersionsData('version.submit', data, 'submit') !== undefined) return refuse('bad-input');
-    return this.write('version.submit', data);
+    return this.write('version.submit', data, { forRosterRole });
   }
 
   public async decide(input: DecideInput): Promise<Written | Refused> {
@@ -197,14 +279,14 @@ export class VersionActs {
     return this.write('version.supersede', data);
   }
 
-  private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>, options: DecisionOptions = {}): Promise<Written | Refused> {
+  private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>, options: DecisionOptions & { forRosterRole?: boolean } = {}): Promise<Written | Refused> {
     const actor = { ...this.actor };
     const observed = OBSERVED_ACTIONS[kind];
     // The person key signs a decision when the project has a person signer (D-60: isPersonKeyKind in signerOf); its own earlier acts are on its chain.
     const signer = this.project.signerOf(kind);
     const signing = writerIdOf(signer.publicKey);
     try {
-      const written = await this.project.appendChecked<Refused>(({ fold }) => {
+      const written = await this.project.appendChecked<Refused>(({ fold, roster }) => {
         const candidates = namedProducts(fold, this.project.projectId, data.product);
         if (candidates.length === 0) return refuse('product-unavailable');
         if (candidates.length > 1) return refuse('product-ambiguous');
@@ -222,12 +304,17 @@ export class VersionActs {
           if (kind === 'version.supersede') return refuse('no-release');
           return refuse(kind === 'version.submit' && LOCKED_RELEASE_STATES.includes(state) ? 'locked' : 'wrong-state');
         }
+        if (options.forRosterRole === true) {
+          const choices = submitRoles(roster, product, version, actor, signing);
+          if (!Array.isArray(choices)) return choices;
+          if (typeof data.decisionFor !== 'string' || !choices.includes(data.decisionFor)) return refuse('decision-role-unavailable');
+        }
         const decision = view?.decision;
         let decisionsSeen: string[] = [];
         if (kind === 'version.decide') {
-          const expected = options.settle === true ? 'contested' : 'none';
-          if (decision?.status !== expected || decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
-          if (options.settle === true) decisionsSeen = [...decision.contested];
+          if (!decisionReady(view, options.settle === true)) return refuse('wrong-state');
+          if (options.stamp !== undefined && !holdsDecisionRole(roster, signing, view.decisionFor)) return refuse('not-decision-holder');
+          if (options.settle === true) decisionsSeen = [...view.decision.contested];
         }
         const additionalDeps: string[] = [];
         if (kind === 'version.release') {

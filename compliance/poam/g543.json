@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sa-11",
+    "sc-07"
+  ],
+  "gap": "G543",
+  "id": "g543",
+  "milestones": [
+    {
+      "phase": "33",
+      "title": "Repeat the locally passing internal-bridge staff fixture checks in CI on the combined branch"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The fixture passed locally with one internal Docker bridge and host loopback forwards. Verify the four service attachments, browser access and outbound-hook checks on the combined CI head.",
+  "title": "The isolated two-browser staff fixture awaits combined CI"
+}

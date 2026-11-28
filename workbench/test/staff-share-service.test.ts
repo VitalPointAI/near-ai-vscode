@@ -29,6 +29,8 @@ import { hubNodeOrSkip, startHubChild } from '../../src/test/helpers/hubChild.ts
 import { MemorySecrets, grantsOn } from '../../src/test/helpers/labelCellWorld.ts';
 import { rosterDevice } from '../../src/test/helpers/replicaRosterWorld.ts';
 import { fixedSigner } from '../../src/test/helpers/replicaWorld.ts';
+import { SECRET_PRODUCT, SEED_PRODUCT, seedStaffWork } from './helpers/staff-world.ts';
+import { staffProductPath } from '../../src/domain/staff/writeLimits.ts';
 
 type ShareEngine = StaffEngine & StaffShareApi & { x25519BindingBytes(rawX25519: string, writer: string): Buffer };
 // The workbench lint checks that the bundle's entry gives every name the share service types.
@@ -202,6 +204,56 @@ test('a conversion names each product it withheld with its way out (D-31), and t
     assert.deepEqual(result.withheld, ['Some history for logistics-estimate was left out because it refers to a product with a higher label. Ask someone cleared for org/Confidential to make a single-machine copy and share it again.']);
   } finally {
     await lead.live.stop();
+  }
+});
+
+test('a hosted lead shares staff work that already holds products: each product is converted, with its text, into a part the lead opens (33-30)', async () => {
+  const lead = await person('products', { hosted: true, staff: true });
+  try {
+    await seedStaffWork(lead.root);
+    const shared = value(await lead.service.turnOn({ clearance: { ...INTERNAL, level: 'Confidential' } }), 'turn on');
+    assert.deepEqual(shared.withheld, []);
+    const input = await lead.live.projectionInput(rowOf(lead).project) as { fold: { families: Record<string, unknown> } };
+    const texts = (input.fold.families.doc as Array<{ product: string; text: string }> | undefined) ?? [];
+    assert.deepEqual(texts.map((item) => item.product).sort(), [SECRET_PRODUCT.product, SEED_PRODUCT.product].sort());
+    assert.ok(texts.find((item) => item.product === SEED_PRODUCT.product)?.text.includes('The enemy holds the river crossings.'));
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('a hosted joiner gets the shared products they are cleared for, as text and as files, and never one above their clearance (33-30)', async (t: TestContext) => {
+  const node = hubNodeOrSkip(t);
+  if (node === undefined) return;
+  const server = await startHubChild(node);
+  const lead = await person('avery-products', { hosted: true, staff: true });
+  const blake = await person('blake-products', { hosted: true, staff: false });
+  try {
+    await seedStaffWork(lead.root);
+    value(await lead.service.turnOn({ clearance: { ...INTERNAL, level: 'Confidential' } }), 'turn on');
+    value(await lead.service.connectServer({ hubFile: await server.hubFileText(), ceiling: INTERNAL }), 'connect your organization\'s server');
+    await until(() => rowOf(lead), (row) => row?.state === 'live', 'the lead live on the server');
+    const invited = value(await lead.service.invite({ name: 'Blake Rivers', seat: 'j2-analyst', clearance: INTERNAL }), 'invite');
+    value(await blake.service.openInvitation({ text: invited.file?.text as string, name: 'Blake Rivers' }), 'open the invitation');
+    const [request] = value(await lead.service.joinRequests(), 'join requests');
+    const admitted = value(await lead.service.admit({ request: request.text, codeMatched: true }), 'admit');
+    value(await blake.service.openWelcome({ text: admitted.file?.text as string }), 'open the welcome');
+    await until(() => rowOf(blake), (row) => row?.state === 'live', 'the joiner live on the server');
+    const textsOf = async (who: Person): Promise<Array<{ product: string; text: string }>> => {
+      const row = rowOf(who);
+      if (row === undefined) return [];
+      const input = await who.live.projectionInput(row.project) as { fold: { families: Record<string, unknown> } } | undefined;
+      return (input?.fold.families.doc as Array<{ product: string; text: string }> | undefined) ?? [];
+    };
+    const texts = await until(() => textsOf(blake), (list) => list.some((item) => item.product === SEED_PRODUCT.product), 'the joiner\'s text of the product', 60_000);
+    assert.ok(texts.find((item) => item.product === SEED_PRODUCT.product)?.text.includes('The enemy holds the river crossings.'));
+    assert.equal(texts.some((item) => item.product === SECRET_PRODUCT.product), false, 'never the Confidential product');
+    const file = path.join(blake.root, ...staffProductPath(SEED_PRODUCT.section, SEED_PRODUCT.product).split('/'));
+    await until(() => existsSync(file), (found) => found, 'the product file in the joiner\'s folder', 60_000);
+  } finally {
+    await blake.live.stop();
+    await lead.live.stop();
+    await server.dispose();
   }
 });
 

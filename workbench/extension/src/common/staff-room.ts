@@ -19,6 +19,7 @@ export interface StaffRoomAction {
   readonly accessibleName: string;
   readonly product?: string;
   readonly hash?: string;
+  readonly decisionFor?: string;
   readonly invite?: string;
   readonly branch?: string;
 }
@@ -50,6 +51,15 @@ export interface StaffRoomRow {
   readonly whoCanSee: string;
   readonly unconfirmed?: string;
   readonly accessibleName: string;
+  readonly versionActions?: readonly StaffRoomVersionActions[];
+}
+
+/** Actions on a specific version, including a version older than the one shown in the row. */
+export interface StaffRoomVersionActions {
+  readonly hash: string;
+  readonly number: number;
+  readonly submitRoles: readonly string[];
+  readonly decide?: true;
 }
 
 /** The Staff Room's view of one shared work (staffRoomLive.ts StaffRoomLiveView). */
@@ -107,6 +117,7 @@ export interface StaffRoomServer {
   decline(project: string, invite: string): Promise<ServiceResult<string>>;
   choose(project: string, branch: string): Promise<ServiceResult<string>>;
   propose(project: string, product: string): Promise<ServiceResult<string>>;
+  submit(project: string, product: string, hash: string, decisionFor: string): Promise<ServiceResult<string>>;
   dismiss(project: string, product: string, hash: string): Promise<void>;
   /** The switch to post-quantum keys (33.2 D-05): the lead's switch, then moving the shared work to new keys, then keys for late computers. */
   switchToV2(project: string, returnTo: string): Promise<StaffSignedResult<string>>;
@@ -122,9 +133,13 @@ export const STAFF_ROOM_TEXT = {
   notOpen: 'This shared work is not open in this session.',
   decisionGone: 'This decision is no longer open. Look again.',
   notVersion: 'This version is not in the shared record on this computer.',
+  decisionUnavailable: 'You cannot open a decision for this version right now. Look again.',
   joinLater: 'Admitting people is done from Share with People.',
   copyLater: 'Make a single-machine copy from Share with People.',
   decided: 'Your decision was saved.',
+  submit: 'Submit',
+  decide: 'Decide',
+  decisionRole: 'Decision role',
   dialogApprove: 'Approve',
   dialogReject: 'Reject',
   dialogCancel: 'Cancel',

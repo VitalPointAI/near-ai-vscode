@@ -10,7 +10,7 @@ import React from '@theia/core/shared/react';
 import { injectable } from '@theia/core/shared/inversify';
 import { Emitter, type Event } from '@theia/core/lib/common/event.js';
 import {
-  STAFF_ROOM_TEXT, type StaffRoom, type StaffRoomAction, type StaffRoomCard, type StaffRoomClient, type StaffRoomLiveView,
+  STAFF_ROOM_TEXT, type StaffRoom, type StaffRoomAction, type StaffRoomCard, type StaffRoomClient, type StaffRoomLiveView, type StaffRoomRow, type StaffRoomVersionActions,
 } from '../../common/staff-room.js';
 
 export interface StaffRoomHandlers {
@@ -90,6 +90,30 @@ function decision(room: StaffRoom, handlers: StaffRoomHandlers): unknown {
       h('button', { type: 'button', className: 'theia-button secondary', onClick: () => handlers.cancel(room) }, STAFF_ROOM_TEXT.dialogCancel)));
 }
 
+function versionControls(room: StaffRoom, row: StaffRoomRow, version: StaffRoomVersionActions, handlers: StaffRoomHandlers): unknown {
+  const { hash, number, submitRoles } = version;
+  const target = { product: row.product, hash };
+  if (version.decide === true) {
+    const label = `${STAFF_ROOM_TEXT.decide} v${number}`;
+    return button(room, { ...target, id: 'begin-decision', label, accessibleName: `${label} of ${row.title}` }, handlers, false, hash);
+  }
+  const label = `${STAFF_ROOM_TEXT.submit} v${number}`;
+  const accessibleName = `${label} of ${row.title}`;
+  const roleId = `staff-room-decision-role-${room.project}-${row.product}-${hash}`;
+  return h('form', {
+    key: hash, className: 'sterling-staff-room-actions',
+    onSubmit: (event: { preventDefault(): void; currentTarget: HTMLFormElement }) => {
+      event.preventDefault();
+      const decisionFor = new FormData(event.currentTarget).get('decisionFor');
+      if (typeof decisionFor === 'string') handlers.act(room, { ...target, id: 'submit', label, accessibleName, decisionFor });
+    },
+  },
+  h('label', { htmlFor: roleId }, `${STAFF_ROOM_TEXT.decisionRole} for v${number} of ${row.title}`),
+  h('select', { id: roleId, name: 'decisionFor', required: true, defaultValue: submitRoles[0] },
+    ...submitRoles.map((role) => h('option', { key: role, value: role }, role))),
+  h('button', { type: 'submit', className: 'theia-button secondary sterling-staff-room-action', 'aria-label': accessibleName }, label));
+}
+
 function roomView(room: StaffRoom, handlers: StaffRoomHandlers): unknown {
   const view: StaffRoomLiveView = room.view;
   return h('section', { key: room.project, className: 'sterling-staff-room-section', 'aria-label': room.root },
@@ -116,7 +140,8 @@ function roomView(room: StaffRoom, handlers: StaffRoomHandlers): unknown {
     row.version === undefined ? null : h('span', { className: 'sterling-staff-room-version' }, row.version),
     row.label === undefined ? null : h('span', { className: 'sterling-staff-room-label' }, row.label),
     h('span', { className: 'sterling-staff-room-who' }, row.whoCanSee),
-    row.unconfirmed === undefined ? null : h('span', { className: 'sterling-staff-room-unconfirmed' }, row.unconfirmed)))));
+    row.unconfirmed === undefined ? null : h('span', { className: 'sterling-staff-room-unconfirmed' }, row.unconfirmed),
+    ...((row.versionActions ?? []).map((version) => versionControls(room, row, version, handlers)))))));
 }
 
 /** Every open shared work's room, or the one sentence when none is open. */

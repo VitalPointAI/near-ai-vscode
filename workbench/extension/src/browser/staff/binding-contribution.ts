@@ -24,9 +24,10 @@ import { CommonCommands } from '@theia/core/lib/browser/common-commands.js';
 import { ContextKeyService, type ContextKey } from '@theia/core/lib/browser/context-key-service.js';
 import type { UndoRedoHandler } from '@theia/core/lib/browser/undo-redo-handler.js';
 import {
-  BOUND_EDITOR_CONTEXT, STAFF_BINDING_TEXT, StaffBindingServer, type AttachAnswer, type BindingEdit, type StaffBindingClient,
+  BOUND_EDITOR_CONTEXT, STAFF_BINDING_TEXT, StaffBindingServer, type AttachAnswer, type BindingEdit, type RemoteCursor, type StaffBindingClient,
 } from '../../common/staff-binding.js';
 import { MonacoBoundDocument, type BoundTextModel } from './monaco-bound-document.js';
+import type { DecorationTarget } from './remote-cursors.js';
 
 interface Disposable { dispose(): void }
 
@@ -48,6 +49,10 @@ export interface SourceEditor {
   setReadOnly(readOnly: boolean, message?: string): void;
   onFocusChanged(listener: (focused: boolean) => void): Disposable;
   onDispose(listener: () => void): Disposable;
+  /** Monaco's decorations on this editor (33-29: cursors and Show Who Wrote This); absent where there is no Monaco control. */
+  readonly decorations?: DecorationTarget;
+  /** This editor's selection changes, as offsets into the model: anchor where it started, head where the caret is (33-29). */
+  onSelection?(listener: (anchor: number, head: number) => void): Disposable;
 }
 
 /** The editors of this tab (the part file adapts Theia's EditorManager). */
@@ -65,7 +70,9 @@ export class StaffBindingEvents implements StaffBindingClient {
   private readonly fullText = new Emitter<string>();
   private readonly readOnly = new Emitter<{ doc: string; readOnly: boolean; message?: string }>();
   private readonly notice = new Emitter<{ doc: string; text: string }>();
+  private readonly presence = new Emitter<{ doc: string; cursors: readonly RemoteCursor[] }>();
   readonly onDidHello: Event<string> = this.hello.event;
+  readonly onDidPresence = this.presence.event;
   readonly onDidApply = this.apply.event;
   readonly onDidRequestFullText: Event<string> = this.fullText.event;
   readonly onDidReadOnly = this.readOnly.event;
@@ -80,6 +87,7 @@ export class StaffBindingEvents implements StaffBindingClient {
   onRequestFullText(doc: string): void { this.fullText.fire(doc); }
   onReadOnly(doc: string, readOnly: boolean, message?: string): void { this.readOnly.fire({ doc, readOnly, ...(message === undefined ? {} : { message }) }); }
   onNotice(doc: string, text: string): void { this.notice.fire({ doc, text }); }
+  onPresence(doc: string, cursors: readonly RemoteCursor[]): void { this.presence.fire({ doc, cursors }); }
 }
 
 /** One model of this tab and where it stands with the backend. */

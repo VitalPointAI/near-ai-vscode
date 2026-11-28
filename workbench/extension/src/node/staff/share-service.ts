@@ -98,6 +98,8 @@ export interface ShareLive {
   syncNow(id: string): unknown;
   /** Hosted: the session key's certificate in the project, for the lead flows' own connections to the server. */
   certificateOf(id: string): unknown;
+  /** Hosted: certifies the session key in the project at `root` (a conversion's genesis), before its other entries are written (33-30). */
+  certifyAt(root: string): Promise<boolean>;
 }
 
 /** The deps shared projects open with in this session, the person's secrets and storage, and the session keys when hosted. */
@@ -213,7 +215,15 @@ export class StaffShareService implements StaffShareServer {
       const deps = await this.depsWithBinding(context);
       if (isRefused(deps)) return deps;
       const keyStatus = (deps as { keyStatus?: unknown }).keyStatus ?? (() => Promise.resolve(() => ({ state: 'active' })));
-      const made = await this.options.engine.makeMultiUser(root, { ...deps, staffKeyStatus: keyStatus } as never, (input.clearance === undefined ? {} : { leadClearance: input.clearance }) as never);
+      const options = input.clearance === undefined ? {} : { leadClearance: input.clearance };
+      if (context.hosted !== undefined) {
+        // The session key signs the conversion's products and texts, and the fold takes them only once a session.certify names it (D-62):
+        // the genesis first, then the certificate, then the conversion runs again from where it stopped (33-30).
+        const genesis = await this.options.engine.makeMultiUser(root, { ...deps, staffKeyStatus: keyStatus } as never, { ...options, stopAfter: 'genesis' } as never);
+        if ('refused' in genesis) return refusal(genesis.message);
+        if (!(await live.certifyAt(root))) return refused(SESSION_KEY_TEXT.stepUp, KEY_SERVICE_TEXT.confirm);
+      }
+      const made = await this.options.engine.makeMultiUser(root, { ...deps, staffKeyStatus: keyStatus } as never, options as never);
       if ('refused' in made) return refusal(made.message);
       const withheld = this.options.engine.conversionNoticeLines(made.withheld, made.unversioned, (cell) => made.cells.find((item) => item.cell === cell)?.label);
       await live.reopen(root);

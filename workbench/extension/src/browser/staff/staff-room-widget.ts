@@ -48,9 +48,17 @@ export class StaffRoomWidget extends ReactWidget {
     switch (action.id) {
       case 'sync-now':
         return this.answer(await this.status.syncNow(room.project));
+      case 'submit':
+        if (action.product !== undefined && action.hash !== undefined && action.decisionFor !== undefined) {
+          await this.answer(await this.server.submit(room.project, action.product, action.hash, action.decisionFor));
+        }
+        return;
+      case 'begin-decision':
       case 'approve':
       case 'reject':
-        if (action.product !== undefined && action.hash !== undefined) await this.answer(await this.server.beginDecision(room.project, action.product, action.hash, true), true);
+        if (action.product !== undefined && action.hash !== undefined) {
+          await this.answer(await this.server.beginDecision(room.project, action.product, action.hash, action.id !== 'begin-decision'), true);
+        }
         return;
       case 'admit':
         return this.answer(await this.server.admit(room.project, action.invite ?? ''));

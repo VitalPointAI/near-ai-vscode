@@ -86,6 +86,15 @@ export async function runContainer(name: string, args: string[]): Promise<Result
 /** The suite-owned container name for `name`. */
 export const containerName = (name: string): string => `sterling-workbench-test-${suffix}-${name}`;
 
+/** The Docker host can reach a container's IPv4 on an ordinary internal bridge. */
+export async function addressOnNetwork(name: string, network: string): Promise<string> {
+  const { stdout } = await mustRun('docker', ['container', 'inspect', '--format', '{{json .NetworkSettings.Networks}}', name]);
+  const endpoints = JSON.parse(stdout) as Record<string, { IPAddress?: string }>;
+  const address = endpoints[network]?.IPAddress;
+  assert.ok(address && net.isIPv4(address), `${name} has an IPv4 address on ${network}`);
+  return address;
+}
+
 /** Waits until the container reports healthy through /healthz on the published address, or fails with its logs. */
 export async function waitHealthy(name: string, url: string, timeoutMs = 120_000, failureMessage?: () => string): Promise<void> {
   const deadline = Date.now() + timeoutMs;

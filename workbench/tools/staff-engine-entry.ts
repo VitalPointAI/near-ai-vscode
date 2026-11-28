@@ -58,6 +58,10 @@ export { SCALE_PRESETS, labelKey } from '../../src/domain/gate/labels';
 export { EditorBinding, HEADER_KEPT_TEXT, RESYNC_LOG_LINE } from '../../src/staff/replica/editorBinding';
 export { projectProductFile, projectProductStates } from '../../src/staff/replica/projection';
 export { staffProductPath } from '../../src/domain/staff/writeLimits';
+// 33-29: native cursors (presence over an open project) and Show Who Wrote This (the product's author spans and the executed attribution words).
+export { openProjectPresence } from '../../src/staff/replica/projectPresence';
+export { productOutput } from '../../src/staff/replica/productFeed';
+export { authorRows, namesAtRegistration } from '../../src/domain/staff/whoWroteThis';
 // 33-26: the native Staff Room. The live model, the version acts with their decision stamp, the contested cards and version rows, and the roster split.
 export { memberNameAt, staffRoomLive, whoCanSee } from '../../src/domain/staff/staffRoomLive';
 export { CHANGED_WHILE_DECIDING_TEXT, VersionActs } from '../../src/staff/replica/versionActs';
