@@ -180,6 +180,12 @@ fixture evidence above came from the scratch harness before the command
 was registered. The registered command still needs an authorized
 end-to-end run on a fresh exact fixture.
 
+## Registered sample and save check
+
+The owner-approved one-shot run on November 28 used exact source `0a07a74e4`, the released v0.4.41 image and Chromium 1254. The CLI verified isolation before navigation. It opened the fictional workspace, saved `notes.md`, then failed the save check with exit 1. It emitted no complete timings or rig evidence. The registered log SHA-256 is `d2cbb91a46829f0576a1a9fdf562a9a3ceadc64f03d806d7134d48e2dad89a92`. The original contents of the other two files matched, and the saved `notes.md` SHA-256 `b5e8ab83ff08ced309056cfab0664068d89676d2771b21ca7313c8dac1acb7d3` exactly matches the original bytes plus the typed suffix. The assertion had stripped the original trailing newline before making its comparison. Scoped cleanup removed the test-created container and workspace. The cleanup log SHA-256 is `d3dc4f33eab97ec2cd50017541078acb1e6f18efee7eb020202c3eef9d6812ce`.
+
+The corrected check compares the exact original bytes plus the suffix it types. The new focused regression reproduced the same failure before the fix. Afterward all 60 offline load-test checks and the pinned TypeScript check passed. Independent source review passed. No second browser run was performed.
+
 ## Self-Check: PASSED
 
 The two measured Task 1 commits and their files are present on the

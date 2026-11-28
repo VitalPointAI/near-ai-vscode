@@ -74,6 +74,20 @@ export async function openWorkbench(page, origin, now = () => performance.now())
   return elapsed;
 }
 
+export async function saveFixtureEdit(page, file, edit) {
+  const before = readFileSync(file);
+  const suffix = `\n${edit.text}`;
+  const expected = Buffer.concat([before, Buffer.from(suffix)]);
+  await page.locator('.lm-TabBar-tab').getByText(edit.file, { exact: true }).first().click();
+  await page.locator('.lm-TabBar-tab.lm-mod-current').getByText(edit.file, { exact: true }).first().waitFor();
+  await page.locator('.monaco-editor:visible .view-lines').first().click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText(suffix);
+  await page.keyboard.press('Control+s');
+  await eventually(() => readFileSync(file).equals(expected),
+    'The synthetic edit was not saved');
+}
+
 async function workbenchSample({ browser, workspace, profile, workbenchOrigin, permitsFixtureRequest }) {
   const { context, page } = await fixturePage(browser, 'workbench', permitsFixtureRequest);
   try {
@@ -90,18 +104,7 @@ async function workbenchSample({ browser, workspace, profile, workbenchOrigin, p
         await page.locator('.lm-TabBar-tab.lm-mod-current').getByText(file, { exact: true }).first().waitFor();
       }
     });
-    const editMs = await timed(async () => {
-      const file = join(workspace, edit.file);
-      const before = readFileSync(file, 'utf8');
-      await page.locator('.lm-TabBar-tab').getByText(edit.file, { exact: true }).first().click();
-      await page.locator('.lm-TabBar-tab.lm-mod-current').getByText(edit.file, { exact: true }).first().waitFor();
-      await page.locator('.monaco-editor:visible .view-lines').first().click();
-      await page.keyboard.press('Control+End');
-      await page.keyboard.insertText(`\n${edit.text}`);
-      await page.keyboard.press('Control+s');
-      await eventually(() => readFileSync(file, 'utf8').trimEnd() === `${before.trimEnd()}\n${edit.text}`,
-        'The synthetic edit was not saved');
-    });
+    const editMs = await timed(() => saveFixtureEdit(page, join(workspace, edit.file), edit));
     const terminalMs = await timed(async () => {
       const marker = join(workspace, terminalMarker);
       assert(!existsSync(marker), 'Expected an unused synthetic terminal fixture');

@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main, type CliDeps } from '../src/cli.ts';
-import { openWorkbench, routeFixtureRequest, runJourney } from '../src/browser-journey.mjs';
+import { openWorkbench, routeFixtureRequest, runJourney, saveFixtureEdit } from '../src/browser-journey.mjs';
 import { assertFixtureIsolation, claimSample, permitsFixtureRequest, type FixtureIsolation } from '../src/browser.ts';
 
 test('the one-shot sample command requires its exact flags and the fixture marker excludes both ordinary run kinds', async () => {
@@ -123,6 +123,24 @@ test('Get Started elapsed time stops when the welcome view becomes visible', asy
   }, 'http://127.0.0.1:3000', () => now);
   assert.equal(elapsed, 50);
   assert.equal(now, 550);
+});
+
+test('the browser save check preserves the fixture newline before the appended activity', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'loadtest-save-'));
+  const file = join(folder, 'notes.md');
+  const original = '# Fixture notes\n';
+  const edit = { file: 'notes.md', text: 'Local synthetic activity' };
+  writeFileSync(file, original);
+  const element = { click: async () => {}, waitFor: async () => {} };
+  const page = {
+    locator: () => ({ first: () => element, getByText: () => ({ first: () => element }) }),
+    keyboard: {
+      press: async () => {},
+      insertText: async (text: string) => { writeFileSync(file, original + text); },
+    },
+  };
+  await saveFixtureEdit(page, file, edit);
+  assert.equal(readFileSync(file, 'utf8'), '# Fixture notes\n\nLocal synthetic activity');
 });
 
 test('a stalled browser command rejects at its deadline, then kills and reaps after the grace period', { timeout: 3000 }, async (t) => {
