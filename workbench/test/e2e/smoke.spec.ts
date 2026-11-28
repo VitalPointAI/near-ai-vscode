@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { waitForGetStartedTab } from './wait-for-get-started';
 
 // The same engine bundle the image carries (scripts/build.mjs builds it before the container suite runs this spec).
 const workbenchRoot = path.resolve(__dirname, '..', '..');
@@ -20,8 +21,7 @@ function parserMessage(fixture: string): string {
 }
 
 async function openGetStarted(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+  await waitForGetStartedTab(page);
 }
 
 /** Theia asks whether to trust the new workspace and makes the page inert until answered; answer it as a person would (restricted mode). */

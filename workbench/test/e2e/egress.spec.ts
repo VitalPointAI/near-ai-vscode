@@ -13,6 +13,7 @@
 // the release image the chat's webview frame attaches after the page first went quiet, which clears Playwright's idle state, and a page that
 // stays quiet never sets it again (46-08), so that wait timed out before any check ran.
 import { expect, test } from '@playwright/test';
+import { waitForGetStartedTab } from './wait-for-get-started';
 
 /** How long the ready page is watched; every request in that window is checked with the rest. */
 const OBSERVE_MS = 10_000;
@@ -45,8 +46,7 @@ test('Get Started, the Team preview and the bundled NEAR AI chat request only th
     if (/\] Start of \d+ plugins?:/.test(message.text())) pluginsStarted = message.text();
   });
 
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+  await waitForGetStartedTab(page);
   await expect(page.locator('#sterling-title')).toBeVisible();
 
   // Theia asks whether to trust the new workspace and makes the page inert until answered (46-01 deviation 4).
