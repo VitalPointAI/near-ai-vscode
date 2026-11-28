@@ -92,7 +92,7 @@ test('the policy section says what the code does: own storage not the project, o
     'allows what your settings allow',
     'only reading and planning run',
     'Deleting the file does not reset a policy',
-    'Only **Reset my rules** re-signs a policy that failed, and it resets your own rules only',
+    'Only **Reset my Standing Orders** re-signs a policy that failed, and it resets your own rules only',
     'keeps the old file beside the new one',
     'records the reset',
     'Nothing in a decision needs the network',
@@ -373,7 +373,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   assert.deepEqual([setLabel, edit, applyDraft], ['SovAI: Set Label', 'SovAI: Edit Policy', 'SovAI: Apply Policy Draft']);
   // D-44: Edit Policy and Apply Policy Draft left the palette; the docs name the page and its two buttons that run them.
   const words = flat(policySection);
-  for (const phrase of [setLabel, 'open **SovAI: Policy** and use **Edit my rules**, then **Apply my draft**', '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
+  for (const phrase of [setLabel, 'open **SovAI: Standing Orders** and use **Edit my Standing Orders**, then **Apply my draft**', '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
     'anyone who can read the project can read its labels, compartment names included', 'only ever makes a label stricter', 'signed again only after you confirm',
     'or that was deleted, stops agents reading the project', 'through the file tools, searches or a command that names it',
     'Decision records hold the labels involved and stay on this computer', 'Where a labelled chat\'s content may be sent is in']) {
@@ -383,7 +383,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   assert.doesNotMatch(policySection, /NEAR organization/);
 });
 
-test('README names Set Label, Lower This Chat\'s Label and the policy page\'s Edit my rules and Apply my draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
+test('README names Set Label, Lower This Chat\'s Label and the policy page\'s Edit my Standing Orders and Apply my draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
   const words = flat(readmePolicy);
   for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.open']) assert.ok(words.includes(commandName(id)), id);
   assert.ok(words.includes(`Add a clearance in **${commandName('nearAi.policy.open')}** with **Edit my Standing Orders**, then **Apply my draft**.`), 'the clearance sentence names the page');
@@ -667,7 +667,7 @@ test('PR #143 review: SECURITY.md says classified levels stay here whatever tier
   const security = flat(SECURITY);
   assert.match(security, /This holds whatever tier the policy gives those levels: no cloud and no other host is accredited for them today/);
   assert.match(security, /A model on a host your organization names as local counts only when the policy names that exact host and it is reached over https; a `\*\.` pattern or plain http does not\./);
-  assert.match(security, /only for a policy signed by this computer's own key, \*\*SovAI: Policy\*\* offers \*\*Reset my rules\*\*/);
+  assert.match(security, /only for a policy signed by this computer's own key, \*\*SovAI: Standing Orders\*\* offers \*\*Reset my Standing Orders\*\*/);
   assert.match(flat(README), /a host your organization names exactly and reaches over https/);
 });
 
@@ -810,14 +810,14 @@ test('Phase 41: layers, Reset and the policy page', async () => {
   const words = flat(block);
   const setting = { key: 'labels.routing.levels.org/Internal', yours: 'any-cloud', allowed: 'local-only', layer: 'personal' } as const;
   for (const phrase of [
-    '"Your organization\'s rules"', '"Your rules"', '**SovAI: Policy**', `\`${PROPOSAL_FILE_EXTENSION}\``,
+    '"Your organization\'s Standing Orders"', '"Your Standing Orders"', '**SovAI: Standing Orders**', `\`${PROPOSAL_FILE_EXTENSION}\``,
     ignoredSettingsNotice([setting as never]) ?? '', widerThanOrganizationText(setting as never),
     '**Reset touches your own rules only.**', "Your organization's rules, and the files that hold them, stay as they are.",
     'is never reset for you', needsUpdateSentence('0.5.0'),
     'A policy file an earlier version wrote (version 1) is read as it is and never rewritten on its own; the first change you apply writes version 2.',
     'There is no command to leave your organization.',
-    '**Apply to my rules**', '**Save a file for your organization**', '**Discard**', '**Wider**', '**Stricter**',
-    '**Edit my rules**', '**Apply my draft**', '**Show as stored**', '**Reset my rules**'
+    '**Apply to my Standing Orders**', '**Save a file for your organization**', '**Discard**', '**Wider**', '**Stricter**',
+    '**Edit my Standing Orders**', '**Apply my draft**', '**Show as stored**', '**Reset my Standing Orders**'
   ]) assert.ok(words.includes(flat(phrase)), phrase);
   // The page's own words: each button the text names is the page's.
   for (const label of ['Apply to my Standing Orders', 'Save a file for your organization', 'Discard', 'Edit my Standing Orders', 'Apply my draft', 'Show as stored', 'Reset my Standing Orders', 'Wider', 'Stricter']) {
@@ -1027,11 +1027,14 @@ test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
   assert.doesNotMatch(entry, /\b(?:decideRoute|composeLayers|bundleVersion|route\.[a-z-]+|PR #\d+)\b/, 'no internal names');
 });
 
-test('README identifies the current editor and reset labels and neither guide lists the hidden palette commands', () => {
-  assert.doesNotMatch(SECURITY, LEFT_THE_PALETTE, 'the security guide does not list the hidden commands');
-  assert.doesNotMatch(README, LEFT_THE_PALETTE, 'README does not list the hidden commands');
-  assert.ok(README.includes(`**${commandName('nearAi.policy.open')}**`));
-  assert.ok(README.includes('**Reset my Standing Orders**'));
+test('SECURITY and README identify the current editor and reset labels and omit hidden palette commands', () => {
+  const command = commandName('nearAi.policy.open');
+  for (const [name, text] of [['SECURITY', SECURITY], ['README', README]]) {
+    assert.doesNotMatch(text, LEFT_THE_PALETTE, `${name} does not list the hidden commands`);
+    assert.ok(text.includes(`**${command}**`), `${name} names the current editor`);
+    assert.ok(text.includes('**Reset my Standing Orders**'), `${name} names the current reset action`);
+  }
+  assert.doesNotMatch(SECURITY, /SovAI: Policy|(?:Reset|Edit|Apply to) my rules|Policy: reading only/);
 });
 
 test('Phase 41: the new text is clean: no em-dash, no provider name before organization, no bare team', async () => {

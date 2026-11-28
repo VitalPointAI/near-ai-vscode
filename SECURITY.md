@@ -388,8 +388,8 @@ is what that file and the records beside it do in this version.
   device identity in every folder, not only for Team Mode, because it signs the
   first policy file with it.
 - **When it cannot be trusted.** If the file is missing, unsigned, changed or
-  expired, only reading and planning run until you open **SovAI: Policy** and
-  choose **Reset my rules**, and the project's key folder stays off limits in
+  expired, only reading and planning run until you open **SovAI: Standing Orders** and
+  choose **Reset my Standing Orders**, and the project's key folder stays off limits in
   every case.
   A policy written for a newer version (one that names a feature in its
   `requires` list, or a version or action list this version does not know)
@@ -398,10 +398,10 @@ is what that file and the records beside it do in this version.
   because a reset would discard every rule the policy holds. A setting this
   version does not know is refused the same way, and the sentence names both
   ways on: update the extension if a newer version wrote it, or, only for a
-  policy signed by this computer's own key, **SovAI: Policy** offers
-  **Reset my rules**, saying it keeps the old file and discards every change
+  policy signed by this computer's own key, **SovAI: Standing Orders** offers
+  **Reset my Standing Orders**, saying it keeps the old file and discards every change
   made to the policy. A policy signed by any other key is never offered Reset.
-  The status bar says "Policy: reading only" with one sentence naming the cause
+  The status bar says "Standing Orders: reading only" with one sentence naming the cause
   and the fix. Deleting the file does not reset a policy: a file that has gone
   missing counts as a changed one. A file signed by a key this computer does
   not know is never adopted, even one that carries the default policy, and a
@@ -409,17 +409,17 @@ is what that file and the records beside it do in this version.
   signs a policy by itself only on a true first install, when nothing shows an
   earlier one: no remembered policy in this computer's secret storage, no
   policy file, no record naming an earlier policy and no key history without
-  its key. Only **Reset my rules** re-signs a policy that failed, and it
+  its key. Only **Reset my Standing Orders** re-signs a policy that failed, and it
   resets your own rules only: your organization's rules and files stay as they
   are. It asks you to confirm, keeps the old file beside the new one, and
   records the reset.
-- **Reading it.** **SovAI: Policy** opens the policy page (see below).
+- **Reading it.** **SovAI: Standing Orders** opens the policy page (see below).
   **Show as stored** on that page opens the policy in plain words and as
   stored. The view is read only, and editing it changes nothing.
-- **Changing it.** **Edit my rules** on the policy page opens an unsigned draft
+- **Changing it.** **Edit my Standing Orders** on the policy page opens an unsigned draft
   of your own rules, kept in this extension's storage and never in your
   project. **Apply my draft** on the page, or **Apply** in the message beside
-  the draft, shows the change on the page first; **Apply to my rules** there
+  the draft, shows the change on the page first; **Apply to my Standing Orders** there
   checks it, sets the signer and the dates itself, signs it with your device
   key and records the change with the old and new policy hashes. A draft that
   is not valid, or that was made before the policy changed (a reset, or an edit
@@ -507,7 +507,7 @@ is what that file and the records beside it do in this version.
   default label; a link from there into the project keeps the project file's
   label. While a label file holds reads, only reads of the project are held:
   reads of those runtime files go on. You can set only a label your own clearance covers;
-  to add a clearance, open **SovAI: Policy** and use **Edit my rules**, then
+  to add a clearance, open **SovAI: Standing Orders** and use **Edit my Standing Orders**, then
   **Apply my draft**. An agent cannot read a file whose label your clearances do not
   cover, through the file tools, searches or a command that names it; a read
   a command does not show (a path built in a variable) is not seen. A glob in a
@@ -585,23 +585,23 @@ A project's rules are part of the same design and can only narrow too, but
 no project carries rules of its own in this version. Without your
 organization's rules, your own rules are the policy, as before.
 
-**Reset touches your own rules only.** **Reset my rules** signs fresh starting
+**Reset touches your own rules only.** **Reset my Standing Orders** signs fresh starting
 rules for your own rules with this computer's key. Your organization's rules,
 and the files that hold them, stay as they are.
 
-**The policy page.** **SovAI: Policy** opens one page, titled "Your organization's rules"
-when your organization's rules are on this computer and "Your rules" when
+**The policy page.** **SovAI: Standing Orders** opens one page, titled "Your organization's Standing Orders"
+when your organization's rules are on this computer and "Your Standing Orders" when
 they are not. It shows the rules in force, section by section, read only, and
 says who set them. A change to the rules, such as a draft of your own rules,
 is shown there first as a proposal, one plain sentence per setting, each marked **Wider** or **Stricter**; nothing changes until you
-choose. A change to your own rules is applied with **Apply to my rules**. A
+choose. A change to your own rules is applied with **Apply to my Standing Orders**. A
 change to your organization's rules cannot be made on this computer, because
 your organization keeps its key elsewhere: **Save a file for your organization**
 writes it as a signed `.near-policy-proposal` file to send to your
 organization's contacts, and nothing changes here. **Discard** drops a
 proposal, and a proposal made from rules that changed while it was shown can
-only be discarded. **Edit my rules**, **Apply my draft**, **Show as stored** and
-**Reset my rules** are on the same page; Edit my rules and Apply my draft are
+only be discarded. **Edit my Standing Orders**, **Apply my draft**, **Show as stored** and
+**Reset my Standing Orders** are on the same page; Edit my Standing Orders and Apply my draft are
 there only while your own rules can be read and this computer holds the key
 that signs them.
 
@@ -636,7 +636,7 @@ Confidential, Restricted), `ca-protected` (Protected A, B and C),
 Unclassified to Cosmic Top Secret). The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how SovAI reads them. Your organization's security officer should confirm both before you rely on them.
 
 **Clearances.** An agent reads a labelled file only when a clearance in your
-policy covers its label; add one in **SovAI: Policy** with **Edit my rules**,
+policy covers its label; add one in **SovAI: Standing Orders** with **Edit my Standing Orders**,
 then **Apply my draft**. Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 **The chat's label.** Each chat has a label that rises with what its agents,
@@ -2327,7 +2327,7 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   MCP page before you switch a server on for a project.
 - **A label ceiling per server.** Your policy can name, per server id, the
   highest label the server may ever receive, in `ceiling.mcpLabelCeilings`
-  (through **Edit my rules** in **SovAI: Policy**; for example
+  (through **Edit my Standing Orders** in **SovAI: Standing Orders**; for example
   `{ "partner": { "scale": "org", "level": "Internal", "compartments": [], "releasability": [] } }`).
   A ceiling has a clearance's shape: a level on one of the policy's scales,
   compartments, releasability and an optional `expiresAt`. Every call to a
