@@ -64,7 +64,7 @@ test('gateStatusText: a policy in its last days reads "renewing" and does not wa
   assert.equal(shown.warning, false);
 });
 
-test('gateStatusText: failed closed reads "reading only", carries the bundle\'s own sentence as it is, and warns, for every reason', () => {
+test('gateStatusText: failed closed keeps the cause, updates recognized instructions for display, and warns for every reason', () => {
   for (const reason of Object.keys(BUNDLE_FAILURES) as Array<keyof typeof BUNDLE_FAILURES>) {
     const shown = gateStatusBar.gateStatusText(failedClosed(reason), 0);
     assert.equal(shown.text, 'Standing Orders: reading only');
@@ -72,6 +72,17 @@ test('gateStatusText: failed closed reads "reading only", carries the bundle\'s 
     assert.equal(shown.warning, true);
     assert.ok(!shown.tooltip.includes(EM_DASH));
   }
+});
+
+test('Standing Orders display changes known instructions and preserves unrelated error text', () => {
+  const known = BUNDLE_FAILURES['bad-signature'];
+  const shown = gateStatusBar.gateStatusText(failedClosed('bad-signature'), 0);
+  assert.match(shown.tooltip, /Your policy file was changed outside SovAI\. Open SovAI: Standing Orders and choose Reset my Standing Orders/);
+  assert.match(known, /Open SovAI: Policy and choose Reset my rules/);
+  const unrelated = 'The response contained the fields "SovAI: Policy", "Edit my rules", and "Reset my rules".';
+  assert.equal(gateStatusBar.standingOrdersInstructions(unrelated), unrelated);
+  const warning = gateStatusBar.gateStatusText({ state: 'failed-closed', reason: 'malformed', sentence: unrelated }, 0);
+  assert.ok(warning.tooltip.startsWith(unrelated));
 });
 
 test('gateStatusText: a state that says valid but has passed its end reads as expired, and a check that has not finished reads "checking"', () => {

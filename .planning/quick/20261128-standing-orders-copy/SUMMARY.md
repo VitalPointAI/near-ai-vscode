@@ -1,6 +1,6 @@
 # Standing Orders terminology verification
 
-The editor, its palette command, status, setup and policy actions now use **Standing Orders**. The direct Workbench shortcut uses **Standing Orders** in Canadian English and **Ordres permanents** in Canadian French. The offline guides match those labels. The installer guide's durable-store paragraph is unchanged.
+The editor, its palette command, status, setup and policy actions now use **Standing Orders**. The direct Workbench shortcut uses **Standing Orders** in Canadian English and **Ordres permanents** in Canadian French. The Features and settings, Getting started, Administration and trust-model guides use those labels. The separate [security guide follow-up](SECURITY-DOCS-FOLLOWUP.md) tracks legacy captions in the protected source and its rendered copies.
 
 The branch starts from integration commit `10e2a8578dcd346b9ca60bd3f9d8d7fe3dbe9077`, which contains the verified diagnostic on #255 and the approved installer wording. The reviewed plan has SHA-256 `2085516d90ce81dea22ea3d42f146ef6f19a09ec2f70489a1832452b6f212e9e`.
 
@@ -18,6 +18,8 @@ The branch starts from integration commit `10e2a8578dcd346b9ca60bd3f9d8d7fe3dbe9
 | `dist/standing-orders.vSdyUt/final.log` | `0846ae945b26f8b2938b84f038194b1681f7ef418aa3533f5877f7fbea2df6b7` |
 | `sovai-feedback-live.cpr2v6/standing-check/standing-rail-browser.log` | `c7b7dd671c0ad37b3cfb5c6a1baee8393ee2e2e406ab723b4a39d90aa49c4a38` |
 | `sovai-feedback-live.cpr2v6/standing-rail2/rail-retry.log` | `879dd1e5c2883750566a07f4b3aafee0c1dd37547a03b470eb147e4bdedfcf4a` |
+
+The #258 review fix reproduced one display-copy failure with 32 other checks passing. After the fix, 116 focused extension checks and eight bundled Workbench documentation checks passed with zero skips. The actual offline renderer retained the former Administration heading ID, and the policy webview script passed its syntax check.
 
 ## Open conditions
 

@@ -63,7 +63,8 @@
     }
   }
 
-  // Edit my rules and Apply my draft only when the host offers them; Show as stored and Reset always. The host checks each message again.
+  // Edit my Standing Orders and Apply my draft appear when the host offers them.
+  // Show as stored and Reset my Standing Orders always appear. The host checks each message again.
   const PAGE_ACTION_LABELS = { 'edit-own': 'Edit my Standing Orders', 'apply-draft': 'Apply my draft' };
   function renderPageActions(offered) {
     const own = (Array.isArray(offered) ? offered : []).filter((action) => Object.prototype.hasOwnProperty.call(PAGE_ACTION_LABELS, action));

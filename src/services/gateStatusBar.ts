@@ -1,7 +1,5 @@
-// The policy status bar item (OFFL-02, D-13, D-33): "Policy" while the signed policy file is good, "Policy: renewing" in its last days, and a visible
-// "Policy: reading only" with the bundle's own one-sentence cause and fix when the gate has failed closed. The words come from one pure function so a test
-// can check every state; the item itself is a thin wrapper, like the Team status bar. Under your organization's rules it says so, with your organization's
-// name, and "Policy: ends soon" with the contact in their last 30 days (D-14, D-23); with no organization every word is as before.
+// The Standing Orders status bar item (OFFL-02, D-13, D-33) shows the current policy state and its cause and fix in reading-only mode.
+// The words come from one pure function. Under your organization's rules it shows the organization name and the renewal contact (D-14, D-23).
 import * as vscode from 'vscode';
 import { RENEW_WINDOW_DAYS, failedClosed, needsRenewal } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
@@ -22,11 +20,18 @@ export const POLICY_ENDS_SOON_TEXT = 'Standing Orders: ends soon';
 const CHECKING_TOOLTIP = 'SovAI is checking your Standing Orders.';
 const READING_ONLY_NOTE = 'Click to see your Standing Orders.';
 
-/** Use the current command and button names when displaying a message also kept in decision records. */
+/** Translate the known recovery instructions at display time. Other text keeps its original wording. */
 export function standingOrdersInstructions(text: string): string {
-  return text.replaceAll('SovAI: Policy', 'SovAI: Standing Orders')
-    .replaceAll('Edit my rules', 'Edit my Standing Orders')
-    .replaceAll('Reset my rules', 'Reset my Standing Orders');
+  return text
+    .replaceAll('Open SovAI: Policy and choose Reset my rules to sign a fresh one',
+      'Open SovAI: Standing Orders and choose Reset my Standing Orders to sign a fresh one')
+    .replaceAll('open SovAI: Policy and choose Show as stored to see how to go back.',
+      'open SovAI: Standing Orders and choose Show as stored to see how to go back.')
+    .replaceAll('Open SovAI: Policy and choose Edit my rules again to start from the policy in force.',
+      'Open SovAI: Standing Orders and choose Edit my Standing Orders again to start from the policy in force.')
+    .replaceAll('the policy as Edit my rules in SovAI: Policy wrote it.',
+      'the policy as Edit my Standing Orders in SovAI: Standing Orders wrote it.')
+    .replaceAll('Open SovAI: Policy and try again.', 'Open SovAI: Standing Orders and try again.');
 }
 
 export interface GateStatusShown {

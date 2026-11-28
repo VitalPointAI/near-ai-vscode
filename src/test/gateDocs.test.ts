@@ -63,19 +63,18 @@ test('the policy section carries the code\'s clearance text word for word, and t
   assert.ok(policySection.includes(CLEARANCE_SELF_ASSERTED_TEXT));
 });
 
-test('the commands the docs name are the ones package.json contributes, and the failure sentences name the same policy page and its reset', () => {
-  // D-44 (41-14): Show Policy and Reset Policy to Defaults stay contributed (off the palette); the docs and sentences name the policy page and its button.
+test('README names the current Standing Orders actions and recorded failure text describes the scope of reset', () => {
+  // D-44 (41-14): Show and Reset remain contributed off the palette.
   const reset = commandName('nearAi.policy.reset');
   const show = commandName('nearAi.policy.show');
   const policy = commandName('nearAi.policy.open');
   assert.equal(reset, 'SovAI: Reset Standing Orders to Defaults');
   assert.equal(show, 'SovAI: Show Standing Orders');
   assert.equal(policy, 'SovAI: Standing Orders');
-  for (const [text, command, button] of [[policySection, 'SovAI: Policy', 'Reset my rules'], [readmePolicy, policy, 'Reset my Standing Orders']]) {
-    assert.ok(flat(text).includes(`**${command}**`));
-    assert.ok(flat(text).includes(`**${button}**`), 'the page\'s reset');
-    assert.ok(flat(text).includes('**Show as stored**'), 'the page\'s stored view');
-  }
+  assert.ok(flat(readmePolicy).includes(`**${policy}**`));
+  assert.ok(flat(readmePolicy).includes('**Reset my Standing Orders**'), 'the page\'s reset');
+  assert.ok(flat(readmePolicy).includes('**Show as stored**'), 'the page\'s stored view');
+  assert.ok(flat(policySection).includes('**Show as stored**'), 'the security guide covers the stored view');
   assert.ok(flat(README).includes(policy) && flat(README).includes('Reset my Standing Orders'));
   // Every failure sentence that offers a reset names the policy page and says it resets your own rules (D-21).
   for (const sentence of Object.values(BUNDLE_FAILURES)) {
@@ -699,7 +698,7 @@ test("Phase 41: the policy section says how your organization's rules reach this
   assert.doesNotMatch(block, /NEAR (AI )?organization/i);
 });
 
-// ---- D-44 (41-14 took Show, Edit, Apply Policy Draft, Reset and Show Policy as Stored off the palette): every user sentence points to SovAI: Policy ----
+// ---- D-44 (41-14): the contributed editor actions stay off the palette; displayed and recorded wording have separate contracts. ----
 
 /** A command that left the palette, with or without the brand prefix. */
 const LEFT_THE_PALETTE = /(?:(?:NEAR AI|SovAI):\s*)?(?:Show (?:Policy|Standing Orders)|Edit Policy|Apply Policy Draft|Reset (?:Policy|Standing Orders) to Defaults)/;
@@ -1026,13 +1025,11 @@ test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
   assert.doesNotMatch(entry, /\b(?:decideRoute|composeLayers|bundleVersion|route\.[a-z-]+|PR #\d+)\b/, 'no internal names');
 });
 
-test('Phase 41: SECURITY.md and README send people to the policy page, never to a command that left the palette', () => {
-  for (const [name, text, command, button] of [['SECURITY.md', SECURITY, 'SovAI: Policy', 'Reset my rules'],
-    ['README', README, commandName('nearAi.policy.open'), 'Reset my Standing Orders']] as const) {
-    assert.doesNotMatch(text, LEFT_THE_PALETTE, `${name} names no command that left the palette`);
-    assert.ok(text.includes(`**${command}**`), `${name} names the policy page`);
-    assert.ok(text.includes(`**${button}**`), `${name} names the page's reset`);
-  }
+test('README identifies the current editor and reset labels and neither guide lists the hidden palette commands', () => {
+  assert.doesNotMatch(SECURITY, LEFT_THE_PALETTE, 'the security guide does not list the hidden commands');
+  assert.doesNotMatch(README, LEFT_THE_PALETTE, 'README does not list the hidden commands');
+  assert.ok(README.includes(`**${commandName('nearAi.policy.open')}**`));
+  assert.ok(README.includes('**Reset my Standing Orders**'));
 });
 
 test('Phase 41: the new text is clean: no em-dash, no provider name before organization, no bare team', async () => {
