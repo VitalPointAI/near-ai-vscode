@@ -12,7 +12,7 @@ import {
 import type { StaffLevel, StaffProfileId } from '../domain/staff/doctrine';
 import {
   annexLetter, annexSubjectFor, defaultStaffSettings, doctrineProblems, levelOffer, offeredCombinations, parseStaffSettings, renderProfileMarkdown,
-  resolveProfile, retiredSpaceTerms, sectionCode, staffSettingsJson, stepName
+  resolveProfile, retiredSpaceTerms, sectionCode, staffOrganizationDesignation, staffSettingsJson, stepName
 } from '../domain/staff/profiles';
 import type { StaffSettings } from '../domain/staff/profiles';
 
@@ -29,6 +29,19 @@ test('the doctrine tables are sound: every level answered, every step mapped, le
     for (const letter of letters) assert.match(letter, ANNEX_LETTER_PATTERN);
     for (const subject of ANNEX_SUBJECTS) assert.ok(DOCTRINE_PROFILES[id].annexes[subject], `${id} places ${subject}`);
   }
+});
+
+test('organizational designations follow reviewed profiles independently of planning levels', () => {
+  assert.equal(staffOrganizationDesignation('canada', 'l4', 'j4'), 'S4');
+  assert.equal(staffOrganizationDesignation('canada', 'l3', 'j4'), 'G4');
+  assert.equal(staffOrganizationDesignation('us-army', 'l3', 'j4'), 'S-4');
+  assert.equal(staffOrganizationDesignation('us-army', 'l2', 'j4'), 'G-4');
+  assert.equal(staffOrganizationDesignation('us-joint', 'l1', 'j4'), 'J-4');
+  assert.equal(staffOrganizationDesignation('us-joint', 'l0', 'j4'), 'J-4');
+  assert.equal(staffOrganizationDesignation('us-joint', 'l1', 'j8'), undefined, 'optional office needs its actual structure');
+  assert.equal(staffOrganizationDesignation('canada', 'l0', 'j4'), undefined, 'named strategic offices retain functional labels');
+  assert.equal(staffOrganizationDesignation('nato', 'l2', 'j4'), undefined, 'multinational terminology depends on the organization');
+  assert.equal(staffOrganizationDesignation('canada', 'l3', 'command'), undefined);
 });
 
 test('the integrity check has teeth: a duplicate letter, an unmapped step and a dangling appendix are each reported', () => {

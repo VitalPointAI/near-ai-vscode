@@ -11,6 +11,27 @@ import type {
 import { checkStaffKeys, childPath, isOneLine, isOneOf, isRecord, ok, ownValue, STAFF_SLUG, staffRefused } from './parse';
 import type { StaffParsed } from './parse';
 
+// These choices describe an organization. They do not select a planning process or authorize setup.
+export const STAFF_ORGANIZATION_LEVELS = ['l4', 'l3', 'l2', 'l1', 'l0'] as const;
+export type StaffOrganizationLevel = (typeof STAFF_ORGANIZATION_LEVELS)[number];
+export const STAFF_ORGANIZATION_PROFILES = ['us-joint', 'us-army', 'nato', 'canada'] as const;
+export type StaffOrganizationProfile = (typeof STAFF_ORGANIZATION_PROFILES)[number];
+
+// Phase 102's profile/echelon crosswalk; unspecified charters keep their functional labels.
+const organizationPrefixes: Record<StaffOrganizationProfile, Partial<Record<StaffOrganizationLevel, string>>> = {
+  'us-joint': { l1: 'J-', l0: 'J-' },
+  'us-army': { l4: 'S-', l3: 'S-', l2: 'G-' },
+  nato: {},
+  canada: { l4: 'S', l3: 'G', l2: 'G' }
+};
+
+export function staffOrganizationDesignation(profile: StaffOrganizationProfile, level: StaffOrganizationLevel, section: StaffSectionId): string | undefined {
+  const prefix = organizationPrefixes[profile][level];
+  const number = STAFF_SECTIONS[section].number;
+  if (!prefix || number === undefined || (profile === 'us-joint' && number >= 7)) return undefined;
+  return `${prefix}${number}`;
+}
+
 /** The planning horizons in hours (design 10, 2.1): current operations up to the first, future operations up to the second, future plans beyond. */
 export interface StaffHorizons { readonly currentOpsHours: number; readonly futureOpsHours: number }
 
