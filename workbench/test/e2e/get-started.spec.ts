@@ -397,12 +397,43 @@ test('Team Studio staff setup previews the selected project in the User language
     await englishEntry.click();
     await expect(frame.getByRole('heading', { name: 'Logistics', exact: true })).toBeVisible();
     await frame.getByRole('button', { name: 'Open existing staff setup', exact: true }).click();
-    await frame.getByRole('button', { name: 'J4 Logistics', exact: true }).click();
+    const englishSection = frame.getByRole('button', { name: 'J4 Logistics', exact: true });
+    await englishSection.click();
     await frame.getByRole('button', { name: 'Continue to section setup', exact: true }).click();
     const questions = workbench.locator('.quick-input-widget').filter({ visible: true });
     await expect(questions.getByText('US Joint', { exact: true })).toBeVisible();
     await workbench.keyboard.press('Escape');
     await expect(questions).toBeHidden();
+    await expect(englishSection).toBeFocused();
+    await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
+
+    const switchBack = await openLanguageSetting(workbench);
+    await pickLanguage(switchBack, 'ArrowDown', 'Français (Canada)');
+    await studioTab.click();
+    await expect(frenchHeading).toBeVisible();
+    await expect(frame.getByRole('heading', { name: project, exact: true })).toBeVisible();
+    const frenchSection = frame.getByRole('button', { name: 'J4 Logistique', exact: true });
+    await expect(frenchSection).toHaveAttribute('aria-pressed', 'true');
+    await frame.getByRole('button', { name: 'Poursuivre la configuration de la section', exact: true }).click();
+    await expect(questions).toContainText('Niveaux : stratégique, opérationnel.');
+    await questions.getByText('Forces interarmées des États-Unis', { exact: true }).click();
+    await expect(questions).toContainText('JPP au niveau de la JTF (05 T2).');
+    for (const answer of ['Opérationnel', 'Campagne', 'Exécution locale seulement']) {
+      await questions.getByText(answer, { exact: true }).click();
+    }
+    await expect(questions).toContainText('vérifier la composition');
+    await expect(questions).toContainText(`Projet : ${project}.`);
+    await workbench.keyboard.press('Escape');
+    await expect(questions).toBeHidden();
+    await expect(frenchSection).toBeFocused();
+    await expect(frenchSection).toHaveAttribute('aria-pressed', 'true');
+
+    const reset = await openLanguageSetting(workbench);
+    await pickLanguage(reset, 'ArrowUp', 'English (Canada)');
+    // The next bundled test shares this User profile.
+    await studioTab.click();
+    await expect(englishHeading).toBeVisible();
+    await expect(englishSection).toHaveAttribute('aria-pressed', 'true');
   } finally {
     await reopenedContext.close();
   }
