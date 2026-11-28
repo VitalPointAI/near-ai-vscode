@@ -88,6 +88,55 @@ export async function saveFixtureEdit(page, file, edit) {
     'The synthetic edit was not saved');
 }
 
+function selectedFixtureTerminal(previous) {
+  const widgets = [...document.querySelectorAll('.terminal-container[id]')];
+  const added = widgets.filter(widget => !previous.includes(widget.id));
+  if (added.length !== 1) return false;
+  const [widget] = added;
+  // The pinned Theia shell maps the tab ID to its widget owner. Lumino marks the current tab by class.
+  const selected = widgets.filter(item => document.getElementById(`shell-tab-${item.id}`)?.matches('.lm-TabBar-tab.lm-mod-current'));
+  if (selected.length !== 1 || selected[0] !== widget || !/^terminal-\d+$/.test(widget.id)) return false;
+  const input = document.activeElement;
+  const focused = Boolean(input?.matches('textarea.xterm-helper-textarea') && widget.contains(input));
+  return { id: widget.id, focused };
+}
+
+export async function writeFixtureTerminalMarker(page, workspace) {
+  const marker = join(workspace, terminalMarker);
+  assert(!existsSync(marker), 'Expected an unused synthetic terminal fixture');
+  const selectionFailure = 'The new synthetic terminal could not be selected';
+  const focusFailure = 'The new synthetic terminal did not retain keyboard focus';
+  let failure = selectionFailure;
+  try {
+    const previous = await page.evaluate(() => [...document.querySelectorAll('.terminal-container[id]')].map(widget => widget.id));
+    await page.locator('.lm-MenuBar-itemLabel').getByText('Terminal', { exact: true }).first().click();
+    await page.locator('.lm-Menu-itemLabel').getByText('New Terminal', { exact: true }).first().click();
+    const match = await page.waitForFunction(selectedFixtureTerminal, previous);
+    const { id } = await match.jsonValue().finally(() => match.dispose());
+    const current = async () => page.evaluate(selectedFixtureTerminal, previous);
+    assert.equal((await current())?.id, id);
+
+    failure = focusFailure;
+    await page.locator(`.terminal-container[id="${id}"] .xterm`).click();
+    const checkFocus = async () => {
+      failure = selectionFailure;
+      const selection = await current();
+      assert.equal(selection?.id, id);
+      failure = focusFailure;
+      assert(selection.focused);
+    };
+    await checkFocus();
+    await page.keyboard.type(`echo ${terminalValue} > /home/sterling/workspace/${terminalMarker}`);
+    await checkFocus();
+    await page.keyboard.press('Enter');
+
+    failure = 'The fixed synthetic terminal action did not write its marker';
+    await eventually(() => existsSync(marker) && readFileSync(marker, 'utf8').trim() === terminalValue, failure);
+  } catch {
+    assert.fail(failure);
+  }
+}
+
 async function workbenchSample({ browser, workspace, profile, workbenchOrigin, permitsFixtureRequest }) {
   const { context, page } = await fixturePage(browser, 'workbench', permitsFixtureRequest);
   try {
@@ -105,18 +154,7 @@ async function workbenchSample({ browser, workspace, profile, workbenchOrigin, p
       }
     });
     const editMs = await timed(() => saveFixtureEdit(page, join(workspace, edit.file), edit));
-    const terminalMs = await timed(async () => {
-      const marker = join(workspace, terminalMarker);
-      assert(!existsSync(marker), 'Expected an unused synthetic terminal fixture');
-      await page.locator('.lm-MenuBar-itemLabel').getByText('Terminal', { exact: true }).first().click();
-      await page.locator('.lm-Menu-itemLabel').getByText('New Terminal', { exact: true }).first().click();
-      const terminal = page.locator('.xterm:visible').first();
-      await terminal.click();
-      await page.keyboard.type(`echo ${terminalValue} > /home/sterling/workspace/${terminalMarker}`);
-      await page.keyboard.press('Enter');
-      await eventually(() => existsSync(marker) && readFileSync(marker, 'utf8').trim() === terminalValue,
-        'The fixed synthetic terminal action did not write its marker');
-    });
+    const terminalMs = await timed(() => writeFixtureTerminalMarker(page, workspace));
     const idleMs = await timed(() => delay(Math.min(idle.durationMs, 1000)));
     return { getStartedMs, stepMs: [openedMs, editMs, terminalMs, idleMs] };
   } finally {

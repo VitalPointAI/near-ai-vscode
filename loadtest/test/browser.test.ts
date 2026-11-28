@@ -5,8 +5,9 @@ import { EventEmitter, once } from 'node:events';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { main, type CliDeps } from '../src/cli.ts';
-import { openWorkbench, routeFixtureRequest, runJourney, saveFixtureEdit } from '../src/browser-journey.mjs';
+import { openWorkbench, routeFixtureRequest, runJourney, saveFixtureEdit, writeFixtureTerminalMarker } from '../src/browser-journey.mjs';
 import { assertFixtureIsolation, claimSample, permitsFixtureRequest, type FixtureIsolation } from '../src/browser.ts';
 
 test('the one-shot sample command requires its exact flags and the fixture marker excludes both ordinary run kinds', async () => {
@@ -141,6 +142,113 @@ test('the browser save check preserves the fixture newline before the appended a
   };
   await saveFixtureEdit(page, file, edit);
   assert.equal(readFileSync(file, 'utf8'), '# Fixture notes\n\nLocal synthetic activity');
+});
+
+function recordedTerminal(options: {
+  newWidgets?: string[];
+  selected?: string[];
+  initialFocusLost?: boolean;
+  focusLostAfterType?: boolean;
+  marker?: string;
+} = {}) {
+  const workspace = mkdtempSync(join(tmpdir(), 'loadtest-terminal-'));
+  const marker = join(workspace, '.sovai-fixture-terminal-final.ok');
+  let widgetIds = ['terminal-1'];
+  let focus = 'terminal-1';
+  let opened = false;
+  const clicked: string[] = [];
+  const typed: Array<[string, string]> = [];
+  const submitted: Array<[string, string]> = [];
+  const evaluate = (fn: (...args: never[]) => unknown, arg: unknown) => runInNewContext(`(${fn.toString()})(arg)`, {
+    arg,
+    document: {
+      activeElement: { owner: focus, matches: (selector: string) => selector === 'textarea.xterm-helper-textarea' },
+      querySelectorAll(selector: string) {
+        assert.equal(selector, '.terminal-container[id]');
+        return widgetIds.map(id => ({ id, contains: (input: { owner: string }) => input.owner === id }));
+      },
+      getElementById(tabId: string) {
+        const id = widgetIds.find(widget => `shell-tab-${widget}` === tabId);
+        const selected = opened ? (options.selected ?? ['terminal-2']) : ['terminal-1'];
+        return id ? { matches: (selector: string) => selector === '.lm-TabBar-tab.lm-mod-current' && selected.includes(id) } : null;
+      },
+    },
+  });
+  const page = {
+    evaluate,
+    async waitForFunction(fn: (...args: never[]) => unknown, arg: unknown) {
+      const result = evaluate(fn, arg);
+      if (!result) throw new Error('raw fixture DOM diagnostics');
+      return { jsonValue: async () => result, dispose: async () => {} };
+    },
+    locator(selector: string) {
+      const click = async () => {
+        if (selector === '.lm-MenuBar-itemLabel') return;
+        if (selector === '.lm-Menu-itemLabel') {
+          opened = true;
+          widgetIds = [...widgetIds, ...(options.newWidgets ?? ['terminal-2'])];
+          return;
+        }
+        const id = selector === '.xterm:visible' ? widgetIds[0] : /^\.terminal-container\[id="(terminal-\d+)"\] \.xterm$/.exec(selector)?.[1];
+        assert(id && widgetIds.includes(id));
+        clicked.push(id);
+        focus = options.initialFocusLost ? 'terminal-1' : id;
+      };
+      return { click, first: () => ({ click }), getByText: () => ({ first: () => ({ click }) }) };
+    },
+    keyboard: {
+      async type(text: string) {
+        typed.push([focus, text]);
+        if (options.focusLostAfterType) focus = 'terminal-1';
+      },
+      async press(key: string) {
+        submitted.push([focus, key]);
+        writeFileSync(marker, options.marker ?? 'SOVAI_FIXTURE_TERMINAL_OK\n');
+      },
+    },
+  };
+  return { page, workspace, marker, clicked, typed, submitted };
+}
+
+const terminalSelectionFailure = 'The new synthetic terminal could not be selected';
+const terminalFocusFailure = 'The new synthetic terminal did not retain keyboard focus';
+const terminalAction = 'echo SOVAI_FIXTURE_TERMINAL_OK > /home/sterling/workspace/.sovai-fixture-terminal-final.ok';
+
+test('the fixed terminal action uses the newly selected and focused terminal once, with a visible older terminal', async () => {
+  const f = recordedTerminal();
+  await writeFixtureTerminalMarker(f.page, f.workspace);
+  assert.deepEqual(f.clicked, ['terminal-2']);
+  assert.deepEqual(f.typed, [['terminal-2', terminalAction]]);
+  assert.deepEqual(f.submitted, [['terminal-2', 'Enter']]);
+  assert.equal(readFileSync(f.marker, 'utf8'), 'SOVAI_FIXTURE_TERMINAL_OK\n');
+});
+
+test('terminal selection refuses an older, missing or ambiguous target without keyboard input or raw metadata', async () => {
+  for (const state of [
+    { selected: ['terminal-1'] }, { newWidgets: [] }, { selected: ['terminal-1', 'terminal-2'] },
+    { newWidgets: ['terminal-2', 'terminal-3'] },
+  ]) {
+    const f = recordedTerminal(state);
+    await assert.rejects(writeFixtureTerminalMarker(f.page, f.workspace), { message: terminalSelectionFailure });
+    assert.deepEqual([f.clicked, f.typed, f.submitted], [[], [], []]);
+  }
+});
+
+test('the terminal action refuses sibling focus before typing and refuses submission after focus loss', async () => {
+  const beforeTyping = recordedTerminal({ initialFocusLost: true });
+  await assert.rejects(writeFixtureTerminalMarker(beforeTyping.page, beforeTyping.workspace), { message: terminalFocusFailure });
+  assert.deepEqual([beforeTyping.typed, beforeTyping.submitted], [[], []]);
+
+  const beforeSubmit = recordedTerminal({ focusLostAfterType: true });
+  await assert.rejects(writeFixtureTerminalMarker(beforeSubmit.page, beforeSubmit.workspace), { message: terminalFocusFailure });
+  assert.deepEqual(beforeSubmit.typed, [['terminal-2', terminalAction]]);
+  assert.deepEqual(beforeSubmit.submitted, []);
+});
+
+test('the terminal marker remains the success condition and a wrong marker yields one fixed reason', async () => {
+  const f = recordedTerminal({ marker: 'raw fixture marker detail' });
+  await assert.rejects(writeFixtureTerminalMarker(f.page, f.workspace), { message: 'The fixed synthetic terminal action did not write its marker' });
+  assert.deepEqual(f.submitted, [['terminal-2', 'Enter']]);
 });
 
 test('a stalled browser command rejects at its deadline, then kills and reaps after the grace period', { timeout: 3000 }, async (t) => {
