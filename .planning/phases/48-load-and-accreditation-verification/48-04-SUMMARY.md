@@ -184,7 +184,15 @@ end-to-end run on a fresh exact fixture.
 
 The owner-approved one-shot run on November 28 used exact source `0a07a74e4`, the released v0.4.41 image and Chromium 1254. The CLI verified isolation before navigation. It opened the fictional workspace, saved `notes.md`, then failed the save check with exit 1. It emitted no complete timings or rig evidence. The registered log SHA-256 is `d2cbb91a46829f0576a1a9fdf562a9a3ceadc64f03d806d7134d48e2dad89a92`. The original contents of the other two files matched, and the saved `notes.md` SHA-256 `b5e8ab83ff08ced309056cfab0664068d89676d2771b21ca7313c8dac1acb7d3` exactly matches the original bytes plus the typed suffix. The assertion had stripped the original trailing newline before making its comparison. Scoped cleanup removed the test-created container and workspace. The cleanup log SHA-256 is `d3dc4f33eab97ec2cd50017541078acb1e6f18efee7eb020202c3eef9d6812ce`.
 
-The corrected check compares the exact original bytes plus the suffix it types. The new focused regression reproduced the same failure before the fix. Afterward all 60 offline load-test checks and the pinned TypeScript check passed. Independent source review passed. No second browser run was performed.
+The corrected check compares the exact original bytes plus the suffix it types. The new focused regression reproduced the same failure before the fix. Afterward all 60 offline load-test checks and the pinned TypeScript check passed. Independent source review passed.
+
+## Corrected registered retry
+
+The owner approved one retry using exact source `dc0bf380c0ee0615fc50f043b9981488b370240e`, the same published v0.4.41 archive and pinned Chromium 1254. The registered command passed isolation and the corrected save assertion. The saved `notes.md` again matched SHA-256 `b5e8ab83ff08ced309056cfab0664068d89676d2771b21ca7313c8dac1acb7d3`. The other two fictional files were unchanged.
+
+The command stopped with exit 1 when the synthetic terminal action did not write its marker. The backend log records two terminal channels. The browser code selects the first visible terminal without binding it to the newly opened terminal, but the logs do not identify which terminal received the input. No complete timing sample, passkey result or representative rig evidence was produced.
+
+Scoped cleanup removed the disposable container and fictional workspace. The image archive, dedicated image store, logs and one-use claim remain in `.claude/worktrees/codex-phase4804-local-trial.5kTGxJ`. The registered retry log SHA-256 is `4dfd221e268677216f4b968c52528348ecab3fdb568225322637b117cd74021a`. The backend log SHA-256 is `def9e65db706e1d48f2dcf18c629dce14cb471b15fae5583140d2da60658ade8`; cleanup log SHA-256 is `a0f8cf876c40df5cdc306485ddefaac21bdbffb119b3a2130e6aa5207f962b1f`. This completed the one approved retry.
 
 ## Self-Check: PASSED
 
