@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +9,7 @@ import { readGrant } from '@ext/domain/replica/cellKeys';
 import { entryHash } from '@ext/domain/replica/entry';
 import type { EntryHeader } from '@ext/domain/replica/entry';
 import { buildSessionAnswer, certPinOf, readHubFile } from '@ext/domain/replica/hubFile';
+import { SERVER_WORD_COUNT, serverPinWords } from '@ext/domain/replica/serverWords';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { hubIdentityOf, issueHubFile } from '../src/enrol';
 import { generateKeyFile, readEncryptionKey, readSigningKey } from '../src/keys';
@@ -479,6 +481,63 @@ test('hub-file: without HUB_PUBLIC_ADDRESS it exits 1 naming that setting, and -
     } finally {
       run.cleanup();
     }
+  }
+});
+
+// ---- The built binary: --pin-words (G541) ----
+
+/** The certificate pin worked out with openssl, the way relay/README.md prints it, so the test does not lean on the hub's own pin code. */
+function opensslPin(certFile: string): string {
+  const pubkey = spawnSync('openssl', ['x509', '-in', certFile, '-noout', '-pubkey'], { encoding: 'utf8' });
+  assert.equal(pubkey.status, 0, pubkey.stderr);
+  const der = spawnSync('openssl', ['pkey', '-pubin', '-outform', 'DER'], { input: pubkey.stdout });
+  assert.equal(der.status, 0, der.stderr.toString());
+  return createHash('sha256').update(der.stdout).digest('hex');
+}
+
+test('pin-words: --pin-words prints one line, the twelve words SovAI shows for the certificate pin', async () => {
+  // Only the TLS pair: the words need no hub key, no settings and no state folder.
+  const run = launchHub({ args: ['--pin-words'], secrets: { HUB_SIGNING_KEY: null, HUB_ENCRYPTION_KEY: null }, env: { HUB_PORT: 'not-a-port' } });
+  try {
+    const exit = await within(run.exited, 20_000, 'the pin words');
+    assert.deepEqual(exit, { code: 0, signal: null }, run.stdout());
+    const out = run.stdout();
+    assert.equal(out.endsWith('\n'), true);
+    assert.equal(out.split('\n').length, 2, 'stdout holds one line');
+    const pin = opensslPin(run.tls.certFile);
+    assert.equal(pin, certPinOf(run.tls.certPem));
+    // The words in SovAI's order, space separated: the form staffHubReadmit.test.ts shows a lead's computer accepts before it writes hub.readmit.
+    assert.equal(out.trim(), serverPinWords(pin).join(' '));
+    assert.equal(out.trim().split(' ').length, SERVER_WORD_COUNT);
+    assert.equal(run.stderr(), '');
+    assert.equal(existsSync(run.stateDir), false, 'it touches no state folder');
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('pin-words: without the certificate, with a key of another certificate, or with an extra word it exits 1 with one refusal and no words', async () => {
+  const other = makeTlsFixture();
+  try {
+    for (const [args, secrets, reason] of [
+      [['--pin-words'], { HUB_TLS_CERT: null }, 'secrets'],
+      [['--pin-words'], { HUB_TLS_KEY: other.keyPem }, 'tls'],
+      [['--pin-words', 'extra'], {}, 'config'],
+    ] as const) {
+      const run = launchHub({ args: [...args], secrets: { ...secrets } });
+      try {
+        const exit = await within(run.exited, 20_000, 'the refused pin words');
+        assert.equal(exit.code, 1);
+        const lines = run.logs();
+        assert.deepEqual(lines.map((line) => line.event), ['hub.start_refused']);
+        assert.equal(lines[0]?.reason, reason, String(lines[0]?.detail));
+        assert.equal(run.stdout().split('\n').length, 2, 'stdout holds the refusal only');
+      } finally {
+        run.cleanup();
+      }
+    }
+  } finally {
+    other.cleanup();
   }
 });
 

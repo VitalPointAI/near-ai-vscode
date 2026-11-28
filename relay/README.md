@@ -329,9 +329,20 @@ One limit needs care. To a member's computer, an honest restore and a hub that s
 4. Let every member's computer sync. Watch the logs: `checkpoint.waiting` names projects that still miss changes, and `checkpoint.signed` follows once a project is whole again. The hub leaves restore mode by itself once every member's computer has asked it for a checkpoint since the restart, removes the marker and logs `hub.restore-ended`. To end it early, remove the file `restore-mode` from the state folder; the hub notices within 30 seconds.
 5. When the staff lead has confirmed that every device has synced, and the logs show no `checkpoint.waiting` after the last of them reconnected, members may make changes again.
 
-If a member's computer still names the hub forked after an honest restore, it keeps refusing the hub, which is the safe choice. That member keeps working by file, or through another hub, until the staff lead re-admits the hub; re-admitting a hub arrives with the editor's hub commands in a later release.
+If a member's computer still names the hub forked after an honest restore, it keeps refusing the hub, which is the safe choice. That member keeps working by file, or through another hub, until the staff lead or the deputy re-admits it (Re-admit your organization's server). To re-admit:
 
-Right after a restore, `checkpoint.conflict` with the reason `order-mismatch` can clear by itself: it means a member handed back a checkpoint that comes after one the hub does not hold yet, and signing resumes once another member hands that one back. A related gap remains: the hub may have signed a checkpoint that no member's computer ever received, with later checkpoints coming after it. If a restore loses it, no computer can hand it back, and the hub signs nothing more for that project until it is started again on a state whose checkpoints agree (for example a newer backup that still holds that checkpoint). Changes still sync in the meantime, but members' computers will in time report the hub as delayed. `checkpoint.conflict` with any other reason (`not-nested`, `equal-count-tip-mismatch`) means the hub's own record does not agree with itself and never clears: tell the staff lead, who re-admits the hub.
+1. In Share with people, SovAI shows the staff lead twelve words worked out from the certificate pin of the hub it now reaches.
+2. Print the hub's own twelve words while it is running:
+
+   ```sh
+   docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub exec -T hub \
+     /nodejs/bin/node /app/bin.mjs --pin-words
+   ```
+
+   It prints one line of twelve words and nothing else, worked out from the hub's certificate with the same function members' computers use. It reads only the certificate and its key, and writes nothing. Without Docker, `node hub/dist/bin.mjs --pin-words` does the same with `HUB_TLS_CERT_FILE` and `HUB_TLS_KEY_FILE` set. When it cannot read them, it prints one `hub.start_refused` line instead and exits 1.
+3. Read the words to the staff lead in order, by phone or in person, not through the project. When they match, the lead chooses **Trust your organization's server again**, which clears the finding on every member's computer once. When they differ, the server SovAI reaches is not this hub with this certificate: tell the lead not to trust it, and find out why first.
+
+Right after a restore, `checkpoint.conflict` with the reason `order-mismatch` can clear by itself: it means a member handed back a checkpoint that comes after one the hub does not hold yet, and signing resumes once another member hands that one back. A related gap remains: the hub may have signed a checkpoint that no member's computer ever received, with later checkpoints coming after it. If a restore loses it, no computer can hand it back, and the hub signs nothing more for that project until it is started again on a state whose checkpoints agree (for example a newer backup that still holds that checkpoint). Changes still sync in the meantime, but members' computers will in time report the hub as delayed. `checkpoint.conflict` with any other reason (`not-nested`, `equal-count-tip-mismatch`) means the hub's own record does not agree with itself and never clears: tell the staff lead, who re-admits the hub after comparing the words `--pin-words` prints (above).
 
 ### The restore drill
 
