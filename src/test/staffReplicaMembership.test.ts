@@ -1714,8 +1714,10 @@ test('Keep the unaffected cell writable while the selected founding grant waits 
   assert.ok(supplemental);
   assert.deepEqual(supplemental.recipients, [withdrawn.writer]);
   assert.equal(before.roster.accessGrants.get(target)?.evidence.epoch, 1);
-  const evidenceDir = path.join(peer.at.root, REPLICA_DIR, 'access-evidence');
-  const evidenceOnDisk = (): unknown[] => readdirSync(evidenceDir).map((name) => JSON.parse(readFileSync(path.join(evidenceDir, name), 'utf8')) as unknown);
+  const evidenceOnDisk = (at = peer.at): unknown[] => {
+    const evidenceDir = path.join(at.root, REPLICA_DIR, 'access-evidence');
+    return readdirSync(evidenceDir).map((name) => JSON.parse(readFileSync(path.join(evidenceDir, name), 'utf8')) as unknown);
+  };
   const noSupplementalGrant = () => {
     assert.equal(grantsOn(peer.at).some((grant) => grantHash(grant) === supplemental.hash), false);
     assert.equal(evidenceOnDisk().some((item) => readGrantDelivery(item)?.grants.some((grant) => grantHash(grant) === supplemental.hash)), false);
@@ -1764,10 +1766,16 @@ test('Keep the unaffected cell writable while the selected founding grant waits 
   const partition = mock.method(lead.p, 'signGrantPages', async (grant: Parameters<typeof signPages>[0]) => {
     if (grant.cell !== target || grant.epoch !== 2) return signPages(grant);
     assert.equal(grant.wraps.length, 2);
-    const child = await lead.p.signGrant({ ...grant, labelSealed: '', wraps: grant.wraps.slice(1), pages: [] });
-    return [await lead.p.signGrant({ ...grant, wraps: grant.wraps.slice(0, 1), pages: [grantHash(child)] }), child];
+    assert.ok(lead.p.keys.epochKey(target, 1)?.equals(oldKey));
+    assert.equal(lead.p.keys.holds(target, 2), false);
+    const leadWrap = grant.wraps.find(({ writer }) => writer === lead.p.deviceWriter);
+    const peerWrap = grant.wraps.find(({ writer }) => writer === peer.writer);
+    assert.ok(leadWrap && peerWrap);
+    const child = await lead.p.signGrant({ ...grant, labelSealed: '', wraps: [leadWrap], pages: [] });
+    return [await lead.p.signGrant({ ...grant, wraps: [peerWrap], pages: [grantHash(child)] }), child];
   });
   const finished = await finishRekeys(lead.host).finally(() => partition.mock.restore());
+  const liveLeadKey = lead.p.keys.epochKey(target, 2);
   assert.deepEqual(ok(finished, 'finish the affected cells').rekeyed, [target, base]);
   const selected = await head(lead.p);
   const changes = selected.roster.positions.slice(before.position + 1);
@@ -1798,6 +1806,16 @@ test('Keep the unaffected cell writable while the selected founding grant waits 
   assert.deepEqual(completePages.pageHashes, pages.map(grantHash));
   assert.deepEqual(targetGrant.evidence.grants, [{ hash: completePages.hash, pages: completePages.pageHashes, recipients: survivors }]);
   assert.deepEqual(completePages.grant.wraps.map(({ writer }) => writer).sort(), survivors);
+  const foundingPage = readGrant(founding);
+  const childPage = readGrant(pages[0]);
+  assert.ok(foundingPage.ok && childPage.ok);
+  assert.deepEqual(foundingPage.grant.wraps.map(({ writer }) => writer), [peer.writer]);
+  const [leadWrap] = childPage.grant.wraps;
+  assert.equal(leadWrap?.writer, lead.p.deviceWriter);
+  const leadKeys = await loadOrCreateKemKeys(lead.at.secrets, { identityDir: identityDir(lead.at.global) });
+  const expectedLeadKey = unwrapForDevice({ cell: target, epoch: 2, writer: lead.p.deviceWriter, kem: leadKeys.privateKeys, wrap: leadWrap.wrap });
+  assert.ok(expectedLeadKey && !expectedLeadKey.equals(oldKey));
+  assert.ok(liveLeadKey?.equals(expectedLeadKey), 'ordinary managed Finish settles the signed child wrap in the live lead ring');
   const recipientWrap = completePages.grant.wraps.find(({ writer }) => writer === peer.writer);
   assert.ok(recipientWrap);
   const expectedKey = unwrapForDevice({ cell: target, epoch: 2, writer: peer.writer, kem: receiverKeys.privateKeys, wrap: recipientWrap.wrap });
@@ -1877,6 +1895,15 @@ test('Keep the unaffected cell writable while the selected founding grant waits 
   assert.deepEqual(accepted, [continuity.handle, offered.handle]);
   assert.deepEqual((await reopened.entriesAfter(target, peer.writer, -1)).map(({ header }) => [entryHash(header), header.epoch]),
     [[formerWrite.hash, 1], [resumed.hash, 2]]);
+
+  const leadProofs = evidenceOnDisk(lead.at).flatMap((item) => storedAccessProofs(item, selected.hash));
+  assert.equal(managedWriteAllowed(selected.roster, target, 2, lead.p.deviceWriter, selected.position, NOW, undefined, leadProofs), true);
+  const leadWrite = await lead.p.appendOwn('doc.client', data, { stream: target });
+  assert.ok('ok' in leadWrite);
+  assert.equal(leadWrite.built.entry.header.epoch, 2);
+  const reopenedLead = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+  assert.equal((await head(reopenedLead)).hash, selected.hash);
+  assert.ok(reopenedLead.keys.epochKey(target, 2)?.equals(expectedLeadKey));
 });
 
 test('managed sender retries the exact staged opaque packet across restart and remembers upload and publication', async () => {
