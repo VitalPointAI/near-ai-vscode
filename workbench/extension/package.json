@@ -30,6 +30,9 @@
       "frontend": "lib/browser/sterling-portfolio-module"
     },
     {
+      "frontend": "lib/browser/sterling-context-graph-module"
+    },
+    {
       "frontend": "lib/browser/sterling-work-areas-module"
     },
     {
