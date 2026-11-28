@@ -1,5 +1,6 @@
 // The load-test command line (Phase 48 D-03, D-06, D-09, D-19):
 //   node loadtest/src/cli.ts run --config <file> [--stages 50,100] [--kind load|dry-run]
+//   node loadtest/src/cli.ts sample --no-auth --once
 //   node loadtest/src/cli.ts users --count <n> --out <path outside the repository>
 //   node loadtest/src/cli.ts capacity [--check]
 //   node loadtest/src/cli.ts verify <file> | --all
@@ -10,6 +11,7 @@ import { closeSync, existsSync, fchmodSync, mkdirSync, openSync, readFileSync, r
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runLocalSample, type LocalSampleTimings } from './browser.ts';
 import { checkCapacityBlock, renderCapacityPage } from './capacity.ts';
 import { assertTestRealm, parseUsersFile, TEST_CLIENT_ID, TokenStore } from './keycloak.ts';
 import { createMeasure, execKubectl, httpPrometheus, type Kubectl } from './measure.ts';
@@ -25,6 +27,7 @@ export interface CliDeps {
   readonly fetch: Fetch;
   readonly clock: Clock;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly sample: (descriptor: string) => Promise<LocalSampleTimings>;
   readonly signal?: AbortSignal;
 }
 
@@ -49,6 +52,7 @@ function defaultDeps(): CliDeps {
     kubectl: execKubectl(),
     fetch,
     clock: { now: Date.now, sleep: async (ms, signal) => { await delay(ms, undefined, { signal }); } },
+    sample: (descriptor) => runLocalSample(REPO_ROOT, descriptor),
     env: process.env
   };
 }
@@ -300,11 +304,26 @@ export async function main(argv: readonly string[], overrides: Partial<CliDeps> 
   const deps = { ...defaultDeps(), ...overrides };
   const [name, ...rest] = argv;
   try {
-    if (name === 'run') return await run(rest, deps);
+    const fixture = deps.env.SOVAI_SAMPLE_FIXTURE;
+    if (name === 'sample') {
+      if (!fixture || rest.length !== 2 || rest[0] !== '--no-auth' || rest[1] !== '--once') {
+        deps.error('sample requires --no-auth --once and a private SOVAI_SAMPLE_FIXTURE descriptor\n');
+        return 2;
+      }
+      deps.write(`${JSON.stringify(await deps.sample(fixture))}\n`);
+      return 0;
+    }
+    if (name === 'run') {
+      if (fixture !== undefined) {
+        deps.error('The ordinary run command is unavailable in the local sample fixture.\n');
+        return 2;
+      }
+      return await run(rest, deps);
+    }
     if (name === 'users') return users(rest, deps);
     if (name === 'capacity') return capacity(rest, deps);
     if (name === 'verify') return verify(rest, deps);
-    deps.error(`Unknown command ${name ?? '<none>'}. Commands: run, users, capacity, verify\n`);
+    deps.error(`Unknown command ${name ?? '<none>'}. Commands: run, sample, users, capacity, verify\n`);
     return 2;
   } catch (error) {
     deps.error(`${name}: ${error instanceof Error ? error.message : String(error)}\n`);

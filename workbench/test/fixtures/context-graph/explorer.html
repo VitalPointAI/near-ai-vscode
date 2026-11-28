@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Context Graph Explorer</title>
+  <link rel="stylesheet" href="/explorer.css">
+  <script type="module" src="/explorer.mjs"></script>
+</head>
+<body>
+  <main class="explorer">
+    <header class="heading">
+      <div><h1>Context Graph</h1><p id="counts">Loading graph</p></div>
+      <div class="view-switch" role="group" aria-label="Graph representation">
+        <button id="show-graph" type="button" aria-pressed="true" aria-controls="graph-surface">Graph</button>
+        <button id="show-list" type="button" aria-pressed="false" aria-controls="list-surface">List</button>
+      </div>
+    </header>
+    <div class="toolbar" role="group" aria-label="Graph controls">
+      <label for="search">Search entities</label>
+      <input type="search" id="search" placeholder="Find a person, organization or project">
+      <button id="fit" type="button">Fit view</button>
+      <button id="motion" type="button">Pause motion</button>
+      <div class="zoom" role="group" aria-label="Zoom">
+        <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+        <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      </div>
+      <details class="narrow-zoom">
+        <summary>Zoom</summary>
+        <div class="zoom-menu">
+          <button id="narrow-zoom-out" type="button">Zoom out</button>
+          <button id="narrow-zoom-in" type="button">Zoom in</button>
+        </div>
+      </details>
+    </div>
+    <div class="workspace">
+      <section class="surface" id="graph-surface" aria-label="Graph canvas">
+        <canvas id="graph" role="group" tabindex="0" aria-label="Pan graph"
+          aria-description="Use arrow keys to pan. Use plus and minus to zoom. Switch to List for keyboard access to entities and relationships."></canvas>
+      </section>
+      <section class="surface list" id="list-surface" aria-label="Graph results" hidden>
+        <h2>Entities</h2>
+        <ul id="entities"></ul>
+        <h2>Relationships</h2>
+        <ul id="relationships"></ul>
+      </section>
+      <aside class="inspector" aria-label="Evidence inspector">
+        <div class="inspector-header">
+          <h2>Evidence</h2>
+          <button id="close-inspector" type="button" hidden>Close inspector</button>
+        </div>
+        <div id="details">
+          <h3>Choose an entity</h3>
+          <p>Select an entity or a relationship to inspect its sources.</p>
+        </div>
+        <p id="updated" hidden>Updated</p>
+      </aside>
+    </div>
+    <section id="search-notices" aria-label="Authorized search notices" hidden></section>
+    <p id="status" class="visually-hidden" role="status"></p>
+  </main>
+</body>
+</html>

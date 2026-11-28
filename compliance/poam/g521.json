@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "si-02",
+    "cm-03",
+    "sr-11"
+  ],
+  "gap": "G521",
+  "id": "g521",
+  "milestones": [
+    {
+      "title": "Authorizing official's decision on withdrawals recorded",
+      "targetDate": "2027-05-31"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "A withdrawal raises an alert at the site and goes to its change board; nothing blocks it at admission. Your organization's authorizing official accepts this or asks for an admission deny list.",
+  "title": "A withdrawn artefact keeps running at a site until its change board acts (owner decision Q8)"
+}

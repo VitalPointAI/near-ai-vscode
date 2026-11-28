@@ -255,6 +255,16 @@ export function checkRealm(realm, settings) {
     need(mapper('oidc-usersessionmodel-note-mapper', (config) => config['user.session.note'] === 'AUTH_TIME' && config['claim.name'] === 'auth_time' && config['access.token.claim'] === 'true'), 'auth_time must be in the access token');
     need(Array.isArray(sessions.redirectUris) && sessions.redirectUris.length > 0 && sessions.redirectUris.every((uri) => String(uri).startsWith('https://')), 'sterling-sessions needs https redirect URIs from the site file');
   }
+  // The approvers' sign-in for your organization's software registry (48.3-05, D-18): public, the device grant and PKCE to loopback only, and
+  // always the step-up level (Keycloak's device endpoint asks for the client's default ACR values, never a request's acr_values).
+  const review = (realm.clients ?? []).find((client) => client.clientId === 'sterling-supply-review');
+  if (review) {
+    const attributes = review.attributes ?? {};
+    need(review.publicClient === true && review.implicitFlowEnabled === false && review.serviceAccountsEnabled === false && attributes['oauth2.device.authorization.grant.enabled'] === 'true'
+      && attributes['pkce.code.challenge.method'] === 'S256', 'sterling-supply-review must be public with the device grant and PKCE only');
+    need(Array.isArray(review.redirectUris) && review.redirectUris.every((uri) => ['http://127.0.0.1/*', 'http://[::1]/*'].includes(uri)), 'sterling-supply-review may redirect only to loopback addresses');
+    need(attributes['default.acr.values'] === settings.stepUpAcr && attributes['minimum.acr.value'] === settings.stepUpAcr, `sterling-supply-review must ask for the step-up (${settings.stepUpAcr})`);
+  }
   // The system use notice (D-76, AC-8): the login theme sterling shows the realm message sterlingSystemUseNotice on every sign-in page.
   const noticeIssues = noticeProblems(settings.systemUseNotice);
   problems.push(...noticeIssues);

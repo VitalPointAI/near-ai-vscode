@@ -7,8 +7,10 @@ import { closeSync, existsSync, openSync, readdirSync, readFileSync, writeSync }
 import { join } from 'node:path';
 import { canonicalize } from '../../compliance/src/signed.ts';
 import { matchRules } from '../../scripts/lib/workflow.mjs';
+import { HUB_HOLD_MS, HUB_PEOPLE, readHubSmoke, type HubSmoke } from './hub.ts';
 
 export const RUN_SCHEMA = 1;
+const EXPERIMENT_SCHEMA = 2;
 export const RUN_KINDS = ['load', 'experiment', 'dry-run'] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 /** The largest run file accepted. Long metric series are not stored, only the queries and their time ranges. */
@@ -72,6 +74,7 @@ export interface StageResult {
   readonly ingress: { readonly samples: readonly IngressSample[]; readonly propagationMs: readonly number[]; readonly propagationUnmeasured: number };
   readonly etcd: { readonly dbSizeBytes: number | null; readonly objects: number | null };
   readonly queries: readonly Query[];
+  readonly hubs?: readonly HubSmoke[];
 }
 export interface RunInputs {
   readonly stages: readonly number[];
@@ -102,7 +105,7 @@ export interface RunVersions {
   readonly hub: string;
 }
 export interface UnhashedRun {
-  readonly schema: 1;
+  readonly schema: typeof RUN_SCHEMA | typeof EXPERIMENT_SCHEMA;
   readonly kind: RunKind;
   readonly id: string;
   readonly rig: string;
@@ -125,11 +128,11 @@ export class RunFileError extends Error {
 
 // The schema, as a small spec: 'n' a non-negative safe integer, 'n?' the same or null, 'asc' an ascending array of 'n', 's' a string, 'b' a
 // boolean; an array of one spec is an array of that; an object is an object with exactly those keys.
-type Spec = 'n' | 'n?' | 'asc' | 's' | 'b' | readonly [Spec] | { readonly [key: string]: Spec };
+type Spec = 'n' | 'n?' | 'asc' | 's' | 'b' | 'hub' | readonly [Spec] | { readonly [key: string]: Spec };
 const DURATIONS: Spec = { cold: 'asc', warm: 'asc' };
 const START: Spec = { requested: 'n', failed: 'n', timedOut: 'n', reconcileMs: DURATIONS, readyMs: DURATIONS, firstResponseMs: DURATIONS };
 const WINDOW: Spec = { start: 'n', end: 'n' };
-const STAGE: Spec = {
+const STAGE: Readonly<Record<string, Spec>> = {
   target: 'n', reached: 'b', reason: 's', window: WINDOW, sessions: 'n', start: START,
   burst: { size: 'n', reached: 'b', reason: 's', peakConcurrency: 'n', window: WINDOW, start: START, reconcilesPer10s: 'asc' },
   perPerson: { active: { sessions: 'n', cpuMillicores: 'asc', memoryBytes: 'asc', volumeBytes: 'asc' }, idle: { sessions: 'n', cpuMillicores: 'asc', memoryBytes: 'asc' } },
@@ -149,11 +152,16 @@ const RUN: { readonly [key: string]: Spec } = {
   peakConcurrency: 'n',
   stages: [STAGE]
 };
+const EXPERIMENT: Spec = { ...RUN, stages: [{ ...STAGE, hubs: ['hub'] }] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0);
 
 function check(value: unknown, spec: Spec, at: string): void {
+  if (spec === 'hub') {
+    if (!readHubSmoke(value)) throw new RunFileError(`${at}: invalid bounded hub observation`);
+    return;
+  }
   if (spec === 'n' || spec === 'n?') {
     if (spec === 'n?' && value === null) return;
     if (!isCount(value)) throw new RunFileError(`${at}: must be a non-negative integer`);
@@ -186,10 +194,21 @@ function check(value: unknown, spec: Spec, at: string): void {
 /** Refuses anything that is not a complete, well-formed run (hash not included). */
 export function checkRun(value: unknown): asserts value is UnhashedRun {
   const { hash: _hash, ...rest } = isRecord(value) ? value : { hash: undefined };
-  check(rest, RUN, '$');
+  const schema = (rest as Record<string, unknown>).schema;
+  check(rest, schema === EXPERIMENT_SCHEMA ? EXPERIMENT : RUN, '$');
   const run = rest as unknown as UnhashedRun;
-  if (run.schema !== RUN_SCHEMA) throw new RunFileError(`$.schema: must be ${RUN_SCHEMA}`);
+  if (run.schema !== RUN_SCHEMA && run.schema !== EXPERIMENT_SCHEMA) throw new RunFileError(`$.schema: unrecognized schema`);
   if (!(RUN_KINDS as readonly string[]).includes(run.kind)) throw new RunFileError(`$.kind: must be one of ${RUN_KINDS.join(', ')}`);
+  if (run.schema === EXPERIMENT_SCHEMA) {
+    const stage = run.stages[0];
+    const hub = stage?.hubs?.[0];
+    if (run.kind !== 'experiment' || run.stages.length !== 1 || stage?.target !== HUB_PEOPLE || !stage.reached ||
+        run.inputs.stages.length !== 1 || run.inputs.stages[0] !== HUB_PEOPLE || run.inputs.holdMs !== HUB_HOLD_MS ||
+        run.inputs.burst !== 0 || stage.hubs?.length !== 1 || !hub || hub.streams !== HUB_PEOPLE ||
+        hub.appends === 0 || hub.healthMs.length === 0) {
+      throw new RunFileError('schema 2 requires one successful bounded hub experiment stage');
+    }
+  }
   if (!RUN_ID.test(run.id)) throw new RunFileError('$.id: must be <UTC start yyyymmddThhmmssZ>-<rig>');
   if (!run.id.endsWith(`-${run.rig}`)) throw new RunFileError('$.id: must end with the rig name');
   run.stages.forEach((item, index) => {

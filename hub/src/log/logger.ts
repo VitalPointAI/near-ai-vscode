@@ -7,6 +7,7 @@ import { type Redactor, uniqueFieldName } from './redact';
 //
 // One exception lives here too, so this file stays the one place that writes to stdout: printKeyFile, the key line the operator asked for with
 // --generate-key (D-30). It prints exactly that line and nothing else, so `> hub_signing_key` gives a clean key file.
+// --hub-file and --pin-words (G541) print their one line through it too.
 
 export type LogLevel = 'info' | 'warn' | 'error';
 

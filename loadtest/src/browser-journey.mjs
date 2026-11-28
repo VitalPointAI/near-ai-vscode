@@ -1,0 +1,284 @@
+// Loaded by the one-shot fixture command. The Playwright dependency comes from the Workbench lockfile.
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+
+const terminalMarker = '.sovai-fixture-terminal-final.ok';
+const terminalValue = 'SOVAI_FIXTURE_TERMINAL_OK';
+
+async function timed(run) {
+  const start = performance.now();
+  await run();
+  return Math.round(performance.now() - start);
+}
+
+async function eventually(matches, message) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (matches()) return;
+    await delay(150);
+  }
+  assert.fail(message);
+}
+
+export async function routeFixtureRequest(route, site, permits) {
+  const request = route.request();
+  if (!permits(request.url(), site, Boolean(request.redirectedFrom()))) {
+    await route.abort();
+    return;
+  }
+  // Playwright routes the first URL in a redirect chain. Refuse the redirect before Chromium sees it.
+  const response = await route.fetch({ maxRedirects: 0, maxRetries: 0, timeout: 12_000 })
+    .catch(() => undefined);
+  if (!response) {
+    await route.abort();
+    return;
+  }
+  try {
+    const status = response.status();
+    if (status >= 300 && status < 400 && status !== 304) await route.abort();
+    else await route.fulfill({ response });
+  } finally {
+    await response.dispose();
+  }
+}
+
+async function fixturePage(browser, site, permits) {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await context.route('**/*', route => routeFixtureRequest(route, site, permits));
+  await context.routeWebSocket('**/*', async socket => {
+    if (permits(socket.url(), site)) socket.connectToServer();
+    else await socket.close();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(12_000);
+  page.setDefaultNavigationTimeout(12_000);
+  return { context, page };
+}
+
+export async function openWorkbench(page, origin, now = () => performance.now()) {
+  const start = now();
+  const response = await page.goto(origin, { waitUntil: 'domcontentloaded' });
+  assert.equal(response?.status(), 200);
+  await page.locator('.sterling-welcome').first().waitFor({ state: 'visible', timeout: 40_000 });
+  const elapsed = Math.round(now() - start);
+
+  const trust = page.getByRole('button', { name: 'Yes, I trust the authors', exact: true });
+  const prompted = await trust.waitFor({ state: 'visible', timeout: 3_500 })
+    .then(() => true, error => {
+      if (error.name !== 'TimeoutError') throw error;
+      return false;
+    });
+  if (prompted) await trust.click();
+  return elapsed;
+}
+
+export async function saveFixtureEdit(page, file, edit) {
+  const before = readFileSync(file);
+  const suffix = `\n${edit.text}`;
+  const expected = Buffer.concat([before, Buffer.from(suffix)]);
+  await page.locator('.lm-TabBar-tab').getByText(edit.file, { exact: true }).first().click();
+  await page.locator('.lm-TabBar-tab.lm-mod-current').getByText(edit.file, { exact: true }).first().waitFor();
+  await page.locator('.monaco-editor:visible .view-lines').first().click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText(suffix);
+  await page.keyboard.press('Control+s');
+  await eventually(() => readFileSync(file).equals(expected),
+    'The synthetic edit was not saved');
+}
+
+function selectedFixtureTerminal(previous) {
+  const widgets = [...document.querySelectorAll('.terminal-container[id]')];
+  const added = widgets.filter(widget => !previous.includes(widget.id));
+  if (added.length !== 1) return false;
+  const [widget] = added;
+  // The pinned Theia shell maps the tab ID to its widget owner. Lumino marks the current tab by class.
+  const selected = widgets.filter(item => document.getElementById(`shell-tab-${item.id}`)?.matches('.lm-TabBar-tab.lm-mod-current'));
+  if (selected.length !== 1 || selected[0] !== widget || !/^terminal-\d+$/.test(widget.id)) return false;
+  const input = document.activeElement;
+  const focused = Boolean(input?.matches('textarea.xterm-helper-textarea') && widget.contains(input));
+  return { id: widget.id, focused };
+}
+
+export async function writeFixtureTerminalMarker(page, workspace) {
+  const marker = join(workspace, terminalMarker);
+  assert(!existsSync(marker), 'Expected an unused synthetic terminal fixture');
+  const selectionFailure = 'The new synthetic terminal could not be selected';
+  const focusFailure = 'The new synthetic terminal did not retain keyboard focus';
+  let failure = selectionFailure;
+  try {
+    const previous = await page.evaluate(() => [...document.querySelectorAll('.terminal-container[id]')].map(widget => widget.id));
+    await page.locator('.lm-MenuBar-itemLabel').getByText('Terminal', { exact: true }).first().click();
+    await page.locator('.lm-Menu-itemLabel').getByText('New Terminal', { exact: true }).first().click();
+    const match = await page.waitForFunction(selectedFixtureTerminal, previous);
+    const { id } = await match.jsonValue().finally(() => match.dispose());
+    const current = async () => page.evaluate(selectedFixtureTerminal, previous);
+    assert.equal((await current())?.id, id);
+
+    failure = focusFailure;
+    await page.locator(`.terminal-container[id="${id}"] .xterm`).click();
+    const checkFocus = async () => {
+      failure = selectionFailure;
+      const selection = await current();
+      assert.equal(selection?.id, id);
+      failure = focusFailure;
+      assert(selection.focused);
+    };
+    await checkFocus();
+    await page.keyboard.type(`echo ${terminalValue} > /home/sterling/workspace/${terminalMarker}`);
+    await checkFocus();
+    await page.keyboard.press('Enter');
+
+    failure = 'The fixed synthetic terminal action did not write its marker';
+    await eventually(() => existsSync(marker) && readFileSync(marker, 'utf8').trim() === terminalValue, failure);
+  } catch {
+    assert.fail(failure);
+  }
+}
+
+async function workbenchSample({ browser, workspace, profile, workbenchOrigin, permitsFixtureRequest }) {
+  const { context, page } = await fixturePage(browser, 'workbench', permitsFixtureRequest);
+  try {
+    const getStartedMs = await openWorkbench(page, workbenchOrigin);
+
+    const [open, edit, , idle] = profile.steps;
+    const quickInput = page.locator('.quick-input-widget input:visible').first();
+    const openedMs = await timed(async () => {
+      for (const file of open.files) {
+        await page.keyboard.press('Control+p');
+        await quickInput.fill(file);
+        await page.getByText(file, { exact: true }).filter({ visible: true }).last().waitFor();
+        await quickInput.press('Enter');
+        await page.locator('.lm-TabBar-tab.lm-mod-current').getByText(file, { exact: true }).first().waitFor();
+      }
+    });
+    const editMs = await timed(() => saveFixtureEdit(page, join(workspace, edit.file), edit));
+    const terminalMs = await timed(() => writeFixtureTerminalMarker(page, workspace));
+    const idleMs = await timed(() => delay(Math.min(idle.durationMs, 1000)));
+    return { getStartedMs, stepMs: [openedMs, editMs, terminalMs, idleMs] };
+  } finally {
+    await context.close();
+  }
+}
+
+async function passkeySample({ browser, passkeyOrigin, permitsFixtureRequest, signal }) {
+  signal.throwIfAborted();
+  const server = createServer((request, response) => {
+    if (request.method !== 'GET' || request.url !== '/' || request.headers.host !== 'localhost:3001') {
+      response.writeHead(404).end();
+      return;
+    }
+    response.setHeader('content-type', 'text/html; charset=utf-8');
+    response.end('<!doctype html><title>Synthetic passkey fixture</title><h1>Synthetic passkey fixture</h1>');
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen({ port: 3001, host: '127.0.0.1', signal }, resolve);
+  });
+  try {
+    const { context, page } = await fixturePage(browser, 'passkey', permitsFixtureRequest);
+    try {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('WebAuthn.enable');
+      await cdp.send('WebAuthn.addVirtualAuthenticator', {
+        options: {
+          protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true,
+          isUserVerified: true, automaticPresenceSimulation: true,
+        },
+      });
+      const response = await page.goto(passkeyOrigin, { waitUntil: 'domcontentloaded' });
+      assert.equal(response?.status(), 200);
+      return await timed(async () => {
+        const verified = await page.evaluate(async () => {
+          const credential = await navigator.credentials.create({ publicKey: {
+            challenge: new Uint8Array(32).fill(7), rp: { id: 'localhost', name: 'Synthetic Workbench fixture' },
+            user: { id: new Uint8Array([1, 2, 3]), name: 'fixture', displayName: 'Fixture' },
+            pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+            authenticatorSelection: { userVerification: 'required' }, timeout: 8000,
+          } });
+          if (!credential) return false;
+          const assertion = await navigator.credentials.get({ publicKey: {
+            challenge: new Uint8Array(32).fill(8), rpId: 'localhost',
+            allowCredentials: [{ type: 'public-key', id: credential.rawId }], userVerification: 'required', timeout: 8000,
+          } });
+          return assertion?.id === credential.id;
+        });
+        assert.equal(verified, true);
+      });
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error && !signal.aborted ? reject(error) : resolve()));
+  }
+}
+
+async function within(operation, ms, message) {
+  const timer = new AbortController();
+  try {
+    return await Promise.race([
+      operation,
+      delay(ms, undefined, { signal: timer.signal }).then(() => { throw new Error(message); }),
+    ]);
+  } finally {
+    timer.abort();
+  }
+}
+
+async function stopBrowser(server, child, graceMs) {
+  const alive = () => child.exitCode === null && child.signalCode === null;
+  if (!alive()) return;
+  let onExit;
+  const reaped = new Promise(resolve => { onExit = resolve; child.once('exit', onExit); });
+  try {
+    // Playwright can wait longer for its protocol close than the fixture allows.
+    void Promise.resolve().then(() => server.close()).catch(() => {});
+    const exited = await within(reaped.then(() => true), graceMs, 'Chromium graceful close timed out')
+      .catch(() => false);
+    if (!exited && alive()) {
+      // The locked Playwright runtime kills the launched Chromium process group.
+      void Promise.resolve().then(() => server.kill()).catch(() => {});
+      await within(reaped, graceMs, 'Chromium did not exit after forced shutdown');
+    }
+  } finally {
+    child.off('exit', onExit);
+  }
+}
+
+async function sampleInBrowser(server, chromium, fixture, signal) {
+  const endpoint = new URL(server.wsEndpoint());
+  assert(endpoint.protocol === 'ws:' && endpoint.hostname === '127.0.0.1' && !endpoint.username && !endpoint.password,
+    'Expected a local Chromium control socket');
+  const browser = await chromium.connect(endpoint.href, { timeout: 5_000 });
+  try {
+    signal.throwIfAborted();
+    const workbench = await workbenchSample({ ...fixture, browser });
+    const signInMs = await passkeySample({ ...fixture, browser, signal });
+    return { ...workbench, signInMs };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function runJourney({ chromium, executablePath, verifyBrowser, ...fixture }, deadlineMs = 75_000, graceMs = 1_000) {
+  const started = performance.now();
+  const server = await chromium.launchServer({
+    executablePath, headless: true, host: '127.0.0.1', port: 0, timeout: Math.min(10_000, deadlineMs),
+    args: ['--host-resolver-rules=MAP localhost 127.0.0.1'],
+  });
+  const child = server.process();
+  const sample = new AbortController();
+  const deadlineMessage = 'Chromium sample exceeded the fixture deadline';
+  try {
+    verifyBrowser(child.pid);
+    const remaining = deadlineMs - (performance.now() - started);
+    assert(remaining > 0, deadlineMessage);
+    const result = await within(sampleInBrowser(server, chromium, fixture, sample.signal), remaining, deadlineMessage);
+    assert(performance.now() - started < deadlineMs, deadlineMessage);
+    return result;
+  } finally {
+    sample.abort();
+    await stopBrowser(server, child, graceMs);
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "activity",
+  "version": "1",
+  "idleShareBasisPoints": 2000,
+  "locators": [
+    "get-started",
+    "command-palette",
+    "editor",
+    "terminal"
+  ],
+  "steps": [
+    {
+      "kind": "open-files",
+      "files": [
+        "brief.md",
+        "notes.md",
+        "summary.md"
+      ]
+    },
+    {
+      "kind": "edit",
+      "file": "notes.md",
+      "text": "Local synthetic activity"
+    },
+    {
+      "kind": "terminal",
+      "action": "fixture-echo"
+    },
+    {
+      "kind": "idle",
+      "durationMs": 1000
+    }
+  ],
+  "sha256": "sha256:345ea21f7d79350b414e09b4c797e0827dd3e6a022b01f0e72e940d1d69aee57"
+}
