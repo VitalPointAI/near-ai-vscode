@@ -13,6 +13,9 @@ const workspace = '/home/sterling/workspace';
 const binding = { HostIp: '127.0.0.1', HostPort: '43112' };
 const launched = 'http://localhost:43112/';
 const endpoint = 'http://127.0.0.1:43112/healthz';
+const dockerRoot = '/mnt/workbench data/docker';
+const availableStorage = 'Docker data-root filesystem visible to the launcher has 15 GiB available (16106127360 bytes). Other mounts may differ.';
+const unavailableStorage = 'Docker data-root filesystem space is unavailable.';
 const emptyProxies = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'FTP_PROXY']
   .flatMap((name) => [`${name}=`, `${name.toLowerCase()}=`]);
 
@@ -27,6 +30,8 @@ function fixture(options = {}) {
   const prerequisiteSteps = [];
   const probes = [];
   const postHealthTimeouts = [];
+  const capacityQueries = [];
+  const storageProbes = [];
   let installed = options.installed ?? true;
   let namedVolume = options.volume;
   let namedContainer = options.container;
@@ -67,10 +72,11 @@ function fixture(options = {}) {
       }
       if (command === 'info') {
         assert(options.checkOnly, 'capacity is observed only in check mode');
-        assert.deepEqual(args.slice(2), ['info', '--format', '{{.NCPU}} {{.MemTotal}}']);
+        capacityQueries.push(args.slice(2));
         assert.equal(timeout, 3000);
         prerequisiteSteps.push('capacity');
-        return options.capacityResult ?? ok('8 17179869184\n');
+        const projectedRoot = target.includes('DockerRootDir') ? `\n${JSON.stringify(dockerRoot)}` : '';
+        return options.capacityResult ?? ok(`8 17179869184${projectedRoot}\n`);
       }
       assert(!options.checkOnly, 'check mode cannot inspect or change images, containers or volumes');
       if (command === 'volume' && subcommand === 'inspect') {
@@ -126,6 +132,11 @@ function fixture(options = {}) {
       }
       assert.fail(`unexpected Docker command: ${args.join(' ')}`);
     },
+    async statfs(path, statOptions) {
+      storageProbes.push([path, statOptions]);
+      if (options.storageFailure) throw new Error('untrusted detail');
+      return options.storageStats ?? { frsize: 8192n, bsize: 4096n, bavail: 1966080n, bfree: 3000000n };
+    },
     async probe(url, timeout) {
       assert(!options.checkOnly, 'check mode cannot probe application health');
       assert.equal(url, endpoint);
@@ -141,7 +152,7 @@ function fixture(options = {}) {
     async sleep(ms) { now += ms; },
   };
   return {
-    deps, mutations, probes, postHealthTimeouts, prerequisiteSteps,
+    deps, mutations, probes, postHealthTimeouts, prerequisiteSteps, capacityQueries, storageProbes,
     preventReuse(changes) {
       Object.assign(namedContainer.HostConfig, changes);
       installed = false;
@@ -157,10 +168,13 @@ test('check reports workstation prerequisites in order and never reaches resourc
   const check = { check: true };
   for (const [arch, platform] of [['x64', 'linux/amd64'], ['arm64', 'linux/arm64']]) {
     const f = fixture({ arch, checkOnly: true, installed: false });
-    const [prerequisites, capacity] = (await launchLocalWorkbench(check, f.deps)).split('\n');
+    const [prerequisites, capacity, storage] = (await launchLocalWorkbench(check, f.deps)).split('\n');
     assert.equal(prerequisites, `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`);
     assert.equal(capacity, 'Docker reports 8 logical CPUs and 16 GiB total memory.');
+    assert.equal(storage, availableStorage);
     assert.deepEqual(f.prerequisiteSteps, ['client', 'socket', 'engine', 'capacity']);
+    assert.deepEqual(f.capacityQueries, [['info', '--format', '{{.NCPU}} {{.MemTotal}}\n{{json .DockerRootDir}}']]);
+    assert.deepEqual(f.storageProbes, [[dockerRoot, { bigint: true }]]);
   }
 
   for (const capacityResult of [
@@ -169,9 +183,11 @@ test('check reports workstation prerequisites in order and never reaches resourc
       .map((stdout) => ({ code: 0, stdout, stderr: '' })),
   ]) {
     const f = fixture({ checkOnly: true, capacityResult });
-    const [prerequisites, capacity] = (await launchLocalWorkbench(check, f.deps)).split('\n');
+    const [prerequisites, capacity, storage] = (await launchLocalWorkbench(check, f.deps)).split('\n');
     assert.match(prerequisites, /prerequisites.*ready.*linux\/amd64.*matching.*image/i);
     assert.equal(capacity, 'Docker CPU and memory readings are unavailable.');
+    assert.equal(storage, unavailableStorage);
+    assert.deepEqual(f.storageProbes, []);
   }
 
   for (const [options, expected, steps] of [
@@ -202,6 +218,53 @@ test('check reports workstation prerequisites in order and never reaches resourc
   }
 });
 
+test('check keeps Docker data-root storage separate from CPU and memory readiness', async () => {
+  const check = { check: true };
+  const documentedCapacity = 'Docker reports 8 logical CPUs and 16 GiB total memory.';
+
+  for (const [storageStats, expected] of [
+    [{ frsize: 8192n, bsize: 4096n, bavail: 0n, bfree: 5n }, /0 GiB available \(0 bytes\)/],
+    [{ bsize: 4096n, bavail: 327680n }, /1\.25 GiB available \(1342177280 bytes\)/],
+    [{ frsize: 0n, bsize: 1n, bavail: 9007199254740993n }, /8388608 GiB available \(9007199254740993 bytes\)/],
+    [{ frsize: -1n, bsize: 4096n, bavail: 1n }, /Docker data-root filesystem space is unavailable\./],
+    [{ frsize: 4096n, bavail: -1n }, /Docker data-root filesystem space is unavailable\./],
+    [{ bsize: 0n, bavail: 1n }, /Docker data-root filesystem space is unavailable\./],
+  ]) {
+    const f = fixture({ checkOnly: true, storageStats });
+    const [, capacity, storage] = (await launchLocalWorkbench(check, f.deps)).split('\n');
+    assert.equal(capacity, documentedCapacity);
+    assert.match(storage, expected);
+    assert.deepEqual(f.storageProbes, [[dockerRoot, { bigint: true }]]);
+  }
+
+  for (const result of ['', 'null', '"/wrong', '"relative/path"', JSON.stringify('/bad\npath')]) {
+    const f = fixture({ checkOnly: true, capacityResult: { code: 0, stdout: `8 17179869184\n${result}` } });
+    const [, capacity, storage] = (await launchLocalWorkbench(check, f.deps)).split('\n');
+    assert.equal(capacity, documentedCapacity);
+    assert.equal(storage, unavailableStorage);
+    assert.deepEqual(f.storageProbes, []);
+  }
+
+  for (const cpuAndMemory of ['0 17179869184', '']) {
+    const missingCapacity = fixture({
+      checkOnly: true,
+      capacityResult: { code: 0, stdout: `${cpuAndMemory}\n${JSON.stringify(dockerRoot)}\n` },
+    });
+    const [, capacity, storage] = (await launchLocalWorkbench(check, missingCapacity.deps)).split('\n');
+    assert.equal(capacity, 'Docker CPU and memory readings are unavailable.');
+    assert.equal(storage, availableStorage);
+  }
+
+  for (const missingProbe of [false, true]) {
+    const f = fixture({ checkOnly: true, storageFailure: true });
+    if (missingProbe) f.deps.statfs = undefined;
+    const output = await launchLocalWorkbench(check, f.deps);
+    assert.equal(output.split('\n')[1], documentedCapacity);
+    assert.equal(output.split('\n')[2], unavailableStorage);
+    assert.doesNotMatch(output, /untrusted detail/);
+  }
+});
+
 test('local Workbench preflights, uses the approved release, and retries its own workspace', async (t) => {
   await t.test('first launch, healthy retry and stopped-container retry preserve identity and storage', async () => {
     const f = fixture();
@@ -213,6 +276,7 @@ test('local Workbench preflights, uses the approved release, and retries its own
     f.stop();
     assert.equal(await launchLocalWorkbench({ image }, f.deps), launched);
     assert.deepEqual(f.mutations.map(([command]) => command), ['volume', 'create', 'start', 'start']);
+    assert.deepEqual(f.storageProbes, []);
   });
 
   await t.test('invalid host, daemon, or existing resources refuse before optional repair', async () => {
@@ -251,6 +315,7 @@ test('local Workbench preflights, uses the approved release, and retries its own
     const repair = fixture({ installed: false });
     assert.equal(await launchLocalWorkbench({ image, repair: true }, repair.deps), launched);
     assert.deepEqual(repair.mutations.map(([command]) => command), ['pull', 'volume', 'create', 'start']);
+    assert.deepEqual(repair.storageProbes, []);
     const wrong = fixture({ installed: false, wrongDigest: true });
     await assert.rejects(launchLocalWorkbench({ image, repair: true }, wrong.deps), /image.*digest/i);
     assert.deepEqual(wrong.mutations.map(([command]) => command), ['pull']);

@@ -1,5 +1,13 @@
 # Requirements: Near AI for VSCode
 
+## Canadian official languages
+
+- [ ] **LANG-01**: The Canadian profile supports a persistent user switch between English (Canada) and French (Canada). Workbench, setup, administration, help and documentation support both languages, with equivalent accessibility and no loss of project context.
+- [ ] **LANG-02**: The Canadian profile can draft in either official language and present both approved renditions of a shared product. Translations preserve exact source provenance and inherited data controls. Approval tracks both versions and qualified human review, and a stale rendition cannot be presented as current.
+- [ ] **LANG-03**: The translation service evaluates each supported language pair and format. Approved model versions have exact artifact, deployment and evaluation evidence. Out-of-scope or uncertain source work can be referred to a qualified person.
+
+Track workbench localization under LANG-01. Carry LANG-02 into Phase 96 and institutional staff draft acceptance. Carry LANG-03 into Phase 98 and authorized multilingual document intake. [Delivery and acceptance](research/canadian-official-languages.md).
+
 ## Milestone v0.5.0: Governed agent platform (Phases 68-74), and v0.7.0 Messaging relay (Phases 75-84)
 
 **Defined:** 2026-11-13 (relay). **Replanned:** 2026-11-15 from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"): the identity and governance core was added, the relay requirements were re-mapped to renumbered phases, and new groups were added (TMR, GATE, OFFL, DLGT, EXEC, CRED, CTRT, CHAN, PAIR, APRV).

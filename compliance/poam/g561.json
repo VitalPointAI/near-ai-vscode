@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "sa-11"
+  ],
+  "gap": "G561",
+  "id": "g561",
+  "milestones": [
+    {
+      "phase": "46",
+      "title": "Record qualified Canadian French copy review and verify remaining Canadian Workbench workflows and outputs"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Workbench staff setup has been checked in Canadian English and French, including unchanged project scope and cancellation. A qualified Canadian French reviewer must verify the terminology and instructions. Record equivalent workflows and outputs for remaining Canadian Workbench surfaces before declaring full LANG-01 acceptance.",
+  "title": "Canadian Workbench language coverage needs qualified review"
+}

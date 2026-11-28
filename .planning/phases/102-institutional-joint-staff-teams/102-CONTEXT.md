@@ -1,0 +1,91 @@
+# Phase 102. Institutional joint staff teams
+
+The owner requested working J1 through J9 teams, with the skills and tools from the
+reviewed institutional blueprint. Command Group and Special Staff are included
+because they own or review handoffs in that same blueprint.
+
+## Organizational levels
+
+| SovAI tier | Level | Default staff designation |
+| --- | --- | --- |
+| Unit | L4 | S |
+| Brigade | L3 | G for the Canadian brigade profile. Use S for a typical US Army brigade. |
+| Division | L2 | G for an Army division headquarters |
+| Joint | L1 | J for a joint headquarters |
+| Joint strategic | L0 | J for a strategic joint headquarters |
+
+The product has four organizational tiers, with separate L1 and L0 choices
+within the joint tier. A G prefix alone does not distinguish a brigade from a
+division. See the [joint tier crosswalk](102-JOINT-TIER-CROSSWALK.md) for
+L1/L0 institutional responsibilities and acceptance. Display names follow the organization and national profile. They
+neither grant authority nor imply every section is staffed.
+
+U.S. Army doctrine uses G for general-officer staffs and J for joint staffs.
+Canadian and NATO publications independently use G for divisional staff.
+[U.S. Army FM 1](https://rdl.train.army.mil/catalog-ws/view/100.ATSC/DDCD9C3D-8DBE-4593-9720-E79BE22342F8-1747333985126/FM1.pdf)
+· [Canadian divisional G1](https://www.canada.ca/en/army/corporate/3-canadian-division/2026/10/awards-october-2026.html)
+· [NATO divisional G3](https://www.nato.int/en/about-us/organization/who-we-are/director-generals-of-ims/lieutenant-general-janusz-adamczak1)
+
+Canada also uses G at brigade. The typical US Army brigade follows the S
+designation. Preserve authorized local variations in each profile.
+[Canadian brigade G3](https://www.canada.ca/en/army/corporate/senior-leaders/3-canadian-division.html)
+· [U.S. Army staff organization reference](https://rdl.train.army.mil/catalog-ws/view/100.ATSC/AA1BF22B-024D-49DA-9A42-03B00DB47FD6-1300769171598/stp46-46qz14-sm-tg.pdf)
+
+## Implementation scope
+
+Use the four-pass blueprint and its three inventory files as the source for
+stable duty IDs, producing roles, accountable humans, evidence and draft
+outputs. The inventory at `360515a60` contains 149 distinct duties, with 117 across
+J1–J9 and 32 across Command Group and Special Staff. A duty is a workflow, and
+several duties can share the same role, skill and bounded tool contract.
+
+| Section | Duties | Institutional focus |
+| --- | ---: | --- |
+| Command Group | 12 | Direction records, decision brief assembly and follow-up |
+| J1 | 15 | Personnel administration, aggregate evidence and referral |
+| J2 | 12 | Information stewardship, labels and provenance |
+| J3 | 12 | Staff calendar, records and action coordination |
+| J4 | 12 | Ordinary workplace inventory, supplier and service administration |
+| J5 | 12 | Institutional estimates, business cases and decision records |
+| J6 | 13 | Enterprise service records and defensive evidence |
+| J7 | 14 | Education administration and lessons |
+| J8 | 14 | Budget evidence and reconciliation |
+| J9 | 13 | Civilian liaison drafts and consent records |
+| Special Staff | 20 | Specialist referrals, policy records and human review |
+
+Use the existing Staff Settings and Team Studio provisioning paths. Compare the
+four existing J2/J3/J4/J5 registered templates with the new institutional
+contracts before reusing components. A shared J-number supplies neither skill
+compatibility nor permission. Tool grants must use positive allowlists and
+apply at dispatch. Each human approval and release remains with the verified
+position holder. Staff agents work on institutional drafts and evidence only,
+using synthetic sources for initial acceptance.
+
+## Sequencing and verification
+
+1. Trace a Command Group decision packet and its J3 action record, with a
+   separate J7 lessons workflow, through Team Studio to exact draft and review
+   evidence. Reuse the existing staff product contracts and version history
+   where they can enforce institutional scope. Verify the behavior of actual
+   provisioned team members, including missing authority and refusal to approve,
+   sign, send or change official records.
+2. Add J2/J6 stewardship, then J5/J9 drafts, and then J4/J8 reconciliation. Reuse
+   the tracer's role, source and effect contracts with branch-owned fragments.
+3. Cover J1 and Specialist Staff with fictional aggregate or public material.
+   Real personnel, protected cases and finance require their existing separate
+   source and organizational approvals.
+4. Validate the 149 duty IDs against the blueprint. Each must have a staff
+   role, accountable human, typed or structured output, required skill, explicit
+   tool effect, route limits and traceable acceptance coverage. Validate all five level
+   selections across the four tiers for the applicable US, NATO and Canadian
+   NATO-aligned profiles. Use the blueprint's 34 core and seven existing
+   echelon scenarios. Add institutional L1/L0 duties, designators and
+   handoff scenarios before claiming joint tier coverage.
+
+The [joint staff blueprint](../../research/staff-teams/12-JOINT-STAFF-SUPPORT-BLUEPRINT.md)
+defines the institutional charter and build order. The
+[assurance cases](../../research/staff-teams/16-joint-staff-support-assurance.md)
+and [echelon crosswalk](../../research/staff-teams/17-staff-doctrine-by-echelon.md)
+define profile-specific acceptance. Blueprint PR #228 is the publication
+dependency. Live delegation verification, source connectors and external
+delivery follow their separate prerequisites.
