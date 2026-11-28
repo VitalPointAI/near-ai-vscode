@@ -34,7 +34,12 @@ Evidence under `.scratch/infrastructure-offline.T8nSAG/` in the isolated worktre
 | `browser.aSGPz6/run.log` | `f18ee83926f8a42a91d016af21e2b160a8cfb95617129b2b5d8a2c7d34110ee2` |
 | Browser before and after file hash manifests | `7f6c1afcc5fccb19cd7aceb1a3e340aa37fd342453b3bd6663a12839be27698f` |
 
+## Follow-up outside the local report
+
+Phase 104 records **G564** in its separate authority branch at `4076a8625`. Verified mission ownership, membership and signed resource authority remain prerequisites for live discovery, connectors and production mission-scoped inventory. Those integrations need separate acceptance.
+
+Ordinary delivery follows PR #254 and verification on the resulting main.
+
 ## Open conditions
 
-- **G564** covers verified mission ownership, membership and signed resource authority. Live discovery, connectors and production mission-scoped inventory require this authority and separate integration acceptance.
-- Ordinary delivery waits for PR #254 and verification on the resulting main.
+None.
