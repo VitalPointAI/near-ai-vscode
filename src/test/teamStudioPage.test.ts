@@ -3930,43 +3930,179 @@ test('page: the toolbar: New team opens the builder\'s first screen; Optimise al
   assert.ok(page.byLabel('Use an existing team') && page.byLabel('Create a new team') && page.byLabel('Recommend a team for me'));
 });
 
-test('page: Staff setup preview shows the chosen project and scope and discards replies after leaving', async () => {
+test('host: profile-first chooser inspects every level without passing scope to legacy setup', async () => {
+  const h = await harness();
+  const messages: Array<Record<string, any>> = [];
+  const legacy: unknown[][] = [];
+  const preview = createStaffSetupPreview({ folders: () => [{ root: h.root, name: 'Office project' }], pick: async () => undefined,
+    libraryDir: path.join(h.root, 'library'), post: message => { messages.push(message); }, startSection: async () => assert.fail('inspection must not start setup') });
+  Object.assign(h.deps, { staffSetupPreview: preview });
+  h.deps.setUpStaffTeam = async (...args: unknown[]) => { legacy.push(args); };
+  await h.send({ type: 'staff-preview-open', request: 1 });
+  const getView = () => messages.at(-1)!;
+  const initial = getView();
+  assert.equal(initial.project, 'Office project');
+  assert.deepEqual(initial.profiles, ['us-joint', 'us-army', 'nato', 'canada']);
+  assert.ok(initial.rows.every((row: { code?: string }) => !row.code));
+  const choose = async (field: string, choice: string, session = getView().session) =>
+    h.send({ type: 'staff-preview-select', request: 1, session, field, choice });
+  await choose('level', 'l3');
+  assert.equal(getView(), initial);
+  await choose('profile', 'canada');
+  assert.notEqual(getView().session, initial.session);
+  assert.deepEqual(getView().levels, ['l4', 'l3', 'l2', 'l1', 'l0']);
+  for (const level of getView().levels) {
+    const previous = getView();
+    await choose('level', level);
+    assert.equal(getView().organizationLevel, level);
+    assert.notEqual(getView().session, previous.session);
+  }
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, undefined);
+  await choose('level', 'l3');
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, 'G4');
+  await choose('profile', 'us-army');
+  assert.equal(getView().organizationLevel, undefined);
+  await choose('level', 'l3');
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, 'S-4');
+  await choose('profile', 'us-joint');
+  await choose('level', 'l1');
+  const joint = getView();
+  await h.send({ type: 'staff-preview-legacy', request: 1, session: joint.session });
+  assert.equal(getView(), joint, 'an inspected profile cannot open legacy setup');
+  await choose('level', 'l0');
+  assert.equal(getView().organizationLevel, 'l0');
+  assert.equal(getView().rows.find((row: { id: string }) => row.id === 'j4').code, 'J-4');
+  await choose('level', 'l2', joint.session);
+  assert.equal(getView().organizationLevel, 'l0', 'an L1 selection cannot be reused after selecting L0');
+  await h.send({ type: 'staff-preview-back', request: 1, session: getView().session });
+  assert.equal(getView().profile, undefined);
+  assert.equal(getView().legacySetup, true);
+  await h.send({ type: 'staff-preview-continue', request: 1, session: getView().session, section: 'j4' });
+  preview.invalidate();
+  await choose('level', 'l2');
+  assert.equal(getView().error, 'projectChanged');
+  await h.send({ type: 'staff-setup', organizationLevel: 'l0', profile: 'us-joint' });
+  assert.deepEqual(legacy, []);
+  await h.send({ type: 'staff-preview-leave', request: 1 });
+  await h.send({ type: 'staff-setup' });
+  assert.deepEqual(legacy, [[]], 'the unchanged native route receives no inspected scope');
+  assert.equal(existsSync(path.join(h.root, '.planning', '.near-ai', 'project.json')), false);
+});
+
+test('page: profile-first staff preview changes scope and language without starting setup', async () => {
   const page = await dashboardPage();
   const entry = () => page.byLabel('Set up staff')!;
   entry().click();
   const first = page.posts.at(-1)!;
-  assert.equal(first.type, 'staff-preview-open');
+  page.byLabel('Leave setup')!.click();
+  assert.equal(page.doc.activeElement, entry());
+  entry().click();
+  const { request } = page.posts.at(-1)!;
+  const content = {
+    type: 'staff-preview-state', request, session: 'initial', project: 'Library project', legacySetup: true,
+    profiles: ['us-army', 'canada'], levels: [], rows: [{ id: 'j4' }, { id: 'j3', status: 'legacyUnresolved', team: 'Library coordination' }]
+  };
+  page.dispatch({ ...content, request: first.request });
+  assert.doesNotMatch(page.text(), /Library project/);
+  page.dispatch(content);
+  assert.match(page.text(), /Logistics/);
+  assert.match(page.text(), /Library coordination/);
+  assert.doesNotMatch(page.text(), /G4|J4|L3 Brigade/);
+  page.byLabel('NATO (Canadian terms)')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-select', request, session: 'initial', field: 'profile', choice: 'canada' });
+  const profile = { ...content, legacySetup: false, session: 'profile', previousSession: 'initial', profile: 'canada', levels: ['l4', 'l3', 'l2', 'l1', 'l0'] };
+  page.dispatch(profile);
+  const brigade = () => page.doc.getElementById('staff-level-l3')!;
+  brigade().click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-select', request, session: 'profile', field: 'level', choice: 'l3' });
+  page.dispatch({ ...profile, session: 'stale', previousSession: 'initial', organizationLevel: 'l0' });
+  assert.equal(page.doc.getElementById('staff-level-l0')!.getAttribute('aria-pressed'), 'false');
+  page.dispatch({ ...profile, session: 'brigade', previousSession: 'profile', organizationLevel: 'l3', rows: [{ id: 'j4', code: 'G4' }] });
+  assert.equal(page.doc.activeElement, brigade());
+  assert.match(page.text(), /G4 Logistics/);
+  assert.equal(brigade().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.doc.getElementById('staff-preview-continue'), null);
+  assert.equal(page.byLabel('Open existing staff setup'), undefined);
+  const before = page.posts.length;
+  page.dispatch({ type: 'staff-preview-locale', locale: 'fr-CA' });
+  assert.match(page.text(), /Niveau organisationnel.*G4 Logistique/);
+  assert.equal(page.doc.activeElement, brigade());
+  assert.equal(brigade().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.posts.length, before);
+  page.fireWindow('keydown', { key: 'Escape', preventDefault: () => undefined });
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request });
+  assert.equal(page.doc.activeElement, page.byLabel('Configurer l’état-major'));
+  page.byLabel('Configurer l’état-major')!.click();
+  const reopened = page.posts.at(-1)!.request;
+  page.dispatch({ ...content, request: reopened });
+  page.byLabel('Ouvrir la configuration existante')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-legacy', request: reopened, session: 'initial' });
+});
+
+test('page: Staff setup selects only chosen sections and continues one at a time on fresh previews', async () => {
+  const page = await dashboardPage();
+  const entry = () => page.byLabel('Set up staff')!;
+  const next = () => page.doc.getElementById('staff-preview-continue')!;
+  const section = (id: string) => page.doc.getElementById('staff-section-' + id);
+  const handoffs = () => page.posts.filter((message) => message.type === 'staff-preview-continue');
+  entry().click();
+  const first = page.posts.at(-1)!;
   page.byLabel('Leave setup')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request: first.request });
   assert.equal(page.doc.activeElement, entry());
   entry().click();
-  const second = page.posts.at(-1)!;
-  const preview = {
-    type: 'staff-preview-state', session: 'host-session', project: 'Library project', profile: 'nato-ca', level: 'tactical',
+  const { request } = page.posts.at(-1)!;
+  const content = {
+    legacy: true, project: 'Library project', profile: 'nato-ca', level: 'tactical',
     rows: [
-      { id: 'j4', template: true, status: 'linked', team: 'Library logistics', decisionRole: true },
+      { id: 'j4', template: true, status: 'available' },
+      { id: 'j5', template: true, status: 'available' },
+      { id: 'j3', template: true, status: 'linked', team: 'Library operations' },
+      { id: 'j2', template: true, status: 'unverified' },
       { id: 'j9', template: false, status: 'noTemplate' }
     ]
   };
+  const preview = { type: 'staff-preview-state', session: 'first-session', ...content };
   page.dispatch({ ...preview, request: first.request });
   assert.doesNotMatch(page.text(), /Library project/);
-  page.dispatch({ ...preview, request: second.request });
+  page.dispatch({ ...preview, request });
   assert.match(page.text(), /Library project.*NATO\/Canadian.*Tactical/);
-  assert.match(page.text(), /Logistics/);
-  assert.doesNotMatch(page.text(), /Civil-military cooperation/);
-  page.byLabel('Logistics')!.click();
-  page.byLabel('Continue to section setup')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-continue', request: second.request, session: 'host-session', section: 'j4' });
-  page.dispatch({ type: 'staff-preview-result', request: second.request, session: 'host-session', applied: false });
-  assert.equal(page.doc.activeElement, page.byLabel('Logistics'));
-  page.byLabel('Complete staff')!.click();
-  assert.match(page.text(), /Library logistics.*Civil-military cooperation.*No agent team template/);
-  assert.equal(page.byLabel('Set up this staff'), undefined);
-  assert.equal(page.doc.activeElement, page.doc.getElementById('staff-preview-title'));
+  assert.match(page.text(), /Library operations/);
+  assert.match(page.text(), /Civil-military cooperation/);
+  assert.equal(section('j3'), null, 'a linked team is shown but cannot be overwritten from this picker');
+  assert.equal(section('j9'), null, 'a section without a template cannot enter the selection');
+  assert.equal(section('j2')!.disabled, false, 'a missing compatible link can proceed to the existing guarded review');
+  assert.match(page.text(), /The linked agent team could not be verified/);
+  assert.equal(page.doc.getElementById('staff-scope-section'), null);
+  assert.equal(page.doc.getElementById('staff-scope-complete'), null);
+  assert.equal(section('j4')!.getAttribute('aria-pressed'), 'false');
+  assert.equal(section('j5')!.getAttribute('aria-pressed'), 'false');
+  assert.equal(next().disabled, true);
+  next().click();
+  assert.equal(handoffs().length, 0);
+
+  section('j5')!.click();
+  section('j4')!.click();
+  assert.equal(section('j4')!.getAttribute('aria-pressed'), 'true');
+  assert.equal(section('j5')!.getAttribute('aria-pressed'), 'true');
+  next().click();
+  assert.deepEqual(handoffs(), [{ type: 'staff-preview-continue', request, session: 'first-session', section: 'j4' }]);
+  const rows = content.rows.map((row) => row.id === 'j4' ? { ...row, status: 'linked', team: 'New logistics' } : row);
+  const result = { type: 'staff-preview-result', request, applied: true, preview: { ...content, session: 'second-session', rows } };
+  page.dispatch({ ...result, session: 'wrong-session' });
+  assert.doesNotMatch(page.text(), /New logistics/);
+  page.dispatch({ ...result, session: 'first-session' });
+  assert.match(page.text(), /New logistics/);
+  assert.equal(section('j4'), null);
+  assert.equal(section('j5')!.getAttribute('aria-pressed'), 'true');
+  assert.equal(handoffs().length, 1, 'an editor confirmation must not start the next section');
+  next().click();
+  assert.deepEqual(handoffs()[1], { type: 'staff-preview-continue', request, session: 'second-session', section: 'j5' });
+
   let escapeHandled = false;
   page.fireWindow('keydown', { key: 'Escape', preventDefault: () => { escapeHandled = true; } });
   assert.equal(escapeHandled, true);
-  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request: second.request });
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-leave', request });
   assert.equal(page.doc.activeElement, entry());
 });
 
@@ -3974,32 +4110,35 @@ test('page: a Canadian language change preserves the staff preview, focused sect
   const page = await dashboardPage();
   page.byLabel('Set up staff')!.click();
   const request = page.posts.at(-1)!.request;
-  page.dispatch({
-    type: 'staff-preview-state', request, session: 'host-session', project: 'Project Écho',
-    profile: 'nato-ca', level: 'tactical',
-    rows: [
-      { id: 'j4', code: 'G4', template: true, status: 'linked', team: 'Library logistics', decisionRole: true },
-      { id: 'j9', code: 'G9', template: false, status: 'noTemplate' }
-    ]
-  });
+  const content = { legacy: true, project: 'Project Écho', profile: 'nato-ca', level: 'tactical', rows: [
+    { id: 'j4', code: 'G4', template: true, status: 'available', decisionRole: true },
+    { id: 'j9', code: 'G9', template: false, status: 'noTemplate' }
+  ] };
+  page.dispatch({ type: 'staff-preview-state', request, session: 'host-session', ...content });
   const selected = () => page.doc.getElementById('staff-section-j4')!;
+  const next = () => page.doc.getElementById('staff-preview-continue')!;
   selected().click();
   assert.equal(page.doc.activeElement, selected());
   const before = page.posts.length;
 
   page.dispatch({ type: 'staff-preview-locale', locale: 'fr-CA' });
-  assert.match(page.text(), /Aperçu de la configuration de l’état-major.*Project Écho.*G4 Logistique.*Équipe liée.*Library logistics/);
+  assert.match(page.text(), /Aperçu de la configuration de l’état-major.*Project Écho.*G4 Logistique/);
   assert.equal(selected().getAttribute('aria-pressed'), 'true');
   assert.equal(page.doc.activeElement, selected());
   assert.equal(page.posts.length, before);
-  page.byLabel('Poursuivre la configuration de la section')!.click();
+  assert.match(next().textContent, /Poursuivre/);
+  next().click();
   assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-continue', request, session: 'host-session', section: 'j4' });
 
   page.dispatch({ type: 'staff-preview-locale', locale: 'en-CA' });
   assert.match(page.text(), /Continue in the editor’s setup questions/);
   assert.equal(page.posts.length, before + 1);
-  page.dispatch({ type: 'staff-preview-result', request, session: 'host-session', applied: false });
+  page.dispatch({ type: 'staff-preview-result', request, session: 'host-session', applied: false, preview: { ...content, session: 'retry-session' } });
   assert.equal(page.doc.activeElement, selected());
+  assert.equal(selected().getAttribute('aria-pressed'), 'true');
+  assert.equal(page.posts.length, before + 1, 'cancellation does not retry on its own');
+  next().click();
+  assert.deepEqual(page.posts.at(-1), { type: 'staff-preview-continue', request, session: 'retry-session', section: 'j4' });
   page.byLabel('Leave setup')!.click();
   assert.equal(page.doc.activeElement, page.byLabel('Set up staff'));
 });
@@ -4044,7 +4183,7 @@ test('host: Staff setup preview scopes the latest pick and holds a substituted p
   const posted: unknown[] = [];
   const preview = createStaffSetupPreview({
     folders: () => [first, second], pick: () => new Promise((resolve) => picks.push(resolve)),
-    libraryDir: library, post: (message) => { posted.push(message); }
+    libraryDir: library, post: (message) => { posted.push(message); }, startSection: async () => false
   });
   const open = (request: number) => preview.receive({ type: 'staff-preview-open', request });
   await preview.receive({ type: 'staff-preview-open', request: 1, root: second.root });
@@ -4061,7 +4200,7 @@ test('host: Staff setup preview scopes the latest pick and holds a substituted p
   picks[0](first);
   await stale;
   assert.equal(posted.length, 1);
-  assert.match(JSON.stringify(posted[0]), /Second project.*nato-ca.*Library logistics/);
+  assert.match(JSON.stringify(posted[0]), /Second project.*"legacySetup":true.*Library logistics/);
   assert.doesNotMatch(JSON.stringify(posted[0]), /First project|library-logistics\.md/);
   await open(2);
   assert.equal(picks.length, 2, 'the current request is accepted once');
@@ -4095,15 +4234,16 @@ test('host: Staff setup preview scopes the latest pick and holds a substituted p
 
 test('host: Staff setup admits only one current section handoff and invalidates it on a folder change', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'staff-preview-continue-'));
+  const primary = await mkdtemp(path.join(tmpdir(), 'staff-preview-primary-'));
   const posted: Array<{ request: number; session?: string }> = [];
   let pending: (() => void) | undefined;
-  const calls: Array<{ section: string; selection: { root: string; isCurrent(): boolean } }> = [];
+  const calls: Array<{ section: string; selection: { root: string; isCurrent(): boolean; isPrimary(): boolean } }> = [];
   const deps = {
-    folders: () => [{ root, name: 'Selected project' }],
-    pick: async () => undefined,
+    folders: () => [{ root: primary, name: 'Primary project' }, { root, name: 'Selected project' }],
+    pick: async () => ({ root, name: 'Selected project' }),
     libraryDir: path.join(root, 'library'),
     post: (message: { request: number; session?: string }) => { posted.push(message); },
-    startSection: async (section: string, selection: { root: string; isCurrent(): boolean }) => {
+    startSection: async (section: string, selection: { root: string; isCurrent(): boolean; isPrimary(): boolean }) => {
       calls.push({ section, selection });
       await new Promise<void>((resolve) => { pending = resolve; });
       return false;
@@ -4111,7 +4251,8 @@ test('host: Staff setup admits only one current section handoff and invalidates 
   };
   const preview = createStaffSetupPreview(deps);
   await preview.receive({ type: 'staff-preview-open', request: 1 });
-  const intent = { type: 'staff-preview-continue', request: 1, session: posted[0].session, section: 'j4' };
+  await preview.receive({ type: 'staff-preview-legacy', request: 1, session: posted[0].session });
+  const intent = { type: 'staff-preview-continue', request: 1, session: posted[1].session, section: 'j4' };
   await preview.receive({ ...intent, session: 'stale' });
   await preview.receive({ ...intent, section: 'j9' });
   await preview.receive({ ...intent, root });
@@ -4122,12 +4263,55 @@ test('host: Staff setup admits only one current section handoff and invalidates 
   assert.equal(calls[0].section, 'j4');
   assert.equal(calls[0].selection.root, await realpath(root));
   assert.equal(calls[0].selection.isCurrent(), true);
+  assert.equal(calls[0].selection.isPrimary(), false, 'the legacy handoff preserves the selected non-primary project');
   preview.invalidate();
   assert.equal(calls[0].selection.isCurrent(), false);
   pending!();
   await first;
   await preview.receive(intent);
   assert.equal(calls.length, 1);
+});
+
+test('host: each completed staff handoff offers a fresh nonce for the same physical project', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'staff-preview-reopen-'));
+  const root = path.join(base, 'project');
+  const projectFile = path.join(root, '.planning', '.near-ai', 'project.json');
+  await mkdir(path.dirname(projectFile), { recursive: true });
+  await writeFile(projectFile, JSON.stringify({ staff: { profile: 'us-joint', level: 'operational', teams: { j4: 'j4-us-joint-operational' } } }));
+  const posted: Array<{ request: number; session?: string; preview?: { session: string; project: string }; error?: string }> = [];
+  const calls: Array<{ section: string; root: string }> = [];
+  let substitute = false;
+  const preview = createStaffSetupPreview({
+    folders: () => [{ root, name: 'Selected project' }],
+    pick: async () => undefined,
+    libraryDir: path.join(base, 'library'),
+    post: (message) => { posted.push(message); },
+    startSection: async (section, project) => {
+      assert.equal(project.isCurrent(), true);
+      calls.push({ section, root: project.root });
+      if (substitute) {
+        await rename(root, path.join(base, 'original'));
+        await mkdir(root);
+      }
+      return true;
+    }
+  });
+  await preview.receive({ type: 'staff-preview-open', request: 1 });
+  await preview.receive({ type: 'staff-preview-legacy', request: 1, session: posted[0].session });
+  const first = { type: 'staff-preview-continue', request: 1, session: posted[1].session, section: 'j4' };
+  await preview.receive(first);
+  const reopened = posted.at(-1)!.preview;
+  assert.ok(reopened);
+  assert.equal(reopened.project, 'Selected project');
+  assert.notEqual(reopened.session, first.session);
+  await preview.receive({ ...first, section: 'j5' });
+  assert.deepEqual(calls, [{ section: 'j4', root: await realpath(root) }], 'a completed nonce cannot start another section');
+  substitute = true;
+  await preview.receive({ ...first, session: reopened.session, section: 'j5' });
+  assert.equal(calls.length, 2);
+  assert.equal(posted.at(-1)!.preview, undefined, 'a same-path replacement cannot receive another preview');
+  await preview.receive({ ...first, session: reopened.session });
+  assert.equal(calls.length, 2);
 });
 
 test('page: the "What should this team be able to produce?" box is not on the main page; it is New team > Create a new team > Describe it, and AI drafts it', async () => {
