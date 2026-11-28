@@ -109,8 +109,13 @@ create the container.
 The workbench opens the Sterling Get Started page for the Canadian Defence Edition, or the page of
 the work area you open. Get Started has **Set up Sterling**, **Open Chat** and **Explore a sample
 agent team**, which opens read-only Team Studio samples, and a card for each Defence work area:
-Capability Development, Exercises & Training, Planning and Resource Management. From the right
-sidebar you can open:
+Capability Development, Exercises & Training, Planning and Resource Management.
+
+Choose **Open local Resource Inventory** below the cards, or **SovAI: Resource Inventory** in the
+Command Palette. The view reads an existing `.planning/.near-ai/resource-inventory.snapshot.json`
+from the selected trusted local workspace folder.
+
+From the right sidebar you can open:
 
 - **Get Started**, **Portfolio**, **Team Studio**, **Agent Activity** and **Governance**;
 - **Chat**, which slides the chat drawer open and closed;
