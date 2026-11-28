@@ -1390,42 +1390,200 @@ test('managed clearance reduction commits decisions using the lead’s custom sc
   const lead = await founded('managed-clearance');
   lead.host.scales = { ...DEMO_SCALES, allied: { name: 'Allied', levels: ['LOW', 'HIGH'] } };
   lead.host.mappings = [{ from: { scale: 'allied', level: 'HIGH' }, covers: { scale: 'demo', level: 'SECRET' } }];
-  const clearance = { ...CLEARED_X, scale: 'allied', level: 'HIGH' };
+  const clearance = { ...CLEARED_X, scale: 'allied', level: 'HIGH', compartments: ['KESTREL', 'OSPREY'] };
   const downgraded = { ...clearance, level: 'LOW' };
-  const affected = await createCell(lead, LABEL_X, [lead.p.deviceWriter]);
-  const unaffected = await createCell(lead, LABEL_Z, [lead.p.deviceWriter]);
+  const reduced = await bringIn(lead, 'mapped-reduced', 'Nell Planner', clearance);
   const peer = await bringIn(lead, 'mapped-peer', 'Mo Analyst', clearance);
-  assert.ok(peer.p.keys.holds(affected, 1));
-  const { seed, receipts } = await seedManagedAccess(lead, [lead.p.projectId, affected, unaffected]);
+  const participants = [lead.p.deviceWriter, peer.writer, reduced.writer].sort();
+  const affected = [{ label: LABEL_X, id: '0'.repeat(32) }, { label: LABEL_Z, id: '1'.repeat(32) }];
+  for (const { label, id } of affected) await createCell(lead, label, participants, id);
+  const base = lead.p.projectId;
+  const { seed, receipts, commitment } = await seedManagedAccess(lead, [base, ...affected.map(({ id }) => id)], peer.writer);
   assert.ok('ok' in await lead.p.putGrants([], receipts));
-  const wrongPolicy = await updateMember({ project: lead.p, deps: lead.at.deps }, { member: peer.member, clearance: downgraded });
-  assert.equal(wrongPolicy.ok, false);
-  assert.equal((await head(lead.p)).hash, seed.hash);
-  const changed = await updateMember(lead.host, { member: peer.member, clearance: downgraded });
-  assert.equal(changed.ok, true, changed.message);
+  const initial = await head(lead.p);
+  const root = await stageManagedPredecessors(lead, peer, seed.hash);
+  assert.ok('ok' in await peer.p.ingestForeign([root], []));
+  const issuer = { authority: lead.p.deviceWriter, signer: lead.p.signer };
+  for (const { label, id } of affected) {
+    const opening = receipts.find(({ evidence }) => evidence.cell === id);
+    const founding = grantsOn(lead.at).find((signed) => grantHash(signed) === committedGrant(initial.roster.cells, id, 1));
+    assert.ok(opening && founding);
+    assert.ok(opening.evidence.grants.some(({ recipients }) => recipients.includes(reduced.writer)));
+    const delivery = sealManagedGrantDelivery(initial.roster, {
+      recipient: peer.writer, opening, grant: founding, pages: [], accessProof: commitment.proof(id, peer.writer),
+      info: { base: false, label }, now: NOW
+    }, issuer);
+    assert.ok(delivery);
+    assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(delivery));
+  }
 
-  const viewer = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
-  const current = await head(viewer);
-  assert.deepEqual(memberAt(current.roster.members, peer.member, current.position)?.clearance, downgraded);
-  const pending = current.roster.accessGrants.get(affected);
-  assert.equal(pending?.decision, 'pending');
-  assert.deepEqual(pending.evidence.excluded, [peer.writer]);
-  assert.match(pending.evidence.policy ?? '', /^[0-9a-f]{64}$/);
-  assert.equal(current.roster.accessGrants.get(unaffected)?.decision, 'continues');
-  const slot = deviceAt(current.roster.members, viewer.deviceWriter, current.position)?.slot;
+  const before = await head(peer.p);
+  assert.equal(before.hash, seed.hash);
+  assert.equal(peer.host.scales?.allied, undefined);
+  const slot = deviceAt(before.roster.members, peer.writer, before.position)?.slot;
   assert.ok(slot !== undefined);
   const data = { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
-  const paused = await viewer.appendOwn('doc.client', data, { stream: affected });
-  assert.equal(isProjectRefused(paused) && paused.refused, 'rekey-pending');
-  assert.ok('ok' in await viewer.appendOwn('doc.client', data, { stream: unaffected }));
-  const finished = await finishRekeys({ ...lead.host, project: viewer });
+  const writeControl = async (replica: ReplicaProject) => {
+    const written = await replica.appendOwn('doc.client', data, { stream: base });
+    assert.ok('ok' in written);
+    assert.equal(written.built.entry.header.epoch, 1);
+  };
+  const baseProof = commitment.proof(base, peer.writer);
+  assert.ok(baseProof);
+  assert.ok('ok' in await peer.p.putGrants([], [baseProof]));
+  await writeControl(peer.p);
+
+  type Baseline = { id: string; proof: NonNullable<ReturnType<typeof commitment.proof>>; key: Buffer; entries: [string, number][] };
+  const baselines: Baseline[] = [];
+  for (const { id } of affected) {
+    const proof = commitment.proof(id, peer.writer);
+    const key = peer.p.keys.epochKey(id, 1);
+    assert.ok(proof && key);
+    assert.equal(managedWriteAllowed(before.roster, id, 1, peer.writer, before.position, NOW, proof), true);
+    const written = await peer.p.appendOwn('doc.client', data, { stream: id });
+    assert.ok('ok' in written);
+    assert.equal(written.built.entry.header.epoch, 1);
+    baselines.push({ id, proof, key, entries: [[written.hash, 1]] });
+  }
+
+  const wrongPolicy = await updateMember({ project: lead.p, deps: lead.at.deps }, { member: reduced.member, clearance: downgraded });
+  assert.equal(wrongPolicy.ok, false);
+  assert.equal((await head(lead.p)).hash, seed.hash);
+  const changed = await updateMember(lead.host, { member: reduced.member, clearance: downgraded });
+  assert.equal(changed.ok, true, changed.message);
+  assert.deepEqual(changed.rekeyed, []);
+  const pending = await head(lead.p);
+  const pendingEntry = (await lead.p.entriesAfter(base, lead.p.deviceWriter, -1)).find(({ header }) => entryHash(header) === pending.hash);
+  const signedPending = verifyEntry(pendingEntry, lead.p.context());
+  assert.ok(signedPending.status === 'verified');
+  assert.equal(signedPending.entry.body.kind, 'member.update');
+  assert.equal(pending.roster.accessRevision?.entry, pending.hash);
+  assert.deepEqual(memberAt(pending.roster.members, reduced.member, pending.position)?.clearance, downgraded);
+  assert.ok(deviceAt(pending.roster.members, reduced.writer, pending.position));
+  for (const { id } of affected) {
+    const evidence = pending.roster.accessGrants.get(id);
+    assert.equal(evidence?.decision, 'pending');
+    assert.deepEqual(evidence.evidence.excluded, [reduced.writer]);
+    assert.match(evidence.evidence.policy ?? '', /^[0-9a-f]{64}$/);
+    assert.equal(epochAt(pending.roster.cells, id, pending.position), 1);
+  }
+  assert.equal(pending.roster.accessGrants.get(base)?.decision, 'continues');
+
+  const routeAt = async (sender: Lead, revision: string) => {
+    const { transport, reveal } = await managedPeerRoute(sender, peer, revision);
+    const route = transport.managedRoute;
+    assert.ok(route);
+    const continuity = await sender.p.sealManagedHandoff({ recipient: peer.writer, continuity: [base] });
+    assert.ok(continuity);
+    assert.equal(await route.put(continuity.handle, continuity.packet), true);
+    const offered = [continuity.handle];
+    const accepted: string[] = [];
+    const memory = hubMemoryOf(new MemorySecrets());
+    reveal();
+    return {
+      route, offered, accepted,
+      exchange: (replica: ReplicaProject) => syncOnce(transport, syncLocalOf(replica), memory, { now: () => NOW, managed: {
+        offers: async () => [],
+        pending: async () => offered.filter((handle) => !accepted.includes(handle)),
+        published: async () => { throw new Error('The retained replica has no outgoing handoff.'); },
+        accepted: async (handle) => { accepted.push(handle); }
+      } })
+    };
+  };
+  const assertHistory = async (replica: ReplicaProject, baseline: Baseline) => {
+    const entries = await replica.entriesAfter(baseline.id, peer.writer, -1);
+    assert.deepEqual(entries.map(({ header }) => [entryHash(header), header.epoch]), baseline.entries);
+  };
+  const assertPending = async (replica: ReplicaProject) => {
+    const at = await head(replica);
+    assert.equal(at.hash, pending.hash);
+    assert.deepEqual(memberAt(at.roster.members, reduced.member, at.position)?.clearance, downgraded);
+    assert.ok(deviceAt(at.roster.members, reduced.writer, at.position));
+    const evidenceDir = path.join(peer.at.root, REPLICA_DIR, 'access-evidence');
+    const priorProofs = readdirSync(evidenceDir).flatMap((name) => {
+      const stored: unknown = JSON.parse(readFileSync(path.join(evidenceDir, name), 'utf8'));
+      return storedAccessProofs(stored, seed.hash);
+    });
+    for (const baseline of baselines) {
+      const { id, key, proof } = baseline;
+      assert.equal(epochAt(at.roster.cells, id, at.position), 1);
+      assert.ok(replica.keys.epochKey(id, 1)?.equals(key));
+      assert.ok(priorProofs.some((candidate) => canonicalBytes(candidate).equals(canonicalBytes(proof))));
+      assert.equal(managedWriteAllowed(at.roster, id, 1, peer.writer, at.position, NOW, proof), false);
+      const contentBlob = sealBlob(key, id, 1, Buffer.from('fictional pending draft'));
+      const refused = await replica.appendOwn('doc.client', data, { stream: id, contentBlob });
+      assert.equal(isProjectRefused(refused) && refused.refused, 'rekey-pending');
+      assert.equal(existsSync(path.join(peer.at.root, REPLICA_DIR, 'blobs', contentBlob.hash)), false);
+      await assertHistory(replica, baseline);
+    }
+    await writeControl(replica);
+  };
+  const pendingRoute = await routeAt(lead, pending.hash);
+  assert.equal((await pendingRoute.exchange(peer.p)).managed, 'complete');
+  assert.deepEqual(pendingRoute.accepted, pendingRoute.offered);
+  await assertPending(peer.p);
+
+  const viewer = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+  const receiver = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  assert.equal((await head(viewer)).hash, pending.hash);
+  await assertPending(receiver);
+  const reopenedLead = { ...lead, p: viewer, host: { ...lead.host, project: viewer } };
+  const finished = await finishRekeys(reopenedLead.host);
   assert.equal(finished.ok, true, finished.message);
-  assert.deepEqual(finished.rekeyed, [affected]);
+  assert.deepEqual(finished.rekeyed, affected.map(({ id }) => id));
   const recovered = await head(viewer);
-  assert.equal(recovered.roster.accessGrants.get(affected)?.evidence.policy, pending.evidence.policy);
-  const expanded = await updateMember({ ...lead.host, project: viewer }, { member: peer.member, clearance });
+  for (const { id } of affected) {
+    const selected = recovered.roster.accessGrants.get(id);
+    const foundingHash = committedGrant(recovered.roster.cells, id, 2);
+    assert.ok(selected && foundingHash);
+    assert.equal(epochAt(recovered.roster.cells, id, recovered.position), 2);
+    assert.equal(selected.evidence.policy, pending.roster.accessGrants.get(id)?.evidence.policy);
+    assert.deepEqual(selected.evidence.grants.find(({ hash }) => hash === foundingHash)?.recipients,
+      [viewer.deviceWriter, peer.writer].sort());
+  }
+  assert.ok(deviceAt(recovered.roster.members, reduced.writer, recovered.position));
+  const expanded = await updateMember(reopenedLead.host, { member: reduced.member, clearance });
   assert.equal(expanded.reason, 'clearance-grants-pending');
   assert.equal((await head(viewer)).hash, recovered.hash);
+
+  const recoveryRoute = await routeAt(reopenedLead, recovered.hash);
+  const deliveries = [];
+  for (const { id, label } of affected) {
+    const delivery = await viewer.sealManagedHandoff({ cell: id, recipient: peer.writer, info: { base: false, label } });
+    assert.ok(delivery);
+    deliveries.push(delivery);
+    recoveryRoute.offered.push(delivery.handle);
+  }
+  const [first, second] = deliveries;
+  assert.equal(await recoveryRoute.route.put(first.handle, first.packet), true);
+  assert.equal((await recoveryRoute.exchange(receiver)).managed, 'waiting');
+  assert.equal((await head(receiver)).hash, recovered.hash);
+  const [firstCell, secondCell] = baselines;
+  const assertRecoveredWrite = async (replica: ReplicaProject, baseline: Baseline) => {
+    const { id, key, entries } = baseline;
+    const next = replica.keys.epochKey(id, 2);
+    assert.ok(next && !next.equals(key));
+    const write = await replica.appendOwn('doc.client', data, { stream: id });
+    assert.ok('ok' in write);
+    assert.equal(write.built.entry.header.epoch, 2);
+    entries.push([write.hash, 2]);
+    await assertHistory(replica, baseline);
+  };
+  await assertRecoveredWrite(receiver, firstCell);
+  const waiting = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  assert.equal((await head(waiting)).hash, recovered.hash);
+  assert.equal(waiting.keys.holds(secondCell.id, 2), false);
+  assert.ok(waiting.keys.epochKey(secondCell.id, 1)?.equals(secondCell.key));
+  const refused = await waiting.appendOwn('doc.client', data, { stream: secondCell.id });
+  assert.equal(isProjectRefused(refused) && refused.refused, 'no-key');
+  await assertHistory(waiting, secondCell);
+  await writeControl(waiting);
+
+  assert.equal(await recoveryRoute.route.put(second.handle, second.packet), true);
+  assert.equal((await recoveryRoute.exchange(waiting)).managed, 'complete');
+  assert.deepEqual(recoveryRoute.accepted.sort(), [...recoveryRoute.offered].sort());
+  for (const baseline of baselines) await assertRecoveredWrite(waiting, baseline);
+  await writeControl(waiting);
 });
 
 async function supplementalFixture() {
