@@ -4,19 +4,19 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 24
 status: executing
-stopped_at: Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked. Gate integration branch: Phase 33 (33.2-05, 33-14), 71-12, 70.1, 48-07/08, 44.1-02 to 08, 48.2 waves 1 to 5 and 48.2-16
-last_updated: "2026-11-25T12:34:16.032Z"
-state_head: 6c17e4d14812f20a4d762190d920924323e9158a
+stopped_at: PR #259 merged (Context Graph rail); v0.4.43 published. Next: velocity/flake cleanup PR, then Gate 2 integration PR (Phase 33/33.1/33.2, 44.1-09, 45.1/45.2, 48.3/48.4, 74.1)
+last_updated: "2026-11-28T17:36:00.000Z"
+state_head: 78bacd513
 progress:
   total_phases: 12
-  completed_phases: 1
+  completed_phases: 3
   total_plans: 109
   completed_plans: 70
-  percent: 8
-last_activity: 2026-11-19
-current_phase: 70
-current_phase_name: Capability vocabulary, manifests and one gate with a floor
-last_activity_desc: "Owner decisions on the data platform (2026-11-18); its milestone (Phases 85-101) adopted after Stage 1 and before the relay, which became its own milestone; milestone versions renumbered to start at 0.5; Phase 70 part 4e merged (#95)"
+  percent: 25
+last_activity: 2026-11-28
+current_phase: 71
+current_phase_name: Identities, credentials and delegation that only narrows
+last_activity_desc: "Release v0.4.43 published; PRs #209-#259 merged (including Standing Orders, Resource Inventory, Team Studio chooser, bilingual Canadian UI, Context Graph rail); Gate 2 integration ready for final verification and owner gate approval"
 ---
 
 # Project State

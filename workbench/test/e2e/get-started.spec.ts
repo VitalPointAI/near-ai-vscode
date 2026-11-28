@@ -3,6 +3,7 @@
 // show the bundled extension's pages in their webviews and a work-area page's Create button creates a work area and opens its page. Run
 // by test/container/get-started.test.ts against the image, opened at 127.0.0.1 as the owner opens it.
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { waitForGetStartedTab } from './wait-for-get-started';
 
 const railLabels = ['Get Started', 'Portfolio', 'Chat', 'Team Studio', 'Agent Activity', 'Standing Orders', 'Data Management', 'Context Graph', 'Model Factory',
   'Compliance', 'Documentation'];
@@ -13,8 +14,7 @@ const cards = [['Capability Development', 'capability-development'], ['Exercises
   ['Resource Management', 'resources']];
 
 async function openGetStarted(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+  await waitForGetStartedTab(page);
   await declineWorkspaceTrust(page);
 }
 

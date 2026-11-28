@@ -5,6 +5,7 @@
 import { renameSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { waitForGetStartedTab } from './wait-for-get-started';
 
 // A tall window: Theia fits its layout to the window, so the whole view is in one screenshot.
 test.use({ viewport: { width: 1440, height: 2000 } });
@@ -25,8 +26,7 @@ async function shot(page: Page, name: string): Promise<void> {
 
 /** Opens the workbench, answers the trust question in Restricted Mode, and opens the Compliance view from the rail. */
 async function openCompliance(page: Page): Promise<Locator> {
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
+  await waitForGetStartedTab(page);
   // Theia asks whether to trust the workspace; the person declines, so the session runs in Restricted Mode (D-05).
   await page.getByRole('button', { name: 'No, I don\'t trust the authors' }).click({ timeout: 60_000 });
   await page.getByRole('navigation', { name: 'Sterling shortcuts' }).getByRole('button', { name: 'Compliance', exact: true }).click();
