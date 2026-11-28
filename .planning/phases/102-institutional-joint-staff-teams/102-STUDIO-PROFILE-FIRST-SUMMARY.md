@@ -15,5 +15,5 @@ The tests-first run reproduced the absent profile chooser. The final exact archi
 
 ## Open conditions
 
-- The [profile-bound setup draft](102-STUDIO-PROFILE-BOUND-SETUP-DRAFT.md) requires the confined shared draft runtime and an approved dedicated administrative template before the exact confirmed create and reopen test. The inspected organizational profile and level are not written by this change.
+- G17 and G62: the [profile-bound setup draft](102-STUDIO-PROFILE-BOUND-SETUP-DRAFT.md) requires the confined shared draft runtime and an approved dedicated administrative template before the exact confirmed create and reopen test. The inspected organizational profile and level are not written by this change.
 - G17 and G62 remain open for production role authority, authorized sources and confinement. G561 remains open for qualified Canadian French copy review and broader parity.
