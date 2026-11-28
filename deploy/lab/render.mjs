@@ -9,6 +9,7 @@ import { IMAGE_LINE, checkRendered, metadataName } from '../bundle/lib/invariant
 import { UNPUBLISHED_DIGEST, readImagesLock, splitRef } from '../bundle/lib/locks.mjs';
 import { isEnabled, listReleases, loadSite, renderRelease, splitDocs } from '../bundle/lib/render.mjs';
 import { prepareRealm } from '../keycloak/apply.mjs';
+import { labStorageOverrides, labStorageSettings, readStoragePlan, verifyLabStorage } from './storage-plan.mjs';
 
 const LAB = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(LAB, '../..');
@@ -18,7 +19,7 @@ const REQUIRED = new Set([
   'sterling-keycloak-realm', 'theia-cloud-crds', 'theia-cloud-base', 'theia-cloud', 'sterling-sessions', 'sterling-hub',
 ]);
 const LAB_VALUES = new Set(['openbao', 'sterling-keycloak-realm', 'sterling-sessions', 'theia-cloud']);
-const USAGE = 'Usage: node deploy/lab/render.mjs --public-key <lab-public-key.pem>';
+const USAGE = 'Usage: node deploy/lab/render.mjs --public-key <lab-public-key.pem> [--storage-plan <budget.json>]';
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
 function readPublicKey(file) {
@@ -31,12 +32,13 @@ function readPublicKey(file) {
   }
 }
 
-function preview(publicKey) {
-  const settings = readJson(path.join(LAB, 'site.lab.yaml'));
-  if (settings.registryKind !== 'zot' || settings.storageProvider !== 'lab-static' || !Array.isArray(settings.hubs) || settings.hubs.length !== 1) {
+function preview(publicKey, storagePlan) {
+  const defaults = readJson(path.join(LAB, 'site.lab.yaml'));
+  if (defaults.registryKind !== 'zot' || defaults.storageProvider !== 'lab-static' || !Array.isArray(defaults.hubs) || defaults.hubs.length !== 1) {
     throw new Error('The lab-core preview requires Zot, lab-static storage and one hub.');
   }
 
+  const settings = storagePlan ? labStorageSettings(defaults, storagePlan) : defaults;
   const releases = listReleases(ROOT).filter(({ name }) => REQUIRED.has(name));
   const missing = [...REQUIRED].filter((name) => !releases.some((release) => release.name === name));
   if (missing.length) throw new Error(`Required lab releases are missing: ${missing.join(', ')}.`);
@@ -67,9 +69,10 @@ function preview(publicKey) {
     writeFileSync(siteFile, JSON.stringify({ ...settings, registry, organizationPublicKey: publicKey }), { mode: 0o600, flag: 'wx' });
     const site = loadSite(siteFile);
     const rendered = releases.map((release) => {
-      const yaml = renderRelease(ROOT, release, { site, siteDir: scratch });
+      const sets = storagePlan ? labStorageOverrides(release.name, storagePlan) : [];
+      const yaml = renderRelease(ROOT, release, { site, siteDir: scratch, sets });
       if (!splitDocs(yaml).length) throw new Error(`Required lab release ${release.name} rendered no resources.`);
-      return { name: release.name, yaml };
+      return { name: release.name, namespace: release.namespace, yaml };
     });
     const zotService = splitDocs(rendered.find(({ name }) => name === 'zot').yaml)
       .find((doc) => /^kind: Service$/m.test(doc) && metadataName(doc) === 'zot');
@@ -99,9 +102,12 @@ function preview(publicKey) {
       registry,
       releases: rendered.map(({ name }) => name),
       unpublishedImages: [...unpublishedImages].sort(),
+      ...(storagePlan ? { storage: verifyLabStorage(rendered, storagePlan, site) } : {}),
       unverified: [
         'Signed lab-only OpenBao image selection and import.',
-        'VM storage capacity. Zot and Postgres use production-sized example values in this preview.',
+        storagePlan
+          ? 'VM storage capacity and volume binding. Keep only one retained test workspace within this budget.'
+          : 'VM storage capacity. Zot and Postgres use production-sized example values in this preview.',
         'Live install and admission. This report confers no install authority.',
       ],
     };
@@ -113,14 +119,15 @@ function preview(publicKey) {
 const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === '--help') {
   console.log(USAGE);
-} else if (args.length !== 2 || args[0] !== '--public-key') {
+} else if (args[0] !== '--public-key' || (args.length !== 2 && !(args.length === 4 && args[2] === '--storage-plan'))) {
   console.error(USAGE);
   process.exitCode = 1;
 } else {
   let publicKey;
   try {
     publicKey = readPublicKey(args[1]);
-    console.log(JSON.stringify(preview(publicKey), null, 2));
+    const storagePlan = args.length === 4 ? readStoragePlan(args[3]) : undefined;
+    console.log(JSON.stringify(preview(publicKey, storagePlan), null, 2));
   } catch (error) {
     let message = error.message;
     for (const line of publicKey?.trim().split('\n') ?? []) message = message.replaceAll(line, '[public key omitted]');

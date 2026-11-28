@@ -15,6 +15,8 @@ import {
   inventorySizeLimit, inventoryStatuses, parseInventorySnapshot
 } from '../common/sterling-resource-inventory.js';
 import type { InventoryLinkRequest, InventoryRecord, InventorySnapshot } from '../common/sterling-resource-inventory.js';
+import { saveResourceCatalogue } from './sterling-resource-catalogue.js';
+import type { PresentedCatalogue } from './sterling-resource-catalogue.js';
 import './sterling-portfolio.css';
 import './sterling-resource-inventory.css';
 
@@ -30,6 +32,7 @@ interface Connection {
   root: URI;
   file: URI;
   etag?: string;
+  presentedCatalogue?: PresentedCatalogue;
   readTask?: Promise<void>;
 }
 
@@ -328,6 +331,7 @@ class SterlingResourceInventory extends BaseWidget {
     const fail = (text: string): void => {
       if (!current()) return;
       source.etag = undefined;
+      source.presentedCatalogue = undefined;
       this.setSnapshot(undefined);
       if (this.status.textContent !== text) this.status.textContent = text;
       this.status.classList.add('is-warning');
@@ -353,6 +357,7 @@ class SterlingResourceInventory extends BaseWidget {
       const snapshot = parseInventorySnapshot(content.value);
       if (!snapshot) { fail('The file does not contain a valid resource inventory snapshot.'); return; }
       source.etag = after.etag;
+      source.presentedCatalogue = snapshot.catalogueOnly ? content : undefined;
       this.setSnapshot(snapshot);
       this.status.textContent = snapshot.catalogueOnly
         ? 'Provisional public catalogue. DND verification is pending. Records represent equipment types.'
@@ -552,8 +557,8 @@ class SterlingResourceInventory extends BaseWidget {
 
   private async editCatalogue(record?: InventoryRecord, toggleArchive = false): Promise<void> {
     const source = this.connection;
-    const etag = source?.etag;
-    if (!source || !etag || !this.snapshot?.catalogueOnly || this.linkRequest || this.editingCatalogue) return;
+    const presented = source?.presentedCatalogue;
+    if (!source || !presented || !this.snapshot?.catalogueOnly || this.linkRequest || this.editingCatalogue) return;
     const current = () => this.trusted && this.connection === source && !this.linkRequest && !this.isDisposed;
     this.editingCatalogue = true;
     this.add.disabled = true;
@@ -569,28 +574,8 @@ class SterlingResourceInventory extends BaseWidget {
         updated = await new CatalogueRecordDialog(draft).open();
       }
       if (!updated || !current()) return;
-      const conflict = 'The catalogue changed. Refresh it before applying your edit again.';
-      if (!await this.hasRegularSnapshotParents(source)) throw new Error(conflict);
-      const before = await this.files.resolve(source.file, { resolveMetadata: true });
-      if (!current() || before.etag !== etag || !before.isFile || before.isSymbolicLink || before.size > inventorySizeLimit) {
-        throw new Error(conflict);
-      }
-      const content = await this.files.read(source.file, { limits: { size: inventorySizeLimit } });
-      const parsed = parseInventorySnapshot(content.value);
-      if (content.etag !== etag || !parsed?.catalogueOnly || !await this.hasRegularSnapshotParents(source)) throw new Error(conflict);
-
-      const raw = JSON.parse(content.value) as InventorySnapshot;
-      const index = record ? raw.resources.findIndex(entry => entry.id === record.id) : -1;
-      if (record && index < 0) throw new Error(conflict);
-      if (index < 0) raw.resources.push(updated);
-      else raw.resources[index] = { ...raw.resources[index], ...updated };
-      const output = JSON.stringify(raw, undefined, 2) + '\n';
-      if (!parseInventorySnapshot(output) || new TextEncoder().encode(output).length > inventorySizeLimit) {
-        throw new Error('The entry exceeds the catalogue limits. Shorten its fields or use a smaller snapshot.');
-      }
-      const latest = await this.files.resolve(source.file, { resolveMetadata: true });
-      if (!current() || latest.etag !== etag || !latest.isFile || latest.isSymbolicLink) throw new Error(conflict);
-      await this.files.write(source.file, output, { etag, mtime: before.mtime });
+      const parsed = await saveResourceCatalogue(this.files, source.file, presented,
+        () => this.hasRegularSnapshotParents(source), current, updated, record);
       if (!current()) return;
       this.selected = inventoryReference(parsed, updated);
       await this.read(false);
