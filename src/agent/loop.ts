@@ -21,10 +21,12 @@ import type { UnattendedScope } from './unattended';
 import { truncate } from './shell';
 import { describeWeakened, isTestFile, weakenedTests } from './testIntegrity';
 import { coversOnlyThisCommand, exactRuleFor, riskSentence } from '../domain/approvalRisk';
-import type { AgentTool, SecurityEvent, Todo, ToolContext, ToolPreview } from './tools';
+import { bindFixtureGate, type AgentTool, type SecurityEvent, type Todo, type ToolContext, type ToolPreview } from './tools';
 import { resolveInWorkspace, ToolError } from './workspace';
 import { isScratchPath } from '../domain/scratch';
 import { ModelSwitchCause, SWITCH_AFTER_MS, SWITCH_AFTER_STALLS, switchReason } from './modelFallback';
+
+const FIXTURE_GATE_STALE = 'The fixture gate no longer covers this call.';
 
 /** The kinds of risk whose card never offers "always allow", because the docs promise those always ask (0.4.17). */
 const ALWAYS_ASKS_KINDS: ReadonlySet<string> = new Set(['credentials', 'destructive', 'leaves-machine']);
@@ -705,11 +707,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);
     };
     const context: ToolContext = {
-      ...this.options.context, signal, onTodos: (todos) => this.options.emit({ type: 'todos', todos }),
+      ...this.options.context, signal, verifyFixtureGate: undefined, onTodos: (todos) => this.options.emit({ type: 'todos', todos }),
       tainted: () => this.grants.tainted,
       onSecurity: (event) => this.options.emit({ type: 'security', tool: call.function.name, ...event })
     };
     let input: unknown;
+    let fixtureGate: ReturnType<typeof bindFixtureGate> | undefined;
     let title = tool.name;
     let raw: Record<string, unknown> = {};
     try {
@@ -717,6 +720,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (!parsedArguments || typeof parsedArguments !== 'object' || Array.isArray(parsedArguments)) throw new ToolError('Arguments must be a JSON object.');
       raw = parsedArguments as Record<string, unknown>;
       input = tool.parse(raw);
+      if (tool.fixtureGate) fixtureGate = bindFixtureGate(this.gate, () => this.options.policy, tool.fixtureGate(input), context);
       title = tool.title(input, context);
     } catch (error) {
       const message = error instanceof SyntaxError ? `Arguments are not valid JSON: ${error.message}` : (error as Error).message;
@@ -741,7 +745,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const gateInput = (): Parameters<typeof gateToolCall>[1] => ({
       tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }), ...(floorShell === undefined ? {} : { shell: floorShell }),
       ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}), ...(readsCredential ? { readsCredential } : {}),
-      policy: this.options.policy, rules: this.options.rules, grants: this.grants,
+      policy: this.options.policy, rules: this.options.rules, grants: this.grants, ...(fixtureGate ? { fixtureGate } : {}),
       ...(context.readOnlyRoots === undefined || context.readOnlyRoots.length === 0 ? {} : { readOnlyRoots: context.readOnlyRoots }),
       // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
       buildAuto: async (effective) => {
@@ -822,6 +826,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         ...(decision.floor && gateCall.callKey !== undefined ? { floor: { callKey: gateCall.callKey } } : {}),
         ...(decision.allowGrant && command !== undefined && command.trim() ? { grant: { command: command.trim() } } : decision.allowGrant && tool.capability === 'workspaceWrite' ? { grant: { edits: true } } : {})
       };
+      if (fixtureGate && (signal.aborted || !fixtureGate.current())) return this.finish(call.id, false, FIXTURE_GATE_STALE);
       const reply = await this.options.requestApproval(card);
       // The card only carried the question: the answer goes back into the gate, which records it against this call and, for an allow, asks the layers that
       // outrank the person again (emergency stop, bundle state, the floor's refusals, the ceiling) before anything runs (D-09).
@@ -845,6 +850,16 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       }
     }
     // The call runs: from now on this run has read a file that may hold credentials, and what can send data off this computer asks (D-18).
+    if (fixtureGate) {
+      const root = gateCall.request.workspace?.root;
+      const binding = gateCall.fixtureGate;
+      if (binding !== fixtureGate || context.root !== root || gateCall.request.tool !== tool.name ||
+          gateCall.request.callId !== call.id || signal.aborted || !binding.current()) return this.finish(call.id, false, FIXTURE_GATE_STALE);
+      const verify: NonNullable<ToolContext['verifyFixtureGate']> = (candidate, path) => context.verifyFixtureGate === verify &&
+        !signal.aborted && context.root === root && candidate === input && binding.permits(gateCall.effects) &&
+        (binding.effect.verb === 'plan' ? path === undefined : binding.effect.path === path) && binding.current();
+      context.verifyFixtureGate = verify;
+    }
     const credentialFile = readsCredential ?? gateCall.readsCredential;
     if (credentialFile !== undefined) this.grants.noteCredentialRead(credentialFile);
     // The same hook raises the chat's mark by the labels of what the call reads, before it runs, so a read that fails or is cancelled still counts (D-54).
@@ -891,6 +906,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);
     } finally {
       read.settle(undefined);
+      context.verifyFixtureGate = undefined;
     }
   }
 

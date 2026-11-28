@@ -361,7 +361,9 @@ test('a machine without the founding grant of the current epoch does not know wh
   assert.equal(openLabel(key, CELL_Y, 1, sealed), undefined);
   assert.equal(openLabel(key, CELL_X, 2, sealed), undefined);
   assert.equal(openLabel(key, CELL_X, 1, ''), undefined);
-  assert.equal(openLabel(key, CELL_X, 1, `${sealed.slice(0, -2)}AA`), undefined);
+  const changedSeal = Buffer.from(sealed, 'base64url');
+  changedSeal[changedSeal.length - 1] ^= 1;
+  assert.equal(openLabel(key, CELL_X, 1, changedSeal.toString('base64url')), undefined);
   assert.equal(openLabel(key, CELL_X, 1, 'not base64url!'), undefined);
   // The sealed form is not the label in clear, and two seals of one label differ (a fresh iv each time).
   assert.ok(!Buffer.from(sealed, 'base64url').toString('utf8').includes('KESTREL'));

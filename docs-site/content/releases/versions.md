@@ -28,4 +28,4 @@ extension package (VSIX), its checksum and the assessor package. Version 0.4.37'
 registry, but the release stopped after the push, so 0.4.37 has no GitHub release.
 
 How to install the extension package or run the image is in [Getting started](../using/getting-started.md).
-How a release is built is in the [Architecture overview](../architecture/overview.md#how-a-release-is-shipped).
+How a release is built is in the [Architecture overview](../architecture/overview.mdx#how-a-release-is-shipped).

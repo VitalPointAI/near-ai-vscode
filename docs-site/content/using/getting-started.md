@@ -9,6 +9,9 @@ The **Sterling workbench** runs on your computer in a container. Open it in your
 The release image includes Eclipse Theia and the SovAI extension. The release build uses the VSIX
 to bundle the extension into the image, so workstation setup requires only the container image.
 
+See [Recommended hardware and configuration](./deployment-hardware.md) to choose a workstation,
+hub, or site setup.
+
 ## Run the Sterling workbench image
 
 The image is a **local preview** for one person on one computer. It has no sign-in of its own and
@@ -123,7 +126,7 @@ Profiles that need a saved API key cannot finish setup here. The planned hosted 
 your organization's secret store.
 
 Hosting the workbench for many people, with sign-in, at your organization's own sites is planned
-and not yet released. See [Hosting for many people](../architecture/overview.md#hosting-for-many-people-planned-not-yet-released).
+and not yet released. See [Hosting for many people](../architecture/overview.mdx#hosting-for-many-people-planned-not-yet-released).
 
 ## Optional hub for shared staff projects
 
