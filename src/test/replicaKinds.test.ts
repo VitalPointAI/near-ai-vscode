@@ -64,7 +64,8 @@ const PROJECT_AND_ROSTER: Sample[] = [
   { kind: 'deputy.name', data: { member: 'mbr-deputy', rosterPrev: PREV }, required: ['member', 'rosterPrev'] },
   { kind: 'invite.void', data: { invite: 'inv-1', rosterPrev: PREV }, required: ['invite', 'rosterPrev'] },
   { kind: 'roster.require', data: { features: ['positions@1', 'require@1'], rosterPrev: PREV }, required: ['features', 'rosterPrev'] },
-  { kind: 'hub.readmit', data: { hub: 'hub-main', certPin: HASH('9'), fromCheckpoint: HASH('a'), rosterPrev: PREV }, required: ['hub', 'certPin', 'rosterPrev'] }
+  { kind: 'hub.readmit', data: { hub: 'hub-main', certPin: HASH('9'), fromCheckpoint: HASH('a'), rosterPrev: PREV }, required: ['hub', 'certPin', 'rosterPrev'] },
+  { kind: 'cell.access.commit', data: { accessRevision: HASH('b'), accessRoot: HASH('c'), rosterPrev: PREV }, required: ['accessRevision', 'accessRoot', 'rosterPrev'] }
 ];
 
 // The roster kinds Phase 33.1 adds, routed to the positions module.
@@ -78,8 +79,8 @@ function reasonOf(kind: string, data: unknown): string {
 
 // ---- project and roster schemas ----
 
-test('one valid sample per project and roster kind (22 kinds) passes, and a missing field, an extra field and a __proto__ key each fail with a reason naming the path', () => {
-  assert.equal(PROJECT_AND_ROSTER.length, 22, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
+test('one valid sample per project and roster kind (23 kinds) passes, and a missing field, an extra field and a __proto__ key each fail with a reason naming the path', () => {
+  assert.equal(PROJECT_AND_ROSTER.length, 23, 'roster.require (POST-01), hub.readmit (D-42), Phase 33; cell.access.commit');
   for (const sample of PROJECT_AND_ROSTER) {
     assert.deepEqual(validateData(sample.kind, sample.data), { ok: true }, sample.kind);
     for (const key of sample.required) {
@@ -94,9 +95,9 @@ test('one valid sample per project and roster kind (22 kinds) passes, and a miss
   }
 });
 
-test('every one of the 20 roster kinds requires rosterPrev as a 64-hex hash (DESIGN 7.1)', () => {
+test('every one of the 21 roster kinds requires rosterPrev as a 64-hex hash (DESIGN 7.1)', () => {
   const roster = PROJECT_AND_ROSTER.filter((sample) => !sample.kind.startsWith('project.'));
-  assert.equal(roster.length, 20, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
+  assert.equal(roster.length, 21, 'roster.require (POST-01), hub.readmit (D-42), Phase 33; cell.access.commit');
   for (const sample of roster) {
     assert.ok(sample.required.includes('rosterPrev'), sample.kind);
     for (const bad of ['1'.repeat(63), '1'.repeat(65), 'G'.repeat(64), 5, null, '', HASH('A')]) {
@@ -560,13 +561,13 @@ test('roster entries are kept folded-in-later-phase and change no state, yet sta
   assert.deepEqual(keptOnly.families, baseline.families);
 });
 
-test('the closed kind list has 71 kinds and the 22 project and roster samples are all of them', () => {
-  assert.equal(REPLICA_KINDS.length, 71, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1');
-  assert.equal(new Set(REPLICA_KINDS).size, 71, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1');
+test('the closed kind list has 72 kinds and the 23 project and roster samples are all of them', () => {
+  assert.equal(REPLICA_KINDS.length, 72, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1; cell.access.commit');
+  assert.equal(new Set(REPLICA_KINDS).size, 72, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1; cell.access.commit');
   // device.kem is the device family's (33.2 D-03), not a roster kind, though its name starts with device. Phase 33.1's roster kinds have their
   // samples in replicaPositionSchemas.test.ts.
   const owned = REPLICA_KINDS.filter((kind) => kind !== 'device.kem' && !ROSTER_KIND_OWNER_33_1.has(kind) && (kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind)));
-  assert.equal(owned.length, 22, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
+  assert.equal(owned.length, 23, 'roster.require (POST-01), hub.readmit (D-42), Phase 33; cell.access.commit');
   assert.deepEqual([...owned].sort(), PROJECT_AND_ROSTER.map((sample) => sample.kind).sort());
 });
 

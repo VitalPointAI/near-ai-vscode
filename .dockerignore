@@ -102,6 +102,8 @@
 !src/domain/replica/rosterMembers.ts
 !src/domain/replica/rosterPositions.ts
 !src/domain/replica/rosterView.ts
+!src/domain/replica/rotationGrants.ts
+!src/domain/replica/rotationProof.ts
 !src/domain/replica/safetyCode.ts
 !src/domain/replica/safetyWords.ts
 !src/domain/replica/sessionKeys.ts

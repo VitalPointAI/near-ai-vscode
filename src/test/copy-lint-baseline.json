@@ -242,7 +242,7 @@
   "src/staff/replica/singleCopy.ts": {
     "mode-word": 1
   },
-  "src/staff/replica/store.ts": {
+  "src/staff/replica/storeFiles.ts": {
     "mode-word": 1
   },
   "src/team/gitTransport.ts": {
