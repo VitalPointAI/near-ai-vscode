@@ -3,18 +3,29 @@
 // stays small. No vscode import and no network call: everything here is read from memory.
 import { isNearCloudEndpoint } from '../domain/config';
 import { ConnectionNotBoundError, NEAR_TLS_FINGERPRINT_KIND, pinnedFetch } from './connectionBinding';
-import { TIER_ORDER } from '../domain/gate/routing';
+import { TIER_ORDER, decideRoute } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RoutingTier } from '../domain/gate/routing';
 import { trustFactsFor } from '../domain/gate/trust';
 import type { TrustContext, TrustFacts } from '../domain/gate/trust';
 import type { ModelInfo } from '../domain/provider/messages';
+import type { UseTier } from '../domain/gate/models';
+import { useTierFor } from '../domain/gate/useTier';
+import type { UseInput } from '../domain/gate/useTier';
+import { currentSessionRoute, defaultSessionRoute, passportTriggeredRecordFor, raiseSessionUse, routingOf } from '../gate/sessionMark';
+import type { SessionRoute } from '../gate/sessionMark';
+import { JOB_MINIMUM_TIER, resolvePassport } from '../domain/gate/models';
+import type { ModelJob } from '../domain/gate/models';
+import { SHIPPED_REPORT_MODELS } from '../domain/gate/passportStep';
+import { passportState } from '../domain/gate/passportState';
+import type { ObservedPlace } from '../domain/gate/passportState';
+import { passportTriggerLog } from '../gate/passportTriggers';
 
 /** What the client knows about one content request when its route is decided. */
 export interface RouteFactsInput {
   readonly clientRoute: RouteFacts['clientRoute'];
   readonly host: string;
   /** The model's entry in the client's own cached catalog; undefined when the model is unknown or the catalog has not loaded. */
-  readonly info: Pick<ModelInfo, 'id' | 'privacyBoundary'> | undefined;
+  readonly info: Pick<ModelInfo, 'id' | 'privacyBoundary' | 'forwardedTo'> | undefined;
   /** The answer-check state of the route: failed, unproven or ok. */
   readonly attestation: 'ok' | 'failed' | 'unproven';
   readonly fact: ConnectionBindingFact;
@@ -23,12 +34,69 @@ export interface RouteFactsInput {
   readonly sessionless: boolean;
   /** Team Mode's allowed models, from the floor (D-37); absent is no filter. */
   readonly allowedModels?: readonly string[];
+  /** The client's cached catalogue, so a passport refusal can name the models that would go instead (74.1 D-14). */
+  readonly catalog?: { values(): Iterable<Pick<ModelInfo, 'id' | 'privacyBoundary'>> };
 }
 
-/** The RouteFacts of one request, from what the client read (CLAS-06, D-36). */
+/**
+ * The use of the request running now (74.1 D-13): from the current session route's own facts and its mark, by the shipped tables, never below the highest
+ * use the route has asked for (which it then raises). Outside every route it is chat you review, as before. Facts that cannot be read give the highest
+ * use for this request, never a lower one (fail closed).
+ */
+function requestUse(): { readonly use: UseTier; readonly useInput?: UseInput } {
+  const route = currentSessionRoute();
+  if (route === undefined) return { use: 'T1' };
+  let useInput: UseInput;
+  try {
+    const own = route.useOf?.() ?? {};
+    const mark = route.markOf().map((label) => ({ scale: label.scale, level: label.level }));
+    useInput = { ...own, mark: [...(own.mark ?? []), ...mark] };
+  } catch {
+    return { use: 'T3' };
+  }
+  return { use: raiseSessionUse(route, useTierFor(useInput)), useInput };
+}
+
+/**
+ * What was observed about the passport of the request's model (74.1 D-15): the place first seen for its hash and the place now (the catalogue's
+ * `privacyBoundary` and `forwardedTo`), and the triggers fired for it. A trigger the place fires now is kept once in the trigger log and recorded once as
+ * `route.passport-triggered` through the route's sink. Only with a route policy (step 7 runs only then) and the log set at activation; anything that cannot
+ * be read leaves nothing observed, so the passport decides alone (never more than it would).
+ */
+function observedFor(input: RouteFactsInput): Pick<RouteFacts, 'observed'> {
+  const log = passportTriggerLog();
+  const info = input.info;
+  if (log === undefined || info === undefined) return {};
+  try {
+    const route = currentSessionRoute() ?? defaultSessionRoute();
+    const policy = route.routePolicy?.(input.now);
+    if (policy === undefined) return {};
+    const resolved = resolvePassport(policy.models ?? SHIPPED_REPORT_MODELS, info.id, input.now);
+    if (resolved === undefined) return {};
+    // A catalogue that has not said where the model runs (its privacy list not loaded) says nothing about a change of place: nothing is kept or compared.
+    const current: ObservedPlace | undefined = info.privacyBoundary === undefined ? undefined : { privacyBoundary: info.privacyBoundary, ...(info.forwardedTo === undefined ? {} : { forwardedTo: info.forwardedTo }) };
+    const place = current === undefined ? {} : { firstSeen: log.seen(resolved.hash, current), current };
+    const state = passportState(resolved, { ...place, fired: log.fired(resolved.hash) }, input.now);
+    if (state.state === 'expired' && state.reason !== 'date' && log.fire(resolved.hash, state.reason)) {
+      const provider = input.clientRoute === 'local' ? 'local' : input.clientRoute === 'near' ? 'near-ai' : 'unknown';
+      try {
+        route.sink?.record(passportTriggeredRecordFor(route, {
+          model: info.id, provider, ...(info.privacyBoundary === undefined ? {} : { privacyBoundary: info.privacyBoundary }),
+          passport: { id: resolved.passport.id, hash: resolved.hash }, trigger: state.reason
+        }));
+      } catch { /* D-21: a record that cannot be kept never changes the request */ }
+    }
+    return { observed: Object.freeze({ passportHash: resolved.hash, ...place, fired: log.fired(resolved.hash) }) };
+  } catch {
+    return {};
+  }
+}
+
+/** The RouteFacts of one request, from what the client read (CLAS-06, D-36), and the use of the session it runs in (74.1 D-13). */
 export function routeFactsFor(input: RouteFactsInput): RouteFacts {
   const { clientRoute, host, info, attestation, fact, now } = input;
   const facts: RouteFacts = {
+    ...requestUse(),
     clientRoute,
     host,
     nearEndpoint: isNearCloudEndpoint(host),
@@ -39,7 +107,9 @@ export function routeFactsFor(input: RouteFactsInput): RouteFacts {
     now,
     localModelAvailable: input.localModelAvailable,
     sessionless: input.sessionless,
-    ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels })
+    ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels }),
+    ...observedFor(input),
+    ...(input.catalog === undefined ? {} : { candidates: Object.freeze([...input.catalog.values()].map((entry) => Object.freeze({ id: entry.id, ...(entry.privacyBoundary === undefined ? {} : { privacyBoundary: entry.privacyBoundary }) }))) })
   };
   return facts;
 }
@@ -55,6 +125,46 @@ export function requestTrust(decision: RouteDecision, facts: RouteFacts, context
   } catch {
     return {};
   }
+}
+
+// ---- The gate's preview of a job's model (74.1 D-18, D-19) ----
+/** Where a run's requests go, for the preview: the run's route (its policy and mark), the client's kind and host, and the floor. */
+export interface GateAllowsInput {
+  readonly route: SessionRoute;
+  readonly catalog: ReadonlyArray<{ readonly id: string; readonly privacyBoundary?: string }>;
+  readonly clientRoute: 'near' | 'local' | undefined;
+  readonly host: string;
+  readonly floor?: RoutingTier;
+  readonly now?: number;
+}
+
+/**
+ * Whether the gate would let a model do a job now (74.1 D-18, D-19): decideRoute itself, at the job's minimum use (the safety job as a checking job), with
+ * the run's mark, routing and policy. A preview: it records nothing, raises no session's use and keeps no trigger. The connection's proof is not known
+ * here, so a refusal only for an unproven connection previews as allowed: the request itself decides that one before anything is sent. Anything that
+ * cannot be read previews as refused.
+ */
+export function gateAllows(input: GateAllowsInput): (modelId: string, job: ModelJob) => boolean {
+  return (modelId, job) => {
+    try {
+      const now = input.now ?? Date.now();
+      const entry = input.catalog.find((candidate) => candidate.id === modelId);
+      if (entry === undefined) return false;
+      const { routing, defaultLabel } = routingOf(input.route);
+      const mark = input.route.markOf();
+      const own = input.route.useOf?.() ?? {};
+      const facts: RouteFacts = {
+        clientRoute: input.clientRoute, host: input.host, nearEndpoint: isNearCloudEndpoint(input.host),
+        model: { id: entry.id, ...(entry.privacyBoundary === undefined ? {} : { privacyBoundary: entry.privacyBoundary }) },
+        attestationFailed: input.route.attestation.failed, binding: { state: 'unknown', host: input.host }, now, localModelAvailable: input.clientRoute === 'local',
+        use: JOB_MINIMUM_TIER[job], useInput: { ...own, mark: [...(own.mark ?? []), ...mark.map((label) => ({ scale: label.scale, level: label.level }))], ...(job === 'safety' ? { checkingJob: true } : {}) }
+      };
+      const decision = decideRoute(mark, routing, facts, defaultLabel, input.floor, input.route.routePolicy?.(now));
+      return decision.allowed || decision.rule === 'route.connection-not-bound';
+    } catch {
+      return false;
+    }
+  };
 }
 
 // ---- A connection held to your organization's pins (D-26) ----

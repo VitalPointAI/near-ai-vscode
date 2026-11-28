@@ -208,7 +208,8 @@
     $('run-section').hidden = false;
     const label = payload.engagement.target.kind + ': ' + payload.engagement.target.value;
     status('Engagement ' + payload.engagement.id + ' created for ' + label + '.');
-    if (payload.model) $('model').value = payload.model;
+    // 74.1-10: no fallback model. With none set, the first option asks the person to choose, and Run waits for a choice.
+    $('model').value = payload.model || '';
     // The host names the model this scan runs on and, when it applies, why (owner decision 2026-11-05: a scan runs on an
     // abliterated model, chosen for it when more than one is offered, and the panel says so when none is).
     const note = $('model-note');
@@ -216,21 +217,40 @@
       note.textContent = payload.modelNote || '';
       note.hidden = !payload.modelNote;
     }
+    syncRun();
   }
 
-  function renderModels(models, defaultModel) {
+  function renderModels(models, chooseText) {
     const select = $('model');
     clear(select);
+    state.chooseText = chooseText || '';
+    const choose = el('option', undefined, state.chooseText);
+    choose.value = '';
+    choose.disabled = true;
+    choose.selected = true;
+    select.appendChild(choose);
     for (const model of models) {
       const option = el('option', undefined, model);
       option.value = model;
-      if (model === defaultModel) option.selected = true;
       select.appendChild(option);
     }
     select.addEventListener('change', () => {
-      if (!state.engagement) return;
+      syncRun();
+      if (!state.engagement || !select.value) return;
       post({ type: 'select-model', engagementId: state.engagement.id, model: select.value });
     });
+  }
+
+  // Run is offered only once a model is chosen; the sentence under the model list says why it waits (74.1-UI-SPEC S2).
+  function syncRun() {
+    const chosen = Boolean($('model').value);
+    const run = $('run');
+    if ($('stop').disabled) run.disabled = !chosen;
+    const note = $('model-note');
+    if (!chosen && !note.textContent) note.textContent = state.chooseText || '';
+    else if (chosen && note.textContent === state.chooseText) note.textContent = '';
+    note.hidden = !note.textContent;
+    run.setAttribute('aria-describedby', 'model-note');
   }
 
   // ---- run controls ----
@@ -440,7 +460,7 @@
       case 'disclaimer': renderDisclaimer(message.prompt); break;
       case 'engagement': renderEngagement(message); renderExport(''); break;
       case 'declined': status('Disclaimer declined. Nothing was created and the target is untouched.'); break;
-      case 'models': renderModels(message.models || [], message.defaultModel); break;
+      case 'models': renderModels(message.models || [], message.chooseText); break;
       case 'tools':
         renderTools(message);
         // Proof of what the host sent: a stale webview shows no banner and old markup.

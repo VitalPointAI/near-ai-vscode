@@ -2,10 +2,11 @@
 // its entries, and its fold output holds nothing from the cell; and an entry in a lower cell that cites a higher cell is refused write-down when the
 // context supplies the cell order. Builders beyond the shared roster world live in this file (the helper is not edited in wave 6).
 import assert from 'node:assert/strict';
+import { WRAP_SECURITY_SENTENCES } from '../domain/replica/wrapFormat';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { REKEY_KEEP_TEXT, buildGrant, grantHash, sealLabel, wrapEpochKey } from '../domain/replica/cellKeys';
+import { buildGrant, grantHash, sealLabel, wrapEpochKey } from '../domain/replica/cellKeys';
 import type { CellGrant } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { createLocalDoc, localInsert } from '../domain/replica/doc';
@@ -187,7 +188,7 @@ test('incremental and from-scratch folds agree on the write-down cases, in every
   }
 });
 
-test('SECURITY.md has the cell keys subsection once, inside the multi-user section, with the rekey sentence and no em-dash', () => {
+test('SECURITY.md has the cell keys subsection once, inside the multi-user section, with the precise verified and pending key boundaries and no em-dash', () => {
   const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
   const heading = '### Cell keys, wraps and rekey';
   assert.equal(text.split('\n').filter((line) => line === heading).length, 1);
@@ -195,8 +196,26 @@ test('SECURITY.md has the cell keys subsection once, inside the multi-user secti
   const section = text.slice(start, text.indexOf('\n## ', start + 1));
   assert.ok(section.includes(heading));
   const subsection = section.slice(section.indexOf(heading));
-  // The sentence a person is shown wraps across lines in the document, so compare with the line breaks folded.
-  assert.ok(subsection.replace(/\s+/g, ' ').includes(REKEY_KEEP_TEXT));
+  const terms = subsection.replace(/\s+/g, ' ');
+  assert.ok(terms.includes('After a verified rotation, an affected cell has a new key wrapped to devices that still have access.'));
+  assert.ok(terms.includes('A device that lost access keeps what it received under the old key.'));
+  assert.ok(terms.includes('This computer pauses ordinary writes when it verifies that a revoked device received the current key.'));
+  assert.ok(terms.includes('Roster recovery remains available.'));
+  assert.ok(terms.includes('A computer can still write under an old key while it is waiting for an earlier grant that would show the revoked device held it (G552),'));
+  assert.ok(terms.includes('or while rotation after a clearance reduction is pending (G551).'));
   for (const phrase of ['X25519', 'HKDF-SHA256', 'AES-256-GCM', 'signed', 'earlier epochs', 'write up, never down']) assert.ok(subsection.toLowerCase().includes(phrase.toLowerCase()), phrase);
   assert.doesNotMatch(text, /\u2014/);
+});
+
+test('SECURITY.md has "How cell keys are wrapped" once, inside the multi-user section, with every sentence of WRAP_SECURITY_SENTENCES word for word (33.2 D-11)', () => {
+  const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
+  const heading = '### How cell keys are wrapped';
+  assert.equal(text.split('\n').filter((line) => line === heading).length, 1);
+  const start = text.indexOf('## Multi-user staff projects (preview)');
+  const section = text.slice(start, text.indexOf('\n## ', start + 1));
+  assert.ok(section.includes(heading));
+  const after = section.slice(section.indexOf(heading) + heading.length);
+  const subsection = after.slice(0, after.indexOf('\n### ')).replace(/\s+/g, ' ');
+  for (const sentence of WRAP_SECURITY_SENTENCES) assert.ok(subsection.includes(sentence), sentence);
+  for (const phrase of ['ML-KEM-768', 'P-256', 'HKDF-SHA256', 'AES-256-GCM', 'ITSP.40.111']) assert.ok(subsection.includes(phrase), phrase);
 });

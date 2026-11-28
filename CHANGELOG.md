@@ -4,6 +4,32 @@
 
 - Standing Orders is the new name for the policy editor, its Command Palette entries, and its Workbench and status bar shortcuts. The French Workbench shortcut reads **Ordres permanents**.
 
+### Which models may do what
+
+- **Models are approved for a use.** Every model request is checked against an approval for its
+  use (research only, chat you review, agent work or operational work) before anything is sent.
+  The model picker shows each model's origin, family and "Approved for {use} until {date}" or
+  "Research only". When your organization's model policy is set to enforce, a model without an
+  approval for the use is refused with the reason, the models that would pass and who to ask, and
+  every use above research needs your organization's evaluation of the model.
+- **Report only until your organization enforces.** Without your organization's model policy, or
+  with it set to report, the same requests are sent and recorded, and a notice that cannot be
+  closed says "Agent work is running outside your organization's model policy (report only)."
+  On a computer with only your own rules it offers **Adopt the Western defaults**.
+- **The research workspace.** **SovAI: Open Research Workspace** is the one place where models
+  approved for research only, including adversary models, are used on purpose: no project files,
+  no commands and no tools. The cybersecurity panel and Compare Models' evaluations run there too.
+- **Exceptions under your organization's rules.** A named person can ask to allow a research-only
+  model for chat you review, for at most 90 days; once your organization's rules carry it, the
+  trust line reads "Allowed for chat you review by {name} until {date}". An exception signed only
+  on this computer allows nothing.
+- **Western defaults.** The models for each job now default to Nemotron 3, Command A+ and gpt-oss,
+  with IBM Granite and Granite Guardian for small and checking jobs. A model you set yourself is
+  kept. Checks of a model's work run on a model of another family, or a person decides.
+- **Export AI Bill of Materials.** **SovAI: Export AI Bill of Materials** writes a CycloneDX 1.6
+  list of every model a project used, with its licence, lineage and approval, to
+  `.near-ai/state/ai-bom.cdx.json`.
+
 ## 0.4.43
 
 This Workbench release adds offline documentation and extends Canadian English and French support.

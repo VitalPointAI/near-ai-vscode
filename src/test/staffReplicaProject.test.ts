@@ -26,6 +26,8 @@ import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replic
 import { DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 import { fixedSigner, updateData } from './helpers/replicaWorld';
 import { buildEntry } from '../domain/replica/entry';
+import { buildGrantPages, wrapsFor } from '../domain/replica/grantPages';
+import { formatFor, wrapDeviceAt } from '../staff/replica/wrapPlan';
 
 class MemorySecrets implements SecretStorageLike {
   public readonly values = new Map<string, string>();
@@ -224,7 +226,9 @@ async function joinScenario(decodeHost?: DecodeHost): Promise<Joined> {
   const invited = await a.appendOwn('member.invite', { invite: INVITE, name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(secret) });
   assert.ok('ok' in invited);
   const inviteText = JSON.stringify(buildInvite(a.signer, {
-    genesisHash: a.anchor.genesisHash, project: a.projectId, name: 'Exercise Northwind', lead: { member: 'mbr-lead', x25519: a.anchor.lead.x25519 }, invite: INVITE, secret, expiresAt: INVITE_EXPIRES, now: new Date(NOW)
+    genesisHash: a.anchor.genesisHash, project: a.projectId, name: 'Exercise Northwind', lead: { member: 'mbr-lead', x25519: a.anchor.lead.x25519 }, invite: INVITE, secret, expiresAt: INVITE_EXPIRES, now: new Date(NOW),
+    // The project's required features, as the lead's invitation names them (33.2 D-03): the joining device then sends its post-quantum keys.
+    requires: (await a.state()).roster.required
   }));
   // B's side: read the invite, pin its genesis, answer it.
   const read = readInvite(inviteText, new Date(NOW));
@@ -232,13 +236,13 @@ async function joinScenario(decodeHost?: DecodeHost): Promise<Joined> {
   const pinned = await ReplicaProject.pinAnchor(joiner.deps, inviteAnchor(read.invite));
   assert.deepEqual(pinned, { ok: true, first: true });
   const device = await ReplicaProject.localDevice(joiner.deps);
-  const requestText = JSON.stringify(buildJoinRequest(device.signer, read.invite, { name: 'Jo Analyst', x25519: device.x25519, now: new Date(NOW) }));
+  const requestText = JSON.stringify(buildJoinRequest(device.signer, read.invite, { name: 'Jo Analyst', x25519: device.x25519, now: new Date(NOW), ...(device.kem === undefined ? {} : { kem: device.kem }) }));
   // A's side: check the request, admit, grant, welcome.
   const checked = checkJoinRequest(requestText, { invite: read.invite, secret });
   assert.ok(checked.ok);
   const admitted = await a.appendOwn('member.admit', {
     member: JOINER, invite: INVITE, name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, agentSeats: [],
-    device: { writer: device.writer, publicKey: device.publicKey, x25519: checked.request.x25519, x25519Sig: checked.request.x25519Sig, slot: 2 }
+    device: { writer: device.writer, publicKey: device.publicKey, x25519: checked.request.x25519, x25519Sig: checked.request.x25519Sig, slot: 2, ...(checked.request.kem === undefined ? {} : { kem: checked.request.kem }) }
   });
   assert.ok('ok' in admitted);
   const baseKey = a.keys.epochKey(a.projectId, 1) as Buffer;
@@ -439,11 +443,17 @@ test('MJ-07: an update whose key arrives later waits out of the fold, and the de
   try {
     // The lead makes a cell whose founding grant is wrapped to itself and to B, the way a key really reaches B: B takes it only once the roster
     // entry that commits to the grant is folded (CR-01).
-    const joinerDevice = await ReplicaProject.localDevice(joined.joiner.deps);
     const cell = randomBytes(16).toString('hex');
     const key = newEpochKey();
-    const wrapTo = (writer: string, recipient: string): { writer: string; wrap: string } => ({ writer, wrap: wrapEpochKey({ cell, epoch: 1, writer, recipient, epochKey: key }) });
-    const founding = buildGrant(a.signer, { cell, epoch: 1, roster: joined.admit, labelSealed: '', wraps: [wrapTo(a.deviceWriter, a.anchor.lead.x25519), wrapTo(b.deviceWriter, joinerDevice.x25519)] });
+    // The wraps go through the one entry point in the format the project needs (33.2-06: it started switched, so a new cell's key is cell-wrap/v2),
+    // to each device's keys as the roster names them.
+    const { roster } = await a.state();
+    const at = roster.positionOf.get(joined.admit) as number;
+    const choice = formatFor(roster, { base: false }, undefined);
+    assert.equal(choice, 2);
+    const { wraps } = wrapsFor({ format: 2, cell, epoch: 1, epochKey: key, devices: [wrapDeviceAt(roster, a.deviceWriter, at), wrapDeviceAt(roster, b.deviceWriter, at)] });
+    assert.equal(wraps.length, 2);
+    const [founding] = buildGrantPages(a.signer, { cell, epoch: 1, roster: joined.admit, labelSealed: '', wraps });
     await a.keys.addOwn(cell, 1, key, grantHash(founding));
     assert.ok(!isProjectRefused(await a.putGrants([founding])));
     const create = await a.appendOwn('cell.create', { cell, epoch: 1, grant: grantHash(founding) }, { roster: joined.admit });

@@ -46,10 +46,10 @@ NEAR AI runs some models inside an attested trusted execution environment
 from NEAR's model catalog (`/v1/model/list`) and shows it in the model picker
 and on every reply:
 
-- **Private · NEAR AI private hardware, checked each time it is used**: NEAR
+- **NEAR AI private hardware (checked each time it is used)**: NEAR
   reports attestation support and serves the model itself (for example GLM
   5.3, Kimi K3, Qwen 3.x).
-- **Not private · forwarded to …**: NEAR forwards the request to another
+- **Runs on outside provider (…)**: NEAR forwards the request to another
   provider, named in the label (for example `openrouter.ai` for DeepSeek V4.1
   Flash, `anthropic.com` for Claude models).
 
@@ -388,8 +388,8 @@ is what that file and the records beside it do in this version.
   device identity in every folder, not only for Team Mode, because it signs the
   first policy file with it.
 - **When it cannot be trusted.** If the file is missing, unsigned, changed or
-  expired, only reading and planning run until you open **SovAI: Policy** and
-  choose **Reset my rules**, and the project's key folder stays off limits in
+  expired, only reading and planning run until you open **SovAI: Standing Orders** and
+  choose **Reset my Standing Orders**, and the project's key folder stays off limits in
   every case.
   A policy written for a newer version (one that names a feature in its
   `requires` list, or a version or action list this version does not know)
@@ -398,10 +398,10 @@ is what that file and the records beside it do in this version.
   because a reset would discard every rule the policy holds. A setting this
   version does not know is refused the same way, and the sentence names both
   ways on: update the extension if a newer version wrote it, or, only for a
-  policy signed by this computer's own key, **SovAI: Policy** offers
-  **Reset my rules**, saying it keeps the old file and discards every change
+  policy signed by this computer's own key, **SovAI: Standing Orders** offers
+  **Reset my Standing Orders**, saying it keeps the old file and discards every change
   made to the policy. A policy signed by any other key is never offered Reset.
-  The status bar says "Policy: reading only" with one sentence naming the cause
+  The status bar says "Standing Orders: reading only" with one sentence naming the cause
   and the fix. Deleting the file does not reset a policy: a file that has gone
   missing counts as a changed one. A file signed by a key this computer does
   not know is never adopted, even one that carries the default policy, and a
@@ -409,17 +409,17 @@ is what that file and the records beside it do in this version.
   signs a policy by itself only on a true first install, when nothing shows an
   earlier one: no remembered policy in this computer's secret storage, no
   policy file, no record naming an earlier policy and no key history without
-  its key. Only **Reset my rules** re-signs a policy that failed, and it
+  its key. Only **Reset my Standing Orders** re-signs a policy that failed, and it
   resets your own rules only: your organization's rules and files stay as they
   are. It asks you to confirm, keeps the old file beside the new one, and
   records the reset.
-- **Reading it.** **SovAI: Policy** opens the policy page (see below).
+- **Reading it.** **SovAI: Standing Orders** opens the policy page (see below).
   **Show as stored** on that page opens the policy in plain words and as
   stored. The view is read only, and editing it changes nothing.
-- **Changing it.** **Edit my rules** on the policy page opens an unsigned draft
+- **Changing it.** **Edit my Standing Orders** on the policy page opens an unsigned draft
   of your own rules, kept in this extension's storage and never in your
   project. **Apply my draft** on the page, or **Apply** in the message beside
-  the draft, shows the change on the page first; **Apply to my rules** there
+  the draft, shows the change on the page first; **Apply to my Standing Orders** there
   checks it, sets the signer and the dates itself, signs it with your device
   key and records the change with the old and new policy hashes. A draft that
   is not valid, or that was made before the policy changed (a reset, or an edit
@@ -507,7 +507,7 @@ is what that file and the records beside it do in this version.
   default label; a link from there into the project keeps the project file's
   label. While a label file holds reads, only reads of the project are held:
   reads of those runtime files go on. You can set only a label your own clearance covers;
-  to add a clearance, open **SovAI: Policy** and use **Edit my rules**, then
+  to add a clearance, open **SovAI: Standing Orders** and use **Edit my Standing Orders**, then
   **Apply my draft**. An agent cannot read a file whose label your clearances do not
   cover, through the file tools, searches or a command that names it; a read
   a command does not show (a path built in a variable) is not seen. A glob in a
@@ -585,23 +585,23 @@ A project's rules are part of the same design and can only narrow too, but
 no project carries rules of its own in this version. Without your
 organization's rules, your own rules are the policy, as before.
 
-**Reset touches your own rules only.** **Reset my rules** signs fresh starting
+**Reset touches your own rules only.** **Reset my Standing Orders** signs fresh starting
 rules for your own rules with this computer's key. Your organization's rules,
 and the files that hold them, stay as they are.
 
-**The policy page.** **SovAI: Policy** opens one page, titled "Your organization's rules"
-when your organization's rules are on this computer and "Your rules" when
+**The policy page.** **SovAI: Standing Orders** opens one page, titled "Your organization's Standing Orders"
+when your organization's rules are on this computer and "Your Standing Orders" when
 they are not. It shows the rules in force, section by section, read only, and
 says who set them. A change to the rules, such as a draft of your own rules,
 is shown there first as a proposal, one plain sentence per setting, each marked **Wider** or **Stricter**; nothing changes until you
-choose. A change to your own rules is applied with **Apply to my rules**. A
+choose. A change to your own rules is applied with **Apply to my Standing Orders**. A
 change to your organization's rules cannot be made on this computer, because
 your organization keeps its key elsewhere: **Save a file for your organization**
 writes it as a signed `.near-policy-proposal` file to send to your
 organization's contacts, and nothing changes here. **Discard** drops a
 proposal, and a proposal made from rules that changed while it was shown can
-only be discarded. **Edit my rules**, **Apply my draft**, **Show as stored** and
-**Reset my rules** are on the same page; Edit my rules and Apply my draft are
+only be discarded. **Edit my Standing Orders**, **Apply my draft**, **Show as stored** and
+**Reset my Standing Orders** are on the same page; Edit my Standing Orders and Apply my draft are
 there only while your own rules can be read and this computer holds the key
 that signs them.
 
@@ -636,7 +636,7 @@ Confidential, Restricted), `ca-protected` (Protected A, B and C),
 Unclassified to Cosmic Top Secret). The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how SovAI reads them. Your organization's security officer should confirm both before you rely on them.
 
 **Clearances.** An agent reads a labelled file only when a clearance in your
-policy covers its label; add one in **SovAI: Policy** with **Edit my rules**,
+policy covers its label; add one in **SovAI: Standing Orders** with **Edit my Standing Orders**,
 then **Apply my draft**. Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 **The chat's label.** Each chat has a label that rises with what its agents,
@@ -789,11 +789,15 @@ computer. When no authorization says your organization approved this
 computer for that work, the request is recorded as one that rule would
 refuse (`route.accredited-device`) and the chat says once that this computer
 is not recorded as accredited for that label; it is not refused unless your organization's
-rules turn on `requireAccreditedDevice`. Model approvals work the same way:
-a model your rules have not approved for the work is recorded
-(`route.passport`) and never refused in this version.
+rules turn on `requireAccreditedDevice`. Model approvals work the same way
+by default: a model your rules have not approved for the work is recorded
+(`route.passport`) and sent, and with no `models` section the shipped
+approvals are used in this report mode. When your organization's `models`
+section says `mode: enforce`, the same request is refused before anything is
+sent, with the reason.
 A step that only records never refuses, even when its check cannot be made;
-it is then recorded as one that would refuse.
+it is then recorded as one that would refuse. Under `mode: enforce` a model
+approval check that cannot be made refuses.
 
 **Authorizations.** An authorization is one signed record that allows one
 thing for a while:
@@ -814,7 +818,9 @@ Under your organization's rules only authorizations signed by a key your
 organization lists count. Without your organization's rules, one signed on
 this computer counts for your own rules, and the trust line says
 "(self-signed on this computer)" until your organization's issuer can sign
-them.
+them. A model exception (`t1-risk`) is the one kind that never counts this
+way: it counts only under your organization's rules (see "Which models may do
+what").
 
 #### Export-controlled content
 
@@ -841,6 +847,127 @@ that are read and recorded only, and never decide a request. Meeting the
 Controlled Goods Program or the ITAR is your organization's obligation, and
 your officials decide. SovAI does not make your organization compliant
 with either.
+
+### Which models may do what
+
+Every model request is checked against an approval for its use before
+anything is sent. An approval names the model, the uses it is approved for,
+the places it may run and the date it ends. Your organization's signed rules
+hold its approvals (its model policy); without them, the approvals SovAI ships
+are used. Your organization's approval of a model replaces the shipped one.
+
+**Approvals by use.** Each request has one of four uses, worked out on this
+computer from what the request does: research only (in the research
+workspace), chat you review (plain chat whose answer a person reads), agent
+work (tools, file changes, sub-agents, checks, unattended runs) and
+operational work (a staff project). A use only rises during a chat, and a
+sub-agent starts at its parent's use. A model may do the work only when its
+approval covers the use at the place it runs; the model picker shows each
+model's origin, family and "Approved for {use} until {date}" or "Research
+only". Under enforce, every use above research also needs your organization's
+evaluation of that model's files, cited in its approval, and this includes
+every checking role. The approvals SovAI ships carry no evaluation, so under
+enforce nothing goes above research until your organization evaluates its
+models.
+
+A model from a developer in the People's Republic of China is approved for
+research only, and so is a model with no approval. A model under a
+non-commercial licence is approved for research only, except through the
+vendor's own service. Command A+ is approved on the Cohere Model Vault; your
+organization may approve its own on-premise copy with the files' hash; it is
+never approved on NEAR AI's private hardware.
+
+**The refusal.** Under enforce a refused request sends nothing. The chat says
+why in one form, which starts with "Nothing was sent." and ends with "Who to
+ask:", for example: "Nothing was sent. Your organization has not evaluated gpt-oss-120b for agent work, and under its rules a model takes any role above research only after that evaluation. Choose an evaluated model, or ask for this one to be evaluated. Who to ask: your organization's security contact."
+When other models would pass, it names up to five of them. Nothing moves your
+work to another model by itself. When no approved model can do the work, the
+chat shows the ways forward that apply here, and who to ask.
+
+**Report only.** Until your organization's model policy says
+`mode: enforce`, and on every computer without your organization's rules,
+approvals are only reported: the request is sent and recorded as one the rules
+would refuse (`route.passport`). From the first such request in a session, a
+notice stays at the top of the chat and in the status bar, with no way to
+close it: "Agent work is running outside your organization's model policy (report only)."
+Without your organization's rules it says "Agent work is running outside your rules for models (report only)."
+and offers **Adopt the Western defaults**, which opens a proposal on the policy
+page; nothing changes until you apply it. In report mode today's models,
+including those from developers in the People's Republic of China, keep doing
+agent work, and each use outside the rules is recorded (G409).
+
+**The Western defaults.** The models for each job come from one list, by
+approval: standard Nemotron 3 Super, then Command A+, then gpt-oss; deep
+Nemotron 3 Ultra, Command A+, gpt-oss; fast Nemotron 3 Nano, gpt-oss, IBM
+Granite; safety checks gpt-oss, Nemotron 3 Nano, Granite Guardian; vision
+Command A+; transcription Whisper large-v3; images FLUX.2 klein 4B. For each
+job, a model you set yourself is kept; otherwise your organization's default
+is used, then the first model in that list that the AI service offers and the
+rules allow. In report mode, while none of these models is offered, each job
+falls back to the model it used before; under enforce it never does.
+
+**The research workspace.** **SovAI: Open Research Workspace** opens the one
+place where a model approved for research only, including an adversary model,
+is used on purpose. Its banner says "Research workspace. Adversary models allowed. No project data."
+It reads no project file, searches no project, keeps no project memory and
+has no tools; anything else is refused with "This is the research workspace. It cannot open project files, run commands or use tools."
+A file you add is copied into the workspace's own folder first, and a file in
+an open project is refused. Text copied out starts with the line
+"From the research workspace, model {model}, untrusted". Records of its
+requests say `lane: t0`. The cybersecurity panel and Compare Models'
+evaluations run in the same research lane. The workspace is kept apart by
+SovAI's own checks, not by the operating system, and the cybersecurity scan
+tools still run on this computer with your approvals and the engagement's
+scope check (G413).
+
+**Exceptions.** Under your organization's rules, a named person can allow one
+model approved for research only to serve chat you review, for named projects
+and labels, for at most 90 days. On the policy page, **Ask to allow for chat you review**
+drafts the exception with the model's legal flags first, the named person
+signs it, and it is saved as a request file for your organization; nothing
+changes on this computer. It counts only once your organization's rules carry
+it and list that person's key, and the trust line then reads
+"Allowed for chat you review by {name} until {date}". An exception never
+allows agent work. With no organization rules there are no exceptions: one
+signed only on this computer covers nothing.
+
+**Checks by another family.** Every role that checks another model's work
+(the safety check of agent commands, reviewers, plan checkers, verifiers,
+editors, red team, the staff release guard and the J2 tradecraft reviewer)
+runs on a model of another family than the model it checks. The family comes
+from the approval's lineage, not from the model's name. When no approved
+model of another family is available, a person decides, and the chat says:
+"This check was not given to {model}, because it comes from the same family ({family}) as the model it checks, and no approved model of another family is available. A person decides instead."
+The record of each check names both families.
+
+**What the records say.** Each model request's record names its use, the
+approval by id and hash, and, when the request was refused or reported, the
+reason. **SovAI: Export AI Bill of Materials** writes
+`.near-ai/state/ai-bom.cdx.json` in an open project: a CycloneDX 1.6 list of
+every model the project used, from the model requests this computer still
+keeps, with supplier, licence, the files' hash when known, the base model and
+teachers with their origin, the approval's hash, where it ran and the uses it
+served. It holds no prompt or answer text.
+
+**Known limits.** Each one is in the
+[road to production](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs-site/content/security/road-to-production.md)
+with its gap id.
+
+- No Western model runs in NEAR AI's private hardware yet, so under enforce
+  agent work on NEAR AI has no approved model (G408).
+- Under enforce nothing goes above research until your organization evaluates
+  its models (G410).
+- On NEAR AI's private hardware an approval binds to the model's name, not to
+  the exact files, because the proof of the hardware does not report the
+  files' hash (G411).
+- How NEAR AI passes the publishers' licence terms on to your organization is
+  not answered yet (G412).
+- The research workspace is kept apart by SovAI's own checks, not by the
+  operating system (G413).
+- An exception is signed with this computer's device key until a person's
+  credential replaces it (G414), and it records the mission benefit but no
+  reference to your organization's assessment of the model (G537).
+- Stop agent work now, a security officer's signed switch to enforce, is not yet available, so enforce comes only from a new signed policy from your organization (G418).
 
 ### Sub-agents nobody is watching
 
@@ -1563,8 +1690,9 @@ waits for a quantum computer gains at most Grover's square-root speed-up (AES-25
 strength against Grover before counting scrypt's cost.
 
 **Constraint for later work.** Any public-key step added to sync, such as sharing state between
-different people in Team Mode, must use a hybrid key exchange (X25519 plus ML-KEM), so that it does
-not bring back the harvest-now-decrypt-later weakness the symmetric design avoids.
+different people in Team Mode, must use a hybrid key exchange (P-256 plus ML-KEM-768, as shared
+staff projects do), so that it does not bring back the harvest-now-decrypt-later weakness the
+symmetric design avoids.
 
 ### What still leaks
 
@@ -1754,9 +1882,10 @@ under that cell's key, so only the devices cleared for the cell can read it.
 - **A key is wrapped to each cleared device.** Every device has an encryption key pair besides
   its signing key; the device signs its encryption key so it cannot be swapped. To give a device a
   cell key, the lead's machine makes a fresh key pair, agrees a shared secret with the device's
-  public key (X25519), derives a wrapping key from it with HKDF-SHA256 bound to the cell, the
-  epoch and the receiving device, and seals the cell key with AES-256-GCM. A wrap copied to
-  another device, cell or epoch does not open.
+  public key (X25519 in the first format; new work uses the hybrid in the next subsection), derives
+  a wrapping key from it with HKDF-SHA256 bound to the cell, the epoch and the receiving device,
+  and seals the cell key with AES-256-GCM. A wrap copied to another device, cell or epoch does not
+  open.
 - **Grants are signed and sent only to that cell's devices.** The wraps for one cell and epoch
   travel together in a grant signed by the staff lead (or the deputy, once named). The roster
   entry that creates the cell or gives it a new key records the hash of the grant, so a changed
@@ -1767,11 +1896,13 @@ under that cell's key, so only the devices cleared for the cell can read it.
 - **The cell's label is sealed inside the grant.** The level and compartments of a cell are
   sealed under a key derived from the cell key, so a device below the cell learns only that an
   unnamed cell exists, not what it is or what is in it.
-- **Removal gives the cell a new key.** Removing a member, revoking a device or lowering a
-  clearance writes a new epoch for every cell the change affects, wrapped only to the devices
-  still cleared. The person or device removed keeps what it already had and cannot open anything
-  written after. The lead is told: "They keep what they already received. They will not receive
-  anything new."
+- **A completed rotation limits access to new work.** After a verified rotation, an affected
+  cell has a new key wrapped to devices that still have access. A device that lost access keeps
+  what it received under the old key. This computer pauses ordinary writes when it verifies
+  that a revoked device received the current key. Roster recovery remains available. A
+  computer can still write under an old key while it is waiting for an earlier grant that
+  would show the revoked device held it (G552), or while rotation after a clearance reduction
+  is pending (G551).
 - **New devices can read the history of their cells.** A device admitted later receives wraps
   for the earlier epochs of the cells it is cleared for, so the history of those cells stays
   readable on it.
@@ -1781,6 +1912,31 @@ under that cell's key, so only the devices cleared for the cell can read it.
 - **Who is cleared is decided when a grant is written.** Clearance checks need the current date
   and the label scales, so they run on the lead's machine when a grant or a new key is written.
   The shared history then relies on the signed grant: it never decides clearance itself.
+
+### How cell keys are wrapped
+
+New shared work, and every project its lead switches to post-quantum keys, wraps each cell key with a hybrid of P-256 and ML-KEM-768, joined by HKDF-SHA256 and sealed with AES-256-GCM. An attacker who records shared work today
+must break both halves to open it later, so a future quantum computer that breaks P-256 alone
+gains nothing. Both halves and the key derivation are listed in CCCS ITSP.40.111 for Unclassified,
+Protected A and Protected B information.
+
+- **The wrap.** A fresh P-256 key agrees a secret with the device's P-256 key, and ML-KEM-768
+  gives a second secret. HKDF-SHA256 joins them, the P-256 secret first, bound to both ciphertexts,
+  the cell, the epoch, the receiving device and both of its keys. The cell key is sealed with
+  AES-256-GCM. A wrap is 1,214 bytes, so a grant for many devices is split into signed pages, all
+  committed by the one hash the roster holds.
+- **The device's keys.** Each computer, hosted person and hub signs its P-256 and ML-KEM-768 keys
+  with its own signing key, and the six safety words cover them when a join request carries them.
+  The private parts are kept only as seeds: in this computer's secret storage, in the hosted
+  person's key envelope sealed by your organization's key service, or in the hub's key file.
+- **The switch.** A project that requires post-quantum keys refuses any new X25519 wrap, on every
+  member's computer and on your organization's server alike. Keys given before the switch keep their older X25519 wraps and stay readable. Each part of the
+  project moves to the new wrap at its next new key. A computer that cannot make the new wrap is
+  told to update; it never falls back to the older one, and a computer that has not published its
+  keys yet is given the key later.
+- **Protected B.** Protected B work is never wrapped the older way, so a project must switch before it shares Protected B work.
+- **Reserved.** ML-KEM-1024 with P-384 is reserved for Protected C and classified work, pending the Cyber Centre's advice.
+- **Signatures.** Signatures stay Ed25519. A later change to post-quantum signatures is its own decision.
 
 ### Labelled products in shared projects
 
@@ -2171,7 +2327,7 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   MCP page before you switch a server on for a project.
 - **A label ceiling per server.** Your policy can name, per server id, the
   highest label the server may ever receive, in `ceiling.mcpLabelCeilings`
-  (through **Edit my rules** in **SovAI: Policy**; for example
+  (through **Edit my Standing Orders** in **SovAI: Standing Orders**; for example
   `{ "partner": { "scale": "org", "level": "Internal", "compartments": [], "releasability": [] } }`).
   A ceiling has a clearance's shape: a level on one of the policy's scales,
   compartments, releasability and an optional `expiresAt`. Every call to a
@@ -2472,8 +2628,8 @@ health check connects only to itself; and no hub source file names a client netw
 | The twelve words protect your organization's key only when its security contact reads them to you over a channel you trust | Compare them in person or on a call you placed to a number you already know; never over the channel the file came through |
 | Your organization's rules can carry export-control decisions, but nothing grants access with them yet, and SovAI does not make your organization compliant with the Controlled Goods Program or the ITAR | Your organization's officials decide; a later release uses these decisions to allow access |
 | Your organization's server does not load your organization's rules yet | Its rules reach this computer as a signed file you add with **SovAI: Add Your Organization's Rules** |
-| Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it | Your organization's rules can turn on `requireAccreditedDevice` to refuse the second; model approvals refuse in a later release |
-| Authorizations are self-signed on this computer until your organization's issuer can sign them | Under your organization's rules only authorizations signed by a key it lists count |
+| Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it | Your organization's rules can turn on `requireAccreditedDevice` to refuse the second, and set the model policy to `mode: enforce` to refuse the first (see the section on models above) |
+| Authorizations are self-signed on this computer until your organization's issuer can sign them | Under your organization's rules only authorizations signed by a key it lists count; a model exception counts only under your organization's rules |
 | There is no command to leave your organization | Ask your organization's security contact |
 
 ## How changes reach a release

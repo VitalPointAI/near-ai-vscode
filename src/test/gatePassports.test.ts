@@ -3,6 +3,8 @@
 // use tier of a request (6.1). Report mode only: nothing here refuses a request. Fictional passports only; hashes are made at test time.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { bundleHash } from '../domain/gate/bundle';
 import { MAX_PASSPORTS, effectiveMaxTier, matchesModelPattern, parseModelsSection, passportCovers, passportHash, resolvePassport } from '../domain/gate/models';
@@ -423,7 +425,7 @@ test('resolvePassport without a section uses the shipped rows: PRC models at T0,
     ['openai/gpt-oss-120b', 'openai/gpt-oss', 'T2'],
     ['openai/gpt-6.1-sol', 'openai/gpt', 'T2'],
     ['anthropic/claude-sonnet-5-5', 'anthropic/claude', 'T2'],
-    ['cohere/command-a-plus', 'cohere/command-a-plus', 'T2']
+    ['command-a-plus-05-2026', 'cohere/command-a-plus', 'T2']
   ];
   for (const [model, id, tier] of cases) {
     const resolved = resolvePassport(undefined, model, FIXED_NOW);
@@ -432,7 +434,7 @@ test('resolvePassport without a section uses the shipped rows: PRC models at T0,
     assert.equal(resolved?.source, 'shipped', model);
   }
   assert.equal(resolvePassport(undefined, 'nvidia/OpenReasoning-Nemotron-7B', FIXED_NOW)?.passport.origin, 'CN', 'the name says Nemotron; the origin is the base');
-  for (const model of ['somevendor/unknown-model', 'cohere/command-a-plus-08', 'openai/whisper-large-v3-turbo', 'deepseek-ai', 'qwen/qwen3-8b']) {
+  for (const model of ['somevendor/unknown-model', 'cohere/command-a-plus', 'cohere/command-a-plus-08', 'openai/whisper-large-v3-turbo', 'deepseek-ai', 'qwen/qwen3-8b']) {
     assert.equal(resolvePassport(undefined, model, FIXED_NOW), undefined, model);
   }
   assert.ok(resolvePassport(undefined, 'openai/gpt-oss-20b', FIXED_NOW)?.passport.hosting.includes('nearai-tee'), 'gpt-oss is never read as the closed API');
@@ -558,4 +560,134 @@ test('passportCovers: a T0 passport reaches T1 only with a t1-risk authorization
   assert.deepEqual(covers('T1', false), { covers: false, why: 'acceptance-missing' });
   assert.deepEqual(covers('T2', true), { covers: false, why: 'tier-exceeded' });
   assert.deepEqual(covers('T0', false), { covers: true });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Phase 74.1-01: the licences checked at each publisher, Command A+ on the vault classes, the Granite rows
+
+function shipped(id: string): Passport {
+  const found = SHIPPED_PASSPORTS.find((passport) => passport.id === id);
+  assert.ok(found, id);
+  return found as Passport;
+}
+
+function rowText(passport: Passport): string {
+  return JSON.stringify(passport);
+}
+
+test('74.1-01: Command A+ is Apache-2.0 with Cohere\'s Usage Policy and your organization\'s rule, and nothing in its row says non-commercial', () => {
+  const command = shipped('cohere/command-a-plus');
+  assert.equal(command.licence.id, 'Apache-2.0');
+  assert.ok(command.licence.obligations.some((text) => /Cohere's Usage Policy/.test(text)), 'Cohere-hosted use');
+  assert.ok(command.licence.obligations.some((text) => /your organization's passport with its artifact hash/.test(text)), 'your organization\'s own copy');
+  assert.doesNotMatch(rowText(command), /non-commercial/i);
+  assert.equal(command.origin, 'CA');
+  assert.match(command.lineage.base, /218B total/);
+  assert.match(command.lineage.base, /25B active/);
+  assert.match(command.lineage.base, /text and image input/);
+});
+
+test('74.1-01: Command A+ matches the publisher\'s ids only', () => {
+  for (const model of ['CohereLabs/command-a-plus-05-2026-w4a4', 'CohereLabs/command-a-plus-05-2026-bf16', 'command-a-plus-05-2026']) {
+    assert.equal(resolvePassport(undefined, model, FIXED_NOW)?.passport.id, 'cohere/command-a-plus', model);
+  }
+  for (const model of ['cohere/command-a-plus-08', 'RedHatAI/command-a-plus-05-2026-fp8', 'CohereLabs/c4ai-command-a-03-2025', 'CohereLabs/command-a-vision-07-2025']) {
+    assert.equal(resolvePassport(undefined, model, FIXED_NOW), undefined, model);
+  }
+});
+
+test('74.1-01: the shipped Command A+ row covers the Model Vault classes and never NEAR AI\'s private hardware or your organization\'s own hosting', () => {
+  const resolved = resolvePassport(undefined, 'command-a-plus-05-2026', FIXED_NOW);
+  assert.deepEqual([...(resolved?.passport.hosting ?? [])], ['vendor-region', 'vendor-tee']);
+  const at = (endpointClass: 'vendor-region' | 'vendor-tee' | 'nearai-tee' | 'org-tee' | 'org-plain' | 'local'): unknown =>
+    passportCovers({ resolved, use: 'T2', endpointClass, t1RiskCovers: false, now: FIXED_NOW });
+  assert.deepEqual(at('vendor-region'), { covers: true });
+  assert.deepEqual(at('vendor-tee'), { covers: true });
+  for (const endpointClass of ['nearai-tee', 'org-tee', 'org-plain', 'local'] as const) assert.deepEqual(at(endpointClass), { covers: false, why: 'hosting-mismatch' }, endpointClass);
+});
+
+test('74.1-01: your organization\'s Command A+ passport with its artifact hash replaces the shipped row and covers T2 on org-tee; without the hash it is refused', () => {
+  const own = examplePassport({
+    id: 'cohere/command-a-plus',
+    match: ['CohereLabs/command-a-plus-05-2026-*', 'command-a-plus-05-2026'],
+    developer: 'Cohere',
+    origin: 'CA',
+    hosting: ['org-tee', 'vendor-region', 'vendor-tee'],
+    artifact: { format: 'safetensors', sha256: digest('command-a-plus-w4a4'), quantization: 'nvfp4', remoteCode: false }
+  });
+  const models = parsed(section([own]));
+  const resolved = resolvePassport(models, 'CohereLabs/command-a-plus-05-2026-w4a4', FIXED_NOW);
+  assert.equal(resolved?.source, 'policy');
+  assert.deepEqual(passportCovers({ resolved, use: 'T2', endpointClass: 'org-tee', t1RiskCovers: false, now: FIXED_NOW }), { covers: true });
+  const { artifact: _artifact, ...withoutHash } = own as Record<string, unknown>;
+  assert.equal(refusalOf(section([withoutHash])), 'not-allowed-here models.passports[0].hosting[0]');
+});
+
+test('74.1-01: Nemotron 3 Nano and Super name the NVIDIA Nemotron Open Model License; Ultra names OpenMDW-1.1', () => {
+  assert.equal(shipped('nvidia/nemotron-3-nano').licence.id, 'NVIDIA Nemotron Open Model License');
+  assert.equal(shipped('nvidia/nemotron-3-super').licence.id, 'NVIDIA Nemotron Open Model License');
+  assert.equal(shipped('nvidia/nemotron-3-ultra').licence.id, 'OpenMDW-1.1');
+});
+
+test('74.1-01: every Nemotron 3 row lists gpt-oss-120b (US) beside its PRC teachers', () => {
+  for (const id of ['nvidia/nemotron-3-nano', 'nvidia/nemotron-3-super', 'nvidia/nemotron-3-ultra']) {
+    const teachers = shipped(id).lineage.teachers;
+    assert.ok(teachers.some((teacher) => teacher.model === 'gpt-oss-120b' && teacher.origin === 'US'), id);
+    assert.ok(teachers.some((teacher) => teacher.origin === 'CN'), id);
+  }
+});
+
+test('74.1-01: FLUX.2 klein 4B is Apache-2.0; OpenReasoning-Nemotron inherits Apache-2.0 from Qwen2.5; Whisper stays MIT with the card\'s apache-2.0 recorded', () => {
+  assert.equal(shipped('black-forest-labs/flux.2-klein-4b').licence.id, 'Apache-2.0');
+  assert.ok(shipped('nvidia/openreasoning-nemotron').licence.inherited.some((text) => /Apache-2\.0/.test(text) && /Qwen2\.5/.test(text)));
+  const whisper = shipped('openai/whisper-large-v3');
+  assert.equal(whisper.licence.id, 'MIT');
+  assert.ok(whisper.licence.inherited.some((text) => /apache-2\.0/.test(text)));
+});
+
+test('74.1-01: Kimi names the Kimi K3 License and GLM the GLM-5.3 License, each still "confirm per model" and research only', () => {
+  const kimi = shipped('moonshotai/kimi');
+  const glm = shipped('z-ai/glm');
+  assert.equal(kimi.licence.id, 'Kimi K3 License');
+  assert.equal(glm.licence.id, 'GLM-5.3 License');
+  assert.ok(kimi.licence.inherited.includes('confirm per model'));
+  assert.ok(glm.licence.inherited.includes('confirm per model'));
+  assert.equal(resolvePassport(undefined, 'moonshotai/kimi-k3', FIXED_NOW)?.maxTier, 'T0');
+  assert.equal(resolvePassport(undefined, 'z-ai/glm-5.3', FIXED_NOW)?.maxTier, 'T0');
+});
+
+test('74.1-01: IBM Granite resolves to family granite, origin US, Apache-2.0, T2, on NEAR AI\'s private hardware only', () => {
+  const resolved = resolvePassport(undefined, 'ibm-granite/granite-4.2-8b', FIXED_NOW);
+  assert.equal(resolved?.passport.id, 'ibm-granite/granite');
+  assert.equal(resolved?.passport.lineage.family, 'granite');
+  assert.equal(resolved?.passport.origin, 'US');
+  assert.equal(resolved?.passport.licence.id, 'Apache-2.0');
+  assert.equal(resolved?.maxTier, 'T2');
+  assert.deepEqual([...(resolved?.passport.hosting ?? [])], ['nearai-tee']);
+});
+
+test('74.1-01: Granite Guardian has its own passport, and the plain Granite row does not match it', () => {
+  const resolved = resolvePassport(undefined, 'ibm-granite/granite-guardian-4.1-8b', FIXED_NOW);
+  assert.equal(resolved?.passport.id, 'ibm-granite/granite-guardian');
+  assert.equal(resolved?.passport.lineage.family, 'granite');
+  assert.equal(resolved?.passport.licence.id, 'Apache-2.0');
+  assert.equal(resolved?.maxTier, 'T2');
+  assert.ok(!shipped('ibm-granite/granite').match.some((pattern) => matchesModelPattern(pattern, 'ibm-granite/granite-guardian-4.1-8b')));
+});
+
+test('74.1-01: corrected rows keep their ids, and the source has one literal id line per row', () => {
+  const ids = SHIPPED_PASSPORTS.map((passport) => passport.id);
+  for (const id of ['cohere/command-a-plus', 'nvidia/nemotron-3-nano', 'nvidia/nemotron-3-super', 'nvidia/nemotron-3-ultra', 'moonshotai/kimi', 'z-ai/glm', 'black-forest-labs/flux.2-klein-4b', 'nvidia/openreasoning-nemotron', 'openai/whisper-large-v3']) {
+    assert.ok(ids.includes(id), id);
+  }
+  assert.deepEqual(ids, [...ids].sort(), 'sorted by id');
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'domain', 'gate', 'shippedPassports.ts'), 'utf8');
+  const literal = [...source.matchAll(/^\s*id: '([^']+)',/gm)].map((found) => found[1]);
+  assert.deepEqual(literal, ids);
+});
+
+test('74.1-01: every licence text fits the parser\'s list text limit', () => {
+  for (const passport of SHIPPED_PASSPORTS) {
+    for (const text of [passport.licence.id, ...passport.licence.obligations, ...passport.licence.inherited]) assert.ok(text.length <= 128, `${passport.id}: ${text}`);
+  }
 });

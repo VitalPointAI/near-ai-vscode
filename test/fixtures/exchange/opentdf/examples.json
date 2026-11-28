@@ -1,0 +1,108 @@
+{
+  "source": {
+    "repository": "https://github.com/opentdf/spec",
+    "commit": "0a30366b18b58a314a570ea06c03e6c92c985ab5",
+    "version": "4.3.0 (the repository's VERSION file at that commit)",
+    "licence": "BSD-3-Clause-Clear (see LICENSE.md)",
+    "files": [
+      "schema/OpenTDF/manifest.md",
+      "schema/OpenTDF/key_access_object.md",
+      "schema/OpenTDF/integrity_information.md",
+      "schema/OpenTDF/payload.md"
+    ],
+    "changes": "Copied from the JSON examples in those files. Their // comments were removed so the examples parse as JSON. The full manifest example's assertions array was left out because it holds an example NATO confidentiality label (no NATO label value is kept in this repository). Nothing else was changed."
+  },
+  "manifests": [
+    {
+      "from": "schema/OpenTDF/manifest.md, Full Manifest Example",
+      "manifest": {
+        "tdf_spec_version": "1.0.0",
+        "payload": {
+          "type": "reference",
+          "url": "0.payload",
+          "protocol": "zip",
+          "isEncrypted": true,
+          "mimeType": "application/octet-stream"
+        },
+        "encryptionInformation": {
+          "type": "split",
+          "keyAccess": [
+            {
+              "type": "wrapped",
+              "url": "http://kas.example.com:4000",
+              "protocol": "kas",
+              "wrappedKey": "YBkqvsiDnyDfw5JQzux2S2IaiClhsojZuLYY9WOc9N9l37A5/Zi7iloxcqgFvBFbzVjGW4QBwAHsytKQvE87bHTuQkZs4XyPACOZE/k9r+mK8KazcGTkOnqPKQNhf2XK4TBACJZ6eItO5Q1eHUQVLKjxUfgyx2TBDfhB/7XifNthu+6lFbKHmPl1q7q1Vaa/rpPRhSgqf89x5fQvcSWdkuOH9Y4wTa8tdKqSS3DUNMKTIUQq8Ti/WFrq26DRemybBgBcL/CyUZ98hFjDQgy4csBusEqwQ5zG+UAoRgkLkHiAw7hNAayAUCVRw6aUYRF4LWfcs2BM9k6d3bHqun0v5w==",
+              "policyBinding": {
+                "alg": "HS256",
+                "hash": "ZGMwNGExZjg0ODFjNDEzZTk5NjdkZmI5MWFjN2Y1MzI0MTliNjM5MmRlMTlhYWM0NjNjN2VjYTVkOTJlODcwNA=="
+              },
+              "encryptedMetadata": "OEOqJCS6mZsmLWJ38lh6EN2lDUA8OagL/OxQRQ=="
+            }
+          ],
+          "method": {
+            "algorithm": "AES-256-GCM",
+            "isStreamable": true,
+            "iv": "OEOqJCS6mZsmLWJ3"
+          },
+          "integrityInformation": {
+            "rootSignature": {
+              "alg": "HS256",
+              "sig": "YjliMzAyNjg4NzA0NzUyYmUwNzY1YWE4MWNhNDRmMDZjZDU3OWMyYTMzNjNlNDYyNTM4MDA4YjQxYTdmZmFmOA=="
+            },
+            "segmentSizeDefault": 1000000,
+            "segmentHashAlg": "GMAC",
+            "segments": [
+              {
+                "hash": "ZmQyYjY2ZDgxY2IzNGNmZTI3ODFhYTk2ZjJhNWNjODA=",
+                "segmentSize": 14056,
+                "encryptedSegmentSize": 14084
+              }
+            ],
+            "encryptedSegmentSizeDefault": 1000028
+          },
+          "policy": "eyJ1dWlkIjoiNjEzMzM0NjYtNGYwYS00YTEyLTk1ZmItYjZkOGJkMGI4YjI2IiwiYm9keSI6eyJhdHRyaWJ1dGVzIjpbXSwiZGlzc2VtIjpbInVzZXJAdmlydHJ1LmNvbSJdfX0="
+        }
+      }
+    }
+  ],
+  "keyAccess": [
+    {
+      "from": "schema/OpenTDF/key_access_object.md, Example",
+      "keyAccess": {
+        "type": "wrapped",
+        "url": "https://kas.example.com:5000",
+        "kid": "6f3b6a82-2f30-4c8a-aef3-57c65b8e7387",
+        "sid": "split-id-1",
+        "protocol": "kas",
+        "wrappedKey": "OqnOE...B82uw==",
+        "policyBinding": {
+          "alg": "HS256",
+          "hash": "BzmgoIxZzMmIF42qzbdD4Rw30GtdaRSQL2Xlfms1OPs="
+        },
+        "encryptedMetadata": "ZoJTNW24UMhnXIif0mSnqLVCU="
+      }
+    }
+  ],
+  "segments": [
+    {
+      "from": "schema/OpenTDF/integrity_information.md, segment",
+      "segment": {
+        "hash": "NzhlZDg5OWMwZWVhZDBjMWEzZTQyYmFlODA0NjNlMDM=",
+        "segmentSize": 14056,
+        "encryptedSegmentSize": 14084
+      }
+    }
+  ],
+  "payloads": [
+    {
+      "from": "schema/OpenTDF/payload.md, Example",
+      "payload": {
+        "type": "reference",
+        "url": "0.payload",
+        "protocol": "zip",
+        "isEncrypted": true,
+        "mimeType": "application/pdf"
+      }
+    }
+  ]
+}

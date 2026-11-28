@@ -12,7 +12,8 @@ import type { AllowingRecord, RouteDecision, RouteFacts, RoutePolicy } from '../
 import { TRUST_LINE_TEXT, TRUST_VERIFICATION_LEVELS, dateShown, trustFactsFor, trustLine } from '../domain/gate/trust';
 import type { TrustFacts, TrustPlace } from '../domain/gate/trust';
 import { TRUST_BADGE_STATES } from '../domain/gate/trustBadge';
-import { FIXED_NOW, authorizationFor } from './helpers/policyFixtures';
+import { passportHash, resolvePassport } from '../domain/gate/models';
+import { FIXED_NOW, authorizationFor, evaluatedModels } from './helpers/policyFixtures';
 
 function label(scale: string, level: string, extra: Partial<Label> = {}): Label {
   return { scale, level, compartments: [], releasability: [], handling: [], ...extra };
@@ -220,4 +221,21 @@ test('the fixed words hold no em-dash and none of the words people never see; da
   assert.equal(dateShown('2027-01-31T23:59:59.000Z'), '31 Jan 2027');
   assert.equal(dateShown('2027-03-01T02:00:00.000+05:00'), '28 Feb 2027', 'UTC, not the local day');
   assert.equal(dateShown('not a date'), 'not a date');
+});
+
+test('74.1 D-23: TrustFacts of an allowed request carry the passport hash beside its model-approval record and the use the step checked', () => {
+  const request: RouteFacts = { ...NEAR_TEE_BOUND, model: { id: 'openai/gpt-oss-120b', privacyBoundary: 'tee' }, use: 'T2' };
+  const mark = [org('Internal')];
+  // 74.1-06 (D-16): under enforce, agent work needs your organization's evaluation of the model, carried by its own passport.
+  const models = evaluatedModels('enforce', ['openai/gpt-oss']);
+  const decision = decideRoute(mark, DEFAULT_ROUTING, request, undefined, undefined, policyWith({ models }));
+  assert.equal(decision.allowed, true);
+  const resolved = resolvePassport(models, 'openai/gpt-oss-120b', FIXED_NOW);
+  assert.ok(resolved);
+  const trust = trustFactsFor(decision, request, { mark, routing: DEFAULT_ROUTING });
+  assert.equal(trust.passportHash, passportHash(resolved.passport));
+  assert.ok(trust.allowedBy.some((record) => record.kind === 'model-approval' && record.passport === 'openai/gpt-oss'));
+  assert.equal(trust.use, 'T2');
+  // Without a policy no passport decided the request, so none is named.
+  assert.equal(trustFactsFor(decideRoute(mark, DEFAULT_ROUTING, request), request, { mark, routing: DEFAULT_ROUTING }).passportHash, undefined);
 });

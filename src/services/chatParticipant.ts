@@ -18,6 +18,13 @@ import { editorWriter } from './stateHome';
 import { threadStoreFor } from './threadStore';
 import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import type { SessionRoute } from '../gate/sessionMark';
+import type { GateRuntime } from '../domain/gate/decide';
+
+/** The route of a chat participant request (74.1 D-13): the person's, with no tools, so chat you review; the default route without a gate host. */
+export function participantRoute(runtime: GateRuntime | undefined): SessionRoute {
+  return runtime ? sessionRouteFrom(runtime) : defaultSessionRoute();
+}
 
 export { PARTICIPANT_ID };
 
@@ -136,7 +143,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
     // CLAS-06: a person asked here, so the request is routed (and recorded) as the person's, in the project's log. With no gate host it is decided with the
     // default route.
     const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: session.sessionId }, presence: 'person', context: 'interactive' });
-    const sessionRoute = runtime ? sessionRouteFrom(runtime) : defaultSessionRoute();
+    const sessionRoute = participantRoute(runtime);
     const send = async (): Promise<void> => {
       for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
         if (event.type === 'text') response.answer(event.text);

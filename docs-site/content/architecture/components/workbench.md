@@ -53,6 +53,25 @@ Back to the [component catalogue](./index.md).
 | chart:theia-cloud | Helm chart | runtime | Pass with conditions |
 | chart:theia-cloud-base | Helm chart | runtime | Pass with conditions |
 | chart:theia-cloud-crds | Helm chart | runtime | Pass with conditions |
+| model:anthropic/claude | Model (shipped passport) | runtime | Pass with conditions |
+| model:black-forest-labs/flux.2-klein-4b | Model (shipped passport) | runtime | Pass with conditions |
+| model:cohere/command-a-plus | Model (shipped passport) | runtime | Pass with conditions |
+| model:deepseek-ai/deepseek | Model (shipped passport) | runtime | Pass with conditions |
+| model:google/gemini | Model (shipped passport) | runtime | Pass with conditions |
+| model:ibm-granite/granite | Model (shipped passport) | runtime | Pass with conditions |
+| model:ibm-granite/granite-guardian | Model (shipped passport) | runtime | Pass with conditions |
+| model:moonshotai/kimi | Model (shipped passport) | runtime | Pass with conditions |
+| model:nvidia/llama-nemotron | Model (shipped passport) | runtime | Pass with conditions |
+| model:nvidia/nemotron-3-nano | Model (shipped passport) | runtime | Pass with conditions |
+| model:nvidia/nemotron-3-super | Model (shipped passport) | runtime | Pass with conditions |
+| model:nvidia/nemotron-3-ultra | Model (shipped passport) | runtime | Pass with conditions |
+| model:nvidia/openreasoning-nemotron | Model (shipped passport) | runtime | Pass with conditions |
+| model:openai/gpt | Model (shipped passport) | runtime | Pass with conditions |
+| model:openai/gpt-oss | Model (shipped passport) | runtime | Pass with conditions |
+| model:openai/whisper-large-v3 | Model (shipped passport) | runtime | Pass with conditions |
+| model:qwen/qwen | Model (shipped passport) | runtime | Pass with conditions |
+| model:x-ai/grok | Model (shipped passport) | runtime | Pass with conditions |
+| model:z-ai/glm | Model (shipped passport) | runtime | Pass with conditions |
 
 ## vendor:@modelcontextprotocol/sdk
 
@@ -1032,3 +1051,510 @@ Conditions:
 - Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.
 - Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.
 - The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed.
+
+## model:anthropic/claude
+
+**What it provides.** The shipped model passport for Anthropic's Claude (closed weights): origin US, family claude, licence proprietary, approved at most for T2 on closed-api.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | proprietary |
+| Cryptography | None |
+| Air gap | Needs the internet: does not work air-gapped |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Only where the label allows any cloud: the provider holds the weights and sees the request.
+- The provider's terms of service apply; record your organization's agreement with the provider.
+
+## model:black-forest-labs/flux.2-klein-4b
+
+**What it provides.** The shipped model passport for Black Forest Labs's FLUX.2 klein 4B: origin DE, family flux, licence Apache-2.0, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | Apache-2.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence Apache-2.0: attribution.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:cohere/command-a-plus
+
+**What it provides.** The shipped model passport for Cohere's Command A+ 05-2026 (MoE, 218B total, 25B active; text and image input): origin CA, family command, licence Apache-2.0, approved at most for T2 on vendor-region, vendor-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | Apache-2.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on the Cohere Model Vault classes (vendor-region, vendor-tee) under Cohere's Usage Policy, or on your organization's own on-premise hosting through your organization's passport with the artifact hash; never on NEAR AI's private hardware (owner's decision of 2026-11-24, 74.1 D-05).
+- Apache-2.0: keep the attribution.
+
+## model:deepseek-ai/deepseek
+
+**What it provides.** The shipped model passport for DeepSeek's DeepSeek: origin CN, family deepseek, licence MIT, approved at most for T0 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | MIT |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.
+- Licence MIT; confirm the licence of each model before use.
+
+## model:google/gemini
+
+**What it provides.** The shipped model passport for Google's Gemini (closed weights): origin US, family gemini, licence proprietary, approved at most for T2 on closed-api.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | proprietary |
+| Cryptography | None |
+| Air gap | Needs the internet: does not work air-gapped |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Only where the label allows any cloud: the provider holds the weights and sees the request.
+- The provider's terms of service apply; record your organization's agreement with the provider.
+
+## model:ibm-granite/granite
+
+**What it provides.** The shipped model passport for IBM's Granite 4.x (pretrained by IBM; synthetic data made by IBM, no teacher named): origin US, family granite, licence Apache-2.0, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | Apache-2.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence Apache-2.0: attribution.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:ibm-granite/granite-guardian
+
+**What it provides.** The shipped model passport for IBM's Granite Guardian 4.x (fine-tuned from Granite 4.1 by IBM Research): origin US, family granite, licence Apache-2.0, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | Apache-2.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence Apache-2.0: attribution.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:moonshotai/kimi
+
+**What it provides.** The shipped model passport for Moonshot AI's Kimi: origin CN, family kimi, licence Kimi K3 License, approved at most for T0 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | Kimi K3 License |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.
+- Licence Kimi K3 License; confirm the licence of each model before use.
+
+## model:nvidia/llama-nemotron
+
+**What it provides.** The shipped model passport for Meta, post-trained by NVIDIA's Llama (Meta), post-trained by NVIDIA: origin US, family llama, licence NVIDIA Open Model License, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | NVIDIA Open Model License |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence NVIDIA Open Model License: attribution; Llama Community License.
+- Post-trained with outputs of models from the People's Republic of China (DeepSeek-R1); your organization's evaluation includes trigger sweeps before operational work.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:nvidia/nemotron-3-nano
+
+**What it provides.** The shipped model passport for NVIDIA's Nemotron 3 Nano (pretrained from scratch by NVIDIA): origin US, family nemotron, licence NVIDIA Nemotron Open Model License, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | NVIDIA Nemotron Open Model License |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence NVIDIA Nemotron Open Model License: attribution; check NVIDIA dataset licences.
+- Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:nvidia/nemotron-3-super
+
+**What it provides.** The shipped model passport for NVIDIA's Nemotron 3 Super (pretrained from scratch by NVIDIA): origin US, family nemotron, licence NVIDIA Nemotron Open Model License, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | NVIDIA Nemotron Open Model License |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence NVIDIA Nemotron Open Model License: attribution; check NVIDIA dataset licences.
+- Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:nvidia/nemotron-3-ultra
+
+**What it provides.** The shipped model passport for NVIDIA's Nemotron 3 Ultra (pretrained from scratch by NVIDIA): origin US, family nemotron, licence OpenMDW-1.1, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | OpenMDW-1.1 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence OpenMDW-1.1: attribution; check NVIDIA dataset licences.
+- Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:nvidia/openreasoning-nemotron
+
+**What it provides.** The shipped model passport for Alibaba (Qwen), post-trained by NVIDIA's Qwen2.5, post-trained by NVIDIA: origin CN, family qwen, licence CC-BY-4.0, approved at most for T0 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | CC-BY-4.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.
+- Licence CC-BY-4.0; confirm the licence of each model before use.
+
+## model:openai/gpt
+
+**What it provides.** The shipped model passport for OpenAI's GPT (closed weights): origin US, family gpt, licence proprietary, approved at most for T2 on closed-api.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | proprietary |
+| Cryptography | None |
+| Air gap | Needs the internet: does not work air-gapped |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Only where the label allows any cloud: the provider holds the weights and sees the request.
+- The provider's terms of service apply; record your organization's agreement with the provider.
+
+## model:openai/gpt-oss
+
+**What it provides.** The shipped model passport for OpenAI's gpt-oss (open weights; training data not published): origin US, family gpt, licence Apache-2.0, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | Apache-2.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence Apache-2.0: OpenAI's gpt-oss usage policy.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:openai/whisper-large-v3
+
+**What it provides.** The shipped model passport for OpenAI's Whisper large-v3: origin US, family whisper, licence MIT, approved at most for T2 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | MIT |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.
+- Licence MIT: attribution; the Hugging Face card says apache-2.0.
+- Under enforce it takes a role only after your organization's evaluation of the exact model files.
+
+## model:qwen/qwen
+
+**What it provides.** The shipped model passport for Alibaba (Qwen)'s Qwen: origin CN, family qwen, licence Apache-2.0, approved at most for T0 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | Apache-2.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.
+- Licence Apache-2.0; confirm the licence of each model before use.
+
+## model:x-ai/grok
+
+**What it provides.** The shipped model passport for xAI's Grok (closed weights): origin US, family grok, licence proprietary, approved at most for T2 on closed-api.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | proprietary |
+| Cryptography | None |
+| Air gap | Needs the internet: does not work air-gapped |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Only where the label allows any cloud: the provider holds the weights and sees the request.
+- The provider's terms of service apply; record your organization's agreement with the provider.
+
+## model:z-ai/glm
+
+**What it provides.** The shipped model passport for Zhipu AI's GLM: origin CN, family glm, licence GLM-5.3 License, approved at most for T0 on nearai-tee.
+
+**Why it is needed.** The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.
+
+| | |
+| --- | --- |
+| Kind | Model (shipped passport) |
+| Pinned version or digest | Not pinned in a lock or manifest |
+| Architecture component | `model-endpoints` |
+| Used in | `src/domain/gate/shippedPassports.ts` |
+| Scope | Runtime: it runs in the product |
+| Licence | GLM-5.3 License |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored:  weights by your organization's approved transfer |
+| Compliance fit | Pass with conditions |
+| Controls | SA-4, SR-3, SR-4 |
+| Security fixes | A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.
+- Licence GLM-5.3 License; confirm the licence of each model before use.

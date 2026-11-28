@@ -31,6 +31,23 @@ export function isPersonKeyKind(kind: string): boolean {
   return PERSON_KEY_KIND_SET.has(kind);
 }
 
+// The person-key kinds exactly as Phase 33 built them (33-21), frozen by name so the list above can grow without growing this one (33.1 D-09).
+// These keep signing without an action id; every person-key kind outside it is action-bound by default, so a later kind cannot be left out.
+export const PHASE_33_PERSON_KEY_KINDS: readonly string[] = Object.freeze([
+  'project.genesis',
+  'member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release',
+  'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void', 'roster.require',
+  'hub.readmit',
+  'session.certify',
+  'version.decide', 'version.release', 'version.supersede', 'version.withdraw'
+]);
+const PHASE_33_PERSON_KEY_KIND_SET: ReadonlySet<string> = new Set(PHASE_33_PERSON_KEY_KINDS);
+
+/** True for a person-key kind that a hosted project signs only under the one action the person confirmed (33.1 D-09). */
+export function requiresActionId(kind: string): boolean {
+  return isPersonKeyKind(kind) && !PHASE_33_PERSON_KEY_KIND_SET.has(kind);
+}
+
 // Closed list, one plain sentence each. No em-dashes.
 export const SESSION_REFUSALS = {
   'person-key-required': 'Only the person\'s own key can make this change.',

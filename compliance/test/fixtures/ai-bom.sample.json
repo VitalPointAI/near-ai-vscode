@@ -1,0 +1,273 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:94449d8f-b820-549e-8c66-7294d2b68a69",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-25T12:00:00Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "SovAI"
+        }
+      ]
+    },
+    "component": {
+      "type": "application",
+      "bom-ref": "project",
+      "name": "Harrow Ridge"
+    }
+  },
+  "components": [
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:nvidia/NVIDIA-Nemotron-3-Super-120B",
+      "name": "nvidia/NVIDIA-Nemotron-3-Super-120B",
+      "supplier": {
+        "name": "NVIDIA"
+      },
+      "licenses": [
+        {
+          "license": {
+            "name": "NVIDIA Nemotron Open Model License"
+          }
+        }
+      ],
+      "pedigree": {
+        "ancestors": [
+          {
+            "type": "machine-learning-model",
+            "name": "Nemotron 3 Super (pretrained from scratch by NVIDIA)",
+            "properties": [
+              {
+                "name": "sovai:origin",
+                "value": "US"
+              },
+              {
+                "name": "sovai:relation",
+                "value": "base"
+              }
+            ]
+          },
+          {
+            "type": "machine-learning-model",
+            "name": "DeepSeek V3.2",
+            "properties": [
+              {
+                "name": "sovai:origin",
+                "value": "CN"
+              },
+              {
+                "name": "sovai:relation",
+                "value": "teacher (synthetic-data)"
+              }
+            ]
+          },
+          {
+            "type": "machine-learning-model",
+            "name": "Kimi K2",
+            "properties": [
+              {
+                "name": "sovai:origin",
+                "value": "CN"
+              },
+              {
+                "name": "sovai:relation",
+                "value": "teacher (synthetic-data)"
+              }
+            ]
+          },
+          {
+            "type": "machine-learning-model",
+            "name": "Qwen3-Coder",
+            "properties": [
+              {
+                "name": "sovai:origin",
+                "value": "CN"
+              },
+              {
+                "name": "sovai:relation",
+                "value": "teacher (synthetic-data)"
+              }
+            ]
+          },
+          {
+            "type": "machine-learning-model",
+            "name": "gpt-oss-120b",
+            "properties": [
+              {
+                "name": "sovai:origin",
+                "value": "US"
+              },
+              {
+                "name": "sovai:relation",
+                "value": "teacher (synthetic-data)"
+              }
+            ]
+          }
+        ]
+      },
+      "properties": [
+        {
+          "name": "sovai:origin",
+          "value": "US"
+        },
+        {
+          "name": "sovai:passport",
+          "value": "nvidia/nemotron-3-super"
+        },
+        {
+          "name": "sovai:passportHash",
+          "value": "6170f69d0de2871ee11aaa9aa5920049b344909df32bf3ed22da4339c66fca65"
+        },
+        {
+          "name": "sovai:endpointClass",
+          "value": "nearai-tee"
+        },
+        {
+          "name": "sovai:usesServed",
+          "value": "T2"
+        },
+        {
+          "name": "sovai:firstUse",
+          "value": "2026-11-25T11:30:00Z"
+        },
+        {
+          "name": "sovai:lastUse",
+          "value": "2026-11-25T11:30:00Z"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:openai/gpt-oss-120b",
+      "name": "openai/gpt-oss-120b",
+      "supplier": {
+        "name": "OpenAI"
+      },
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "pedigree": {
+        "ancestors": [
+          {
+            "type": "machine-learning-model",
+            "name": "gpt-oss (open weights; training data not published)",
+            "properties": [
+              {
+                "name": "sovai:origin",
+                "value": "US"
+              },
+              {
+                "name": "sovai:relation",
+                "value": "base"
+              }
+            ]
+          }
+        ]
+      },
+      "properties": [
+        {
+          "name": "sovai:origin",
+          "value": "US"
+        },
+        {
+          "name": "sovai:passport",
+          "value": "openai/gpt-oss"
+        },
+        {
+          "name": "sovai:passportHash",
+          "value": "8399357ea7ad21c6c935b5aa106f99c9d91a84e7ec1fe547eddca9999b90f075"
+        },
+        {
+          "name": "sovai:endpointClass",
+          "value": "nearai-tee"
+        },
+        {
+          "name": "sovai:usesServed",
+          "value": "T2"
+        },
+        {
+          "name": "sovai:firstUse",
+          "value": "2026-11-25T10:00:00Z"
+        },
+        {
+          "name": "sovai:lastUse",
+          "value": "2026-11-25T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:z-ai/glm-5.3",
+      "name": "z-ai/glm-5.3",
+      "supplier": {
+        "name": "Zhipu AI"
+      },
+      "licenses": [
+        {
+          "license": {
+            "name": "GLM-5.3 License"
+          }
+        }
+      ],
+      "pedigree": {
+        "ancestors": [
+          {
+            "type": "machine-learning-model",
+            "name": "GLM",
+            "properties": [
+              {
+                "name": "sovai:origin",
+                "value": "CN"
+              },
+              {
+                "name": "sovai:relation",
+                "value": "base"
+              }
+            ]
+          }
+        ]
+      },
+      "properties": [
+        {
+          "name": "sovai:origin",
+          "value": "CN"
+        },
+        {
+          "name": "sovai:passport",
+          "value": "z-ai/glm"
+        },
+        {
+          "name": "sovai:passportHash",
+          "value": "d9c8c0fea450c0e00cf0f6f424a0d07b671a8621fae66df1bdce8700f7d0e628"
+        },
+        {
+          "name": "sovai:endpointClass",
+          "value": "nearai-tee"
+        },
+        {
+          "name": "sovai:usesServed",
+          "value": "T0"
+        },
+        {
+          "name": "sovai:lane",
+          "value": "t0"
+        },
+        {
+          "name": "sovai:firstUse",
+          "value": "2026-11-25T09:00:00Z"
+        },
+        {
+          "name": "sovai:lastUse",
+          "value": "2026-11-25T11:00:00Z"
+        }
+      ]
+    }
+  ]
+}

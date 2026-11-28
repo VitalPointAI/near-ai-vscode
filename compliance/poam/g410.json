@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "sa-11",
+    "sr-04"
+  ],
+  "gap": "G410",
+  "id": "g410",
+  "milestones": [
+    {
+      "phase": "74.3",
+      "title": "Phase 74.3's evaluation harness produces evaluation references your organization can cite"
+    },
+    {
+      "targetDate": "2027-06-30",
+      "title": "Your organization's first evaluated approval of a Western model"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The shipped approvals carry no evaluation. Under enforce, every role above research needs your organization's own evaluation and red team of the exact model files, cited in its approval. Until one exists, enforce refuses agent work and checks go to a person; report mode keeps the product working. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-16.",
+  "title": "No model may take a role under enforce until your organization evaluates it"
+}

@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-03",
+    "sc-12"
+  ],
+  "gap": "G551",
+  "id": "g551",
+  "milestones": [
+    {
+      "phase": "33.2",
+      "title": "Verify that every affected cell pauses writes until its new key is committed, including after interruption or on another computer."
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "A clearance reduction and its cell key rotations are separate signed entries. If a computer has verified the reduction but has yet to verify rotation of every affected cell, local writes can still use a key known to an earlier recipient whose device remains a member. Record the affected cells and pending rotations in authenticated roster state, pause local writes under the previous keys, and resume only once the new keys are verified and wrapped to cleared recipients.",
+  "title": "An unfinished clearance reduction can leave local writes using the old cell key"
+}

@@ -18,8 +18,8 @@ const stateFor = (id: string, rows: readonly { level: string; control: string; s
 
 test('the real gap register and every POA&M item validate', () => {
   // Ratchet floor prevents accidental mass deletion without forcing exact-count merge conflicts on parallel branches.
-  assert.ok(gaps.length >= 454, `expected at least 454 gaps, found ${gaps.length}`);
-  assert.ok(poam.length >= 371, `expected at least 371 POA&M items, found ${poam.length}`);
+  assert.ok(gaps.length >= 487, `expected at least 487 gaps, found ${gaps.length}`);
+  assert.ok(poam.length >= 396, `expected at least 396 POA&M items, found ${poam.length}`);
   const gapIds = new Set(gaps.map((gap) => gap.id));
   const poamIds = new Set(poam.map((item) => item.id));
   assert.equal(gapIds.size, gaps.length, 'gap ids must be unique');

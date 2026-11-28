@@ -71,9 +71,12 @@ The chat view's title-bar "Home" opens one page filtered by kind of work:
 
 ## 5. Palette, title bar and status bar
 
+> Amended 2026-11-25 (Phase 48.4, sovereignty status, plan 48.4-01): the sovereignty item is the one second permanent status bar item.
+
 - **Palette.** New context keys (none exist today besides the team-active key in `src/services/team/teamSession.ts`): every staff command gets `when: nearAi.staffProject`; cyber commands `nearAi.cyberProject` (or move to the Cybersecurity page); simulation commands `nearAi.simulationRunning` or the staff context. Approve, Reject and Release stay commands for security reasons (STAFF-UX 4) but only in staff projects. A software project drops from about 70 visible commands to about 35. Command ids move to namespaces (`nearAi.setup.*`, `nearAi.team.*`, `nearAi.staff.*`, `nearAi.policy.*`) with hidden aliases.
 - **Chat title bar.** Icons: New Chat, History, Home, Stop (only while a run is going). Overflow: Settings, Status, Help. 17 entries become 7. "Save Continuity Checkpoint" moves to History.
 - **Status bar.** One NEAR AI item: label, trust and sync in one short line ("Protected B · Verified · Synced"); clicking opens the trust and sync popover. Emergency stop shows only while a run is going. The separate gate, scan, simulation and Team Mode items fold into the popover.
+- **Sovereignty item (Phase 48.4).** The one second permanent status bar item, in the Sterling workbench and in the desktop extension, left of the policy item: "Sovereignty: {state}", with the first worst row's short reason when it is not Met. It is never folded into the trust and sync popover, because it is the every-page credibility signal the owner asked for (Q9). Clicking it opens the sovereignty card. In the workbench only one item shows: the desktop extension's item stays hidden when the workbench provides its own.
 
 ## 6. Shared patterns
 

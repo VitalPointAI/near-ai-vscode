@@ -252,6 +252,22 @@ test('label-change: product.create of a name kept in another cell is refused, an
   assert.equal(product?.versions.length, 1);
 });
 
+test('a proposal awaiting rotation stores neither its entry nor its text blob', async () => {
+  const w = await world();
+  const { doc } = await writeProduct(w.lead, PRODUCT, 'org/Internal', 'The next estimate.');
+  assert.ok('ok' in await w.lead.p.appendOwn('member.remove', { member: w.m.member }));
+  const blobs = path.join(w.lead.at.root, ...REPLICA_DIR.split('/'), 'blobs');
+  const blobFiles = () => existsSync(blobs) ? readdirSync(blobs).sort() : [];
+  const beforeFiles = blobFiles();
+  const beforeStore = storeSnapshot(w.lead);
+  refusedWith(await propose(w.lead, PRODUCT, doc, 'org/Internal'), 'rekey-pending');
+  assert.deepEqual(blobFiles(), beforeFiles);
+  assert.equal(storeSnapshot(w.lead), beforeStore);
+  ok(await finishRekeys(w.lead.host), 'finish rotation');
+  assert.ok((await propose(w.lead, PRODUCT, doc, 'org/Internal')).ok);
+  assert.ok(readdirSync(blobs).length > beforeFiles.length);
+});
+
 test('label-change (WR-01): a version header whose compartments or releasability are not its cell\'s is refused, though scale and level match; the header that names the cell\'s whole label applies', async () => {
   const lead = await leadWith({ clearance: { scale: 'org', level: 'Confidential', compartments: ['KESTREL'], releasability: ['CAN'] } });
   const plain = await writeProduct(lead, PRODUCT, 'org/Confidential', 'Water for two days.');
@@ -386,6 +402,8 @@ test('legacy: naming a cleared deputy gives their device the legacy cell and say
   const finished = ok(await finishRekeys(lead.host), 'finish');
   assert.deepEqual(finished.rekeyed, [legacy]);
   assert.ok(finished.message.endsWith(REKEY_KEEP_TEXT));
+  assert.ok(finished.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(finished.message, /anything new/);
   const { roster, hash, position } = await head(lead.p);
   assert.equal(epochAt(roster.cells, legacy, position), 2);
   assert.deepEqual(rosterView(roster).cellGrantees?.(legacy, hash), [lead.writer], 'the new key went to the lead only');

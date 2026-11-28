@@ -25,15 +25,15 @@
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url, verifySignature } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { MAX_PAYLOAD_BYTES, PayloadError, signPayload, verifyPayload } from '../team/signedPayload';
-import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
+import { MAX_PAYLOAD_BYTES, PayloadError, signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
+import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../team/signedPayload';
 import { findSecrets } from '../team/secrets';
 import { isRecord } from '../team/validate';
 import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, entryHash, parseHeaderShape, writerIdOf } from './entry';
 import type { EntryHeader, SealedBlob, SealedEntry } from './entry';
 import { X25519_KEY_BYTES, readGrant, x25519BindingBytes } from './cellKeys';
 import type { KemPublicKeys } from './cellWrapV2';
-import { kemBindingHolds, signKemBinding } from './deviceKem';
+import { kemBindingBytes, kemBindingHolds, signKemBinding } from './deviceKem';
 import type { KemBinding } from './deviceKem';
 import { MAX_FEATURES, isReplicaFeature } from './features';
 import { kemProblem } from './kindSchemas/device';
@@ -234,10 +234,21 @@ export interface BuildInviteInput {
 // invite of Add My Other Machine (D-18): only that member's other machine may answer it, and its admission is a device.add. Throws when the content is
 // not a valid invite, or when another device signs without naming itself as the inviter.
 export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): SignedPayload<InvitePayload> {
-  const leadKey = input.lead.publicKey ?? signer.publicKey;
-  if (input.inviter === undefined && leadKey !== signer.publicKey) throw new Error('The invitation was not made: a device other than the founding lead\'s must name itself as the inviter.');
+  return signPayload(signer, 'staff-invite', invitePayloadFor(signer.publicKey, input), { now: () => input.now });
+}
+
+// buildInvite with a signer that answers later: the person key in a hosted session (Phase 33 D-60, 33-27). Same payload; a refusal comes back as it is.
+export function buildInviteAsync(signer: AnySigner, input: BuildInviteInput): Promise<SignedPayload<InvitePayload> | SignRefused> {
+  return signPayloadAsync(signer, 'staff-invite', invitePayloadFor(signer.publicKey, input), { now: () => input.now });
+}
+
+type AnySigner = PayloadSigner | AsyncPayloadSigner;
+
+function invitePayloadFor(signerKey: string, input: BuildInviteInput): InvitePayload {
+  const leadKey = input.lead.publicKey ?? signerKey;
+  if (input.inviter === undefined && leadKey !== signerKey) throw new Error('The invitation was not made: a device other than the founding lead\'s must name itself as the inviter.');
   const lead: InviteLead = { member: input.lead.member, writer: writerIdOf(leadKey), publicKey: leadKey, x25519: input.lead.x25519 };
-  const inviter: InviteLead = input.inviter === undefined ? { ...lead } : { member: input.inviter.member, writer: writerIdOf(signer.publicKey), publicKey: signer.publicKey, x25519: input.inviter.x25519 };
+  const inviter: InviteLead = input.inviter === undefined ? { ...lead } : { member: input.inviter.member, writer: writerIdOf(signerKey), publicKey: signerKey, x25519: input.inviter.x25519 };
   const payload: InvitePayload = {
     genesisHash: input.genesisHash,
     project: input.project,
@@ -256,7 +267,7 @@ export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): Sig
     payload.hub = { address: own(hub, 'address'), certPin: own(hub, 'certPin'), writer: own(hub, 'writer') } as InviteHub;
   }
   if (invitePayloadOf(payload) === undefined) throw new Error('The invitation was not made: one of its fields is not valid.');
-  return signPayload(signer, 'staff-invite', payload, { now: () => input.now });
+  return payload;
 }
 
 export type InviteRead = { ok: true; invite: InvitePayload } | InviteFailure;
@@ -299,14 +310,40 @@ function freshJoinNonce(): string {
 // fresh here, after the invite was read, which is what makes the safety code cost a second preimage (safetyCode.ts).
 export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, input: BuildJoinRequestInput): SignedPayload<JoinRequestPayload> {
   const writer = writerIdOf(signer.publicKey);
-  const member = input.member ?? invite.forMember;
-  const fields: JoinMacFields = { invite: invite.invite, genesisHash: invite.genesisHash, name: input.name, publicKey: signer.publicKey, x25519: input.x25519, nonce: freshJoinNonce() };
-  if (member !== undefined) fields.member = member;
-  const payload: JoinRequestPayload = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519, x25519Sig: signer.sign(x25519BindingBytes(input.x25519, writer)), nonce: fields.nonce, mac: joinMac(invite.secret, fields) };
-  if (member !== undefined) payload.member = member;
-  if (input.kem !== undefined && (invite.requires ?? []).includes(KEM_JOIN_FEATURE)) payload.kem = signKemBinding(input.kem, writer, (bytes) => signer.sign(bytes));
-  if (joinPayloadOf(payload) === undefined) throw new Error('The join request was not made: one of its fields is not valid.');
+  const nonce = freshJoinNonce();
+  const binding = signer.sign(x25519BindingBytes(input.x25519, writer));
+  const withKem = input.kem !== undefined && (invite.requires ?? []).includes(KEM_JOIN_FEATURE);
+  const kem = withKem ? signKemBinding(input.kem as KemPublicKeys, writer, (bytes) => signer.sign(bytes)) : undefined;
+  const payload = joinPayloadFor(signer.publicKey, invite, input, nonce, binding, kem);
   return signPayload(signer, 'staff-join-request', payload, { now: () => input.now });
+}
+
+// buildJoinRequest with a signer that answers later: the person key of a hosted session joins (Phase 33 D-61, 33-27). It signs the X25519 binding,
+// the post-quantum binding when the invitation asks for it, and the request; the first refusal comes back as it is and nothing more is signed.
+export async function buildJoinRequestAsync(signer: AnySigner, invite: InvitePayload, input: BuildJoinRequestInput): Promise<SignedPayload<JoinRequestPayload> | SignRefused> {
+  const writer = writerIdOf(signer.publicKey);
+  const nonce = freshJoinNonce();
+  const binding = await signer.sign(x25519BindingBytes(input.x25519, writer));
+  if (typeof binding !== 'string') return { refused: String(binding.refused) };
+  let kem: KemBinding | undefined;
+  if (input.kem !== undefined && (invite.requires ?? []).includes(KEM_JOIN_FEATURE)) {
+    const sig = await signer.sign(kemBindingBytes(input.kem, writer));
+    if (typeof sig !== 'string') return { refused: String(sig.refused) };
+    kem = { p256: input.kem.p256, mlkem768: input.kem.mlkem768, sig };
+  }
+  return signPayloadAsync(signer, 'staff-join-request', joinPayloadFor(signer.publicKey, invite, input, nonce, binding, kem), { now: () => input.now });
+}
+
+// The shared join fields use the same fresh nonce in the payload and its MAC.
+function joinPayloadFor(publicKey: string, invite: InvitePayload, input: BuildJoinRequestInput, nonce: string, x25519Sig: string, kem: KemBinding | undefined): JoinRequestPayload {
+  const member = input.member ?? invite.forMember;
+  const fields: JoinMacFields = { invite: invite.invite, genesisHash: invite.genesisHash, name: input.name, publicKey, x25519: input.x25519, nonce };
+  if (member !== undefined) fields.member = member;
+  const payload: JoinRequestPayload = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519, x25519Sig, nonce: fields.nonce, mac: joinMac(invite.secret, fields) };
+  if (member !== undefined) payload.member = member;
+  if (kem !== undefined) payload.kem = kem;
+  if (joinPayloadOf(payload) === undefined) throw new Error('The join request was not made: one of its fields is not valid.');
+  return payload;
 }
 
 export type JoinRequestCheck = { ok: true; request: JoinRequestPayload; writer: string } | InviteFailure;
@@ -585,11 +622,20 @@ export interface BuildHubJoinInput { hub: string; project: string; request: Sign
 // Signs the hub join envelope with the joining device, the device that signed the request. Throws a plain error when another device signs it or a
 // field is not valid.
 export function buildHubJoin(signer: PayloadSigner, input: BuildHubJoinInput): SignedPayload<HubJoinPayload> {
+  return signPayload(signer, 'staff-hub-join', hubJoinPayloadFor(signer.publicKey, input), { now: () => input.now });
+}
+
+// buildHubJoin with a signer that answers later: the person key of a hosted session, the device that made the request (33-27).
+export function buildHubJoinAsync(signer: AnySigner, input: BuildHubJoinInput): Promise<SignedPayload<HubJoinPayload> | SignRefused> {
+  return signPayloadAsync(signer, 'staff-hub-join', hubJoinPayloadFor(signer.publicKey, input), { now: () => input.now });
+}
+
+function hubJoinPayloadFor(publicKey: string, input: BuildHubJoinInput): HubJoinPayload {
   const request = joinPayloadOf(isRecord(input.request) ? own(input.request, 'payload') : undefined);
-  if (request === undefined || request.publicKey !== signer.publicKey) throw new Error('The hub join was not made: it must be signed by the device that made the join request.');
+  if (request === undefined || request.publicKey !== publicKey) throw new Error('The hub join was not made: it must be signed by the device that made the join request.');
   const payload: HubJoinPayload = { v: HUB_JOIN_VERSION, hub: input.hub, project: input.project, invite: request.invite, request: joinRequestHash(input.request), hubMac: input.hubMac };
   if (hubJoinPayloadOf(payload) === undefined) throw new Error('The hub join was not made: one of its fields is not valid.');
-  return signPayload(signer, 'staff-hub-join', payload, { now: () => input.now });
+  return payload;
 }
 
 export type HubJoinRead = { ok: true; join: HubJoinPayload; writer: string } | InviteFailure;

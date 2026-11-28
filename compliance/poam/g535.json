@@ -1,0 +1,28 @@
+{
+  "controls": [
+    "sa-400.01",
+    "sa-400.02",
+    "sa-400.03",
+    "sa-400.04",
+    "sa-400.05",
+    "sa-400.06",
+    "sa-400.07",
+    "sa-400.08",
+    "sa-400.09"
+  ],
+  "gap": "G535",
+  "id": "g535",
+  "milestones": [
+    {
+      "phase": "48.4",
+      "title": "Hosted Protected B selects SA-400(3) to SA-400(9) (O4, accepted 2026-11-25) and 48.4-15 adds their statements"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "Your organization's SA-400(1) and SA-400(2) assessments are recorded with the G117 assessment"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "The Medium profile selects SA-400 without its nine enhancements, which are the clearest Canadian statement of what sovereign means, and the sovereignty card uses them as its criteria. The owner decided on 2026-11-25 (O4) that hosted Protected B selects SA-400(3) to SA-400(9) as organization-defined additions; 48.4-15 adds their statements and evidence rules from the same facts the card reads, and SA-400(1) and SA-400(2) stay your organization's assessments. Sovereignty: assessments.",
+  "title": "The SA-400 enhancements are not selected or assessed for the hosted levels"
+}

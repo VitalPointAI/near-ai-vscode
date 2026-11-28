@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The compliance fit check: every third-party resource the repository uses (npm packages, container images, GitHub Actions, the libraries
 // shipped under vendor/, the Helm charts and pinned tools of the deployment stack) must have a reviewed entry in compliance/resources.json saying how it helps or affects the compliance requirements, and
-// whether it fits. Run by the required `lint` CI job. No dependencies; the files are read as text.
+// whether it fits; and every model the extension ships a passport for. Run by the required `lint` CI job. No dependencies; the files are read as text.
 //
 //   node scripts/resource-check.mjs          check, and exit 1 with one plain line per problem
 //   node scripts/resource-check.mjs --json   print the inventory (what was found, with each entry's fit) as evidence, then check
@@ -20,17 +20,22 @@ export const CHART_LOCK = 'deploy/charts/charts.lock.json';
 export const TOOL_PINS = 'compliance/ci/tool-pins.json';
 export const IMAGE_LOCK = 'deploy/bundle/images.lock.json';
 export const CONTAINERFILE_DIR = 'deploy/images';
+// The model passports the extension ships (Phase 74.1 D-10): one `model:<passport id>` resource per row, read from each row's literal `id: '<id>'` line.
+// Phase 74.3 appends its classifier roster here.
+export const MODEL_FILES = Object.freeze(['src/domain/gate/shippedPassports.ts']);
 // The fixed set of architecture areas every entry's architectureArea names (one place; the component catalogue's area summaries live there too).
 export const AREAS_FILE = 'compliance/architecture-areas.json';
 
-export const KINDS = Object.freeze(['npm', 'image', 'action', 'vendored', 'chart', 'tool']);
+export const KINDS = Object.freeze(['npm', 'image', 'action', 'vendored', 'chart', 'tool', 'model']);
 export const SCOPES = Object.freeze(['runtime', 'build', 'test']);
 export const FITS = Object.freeze(['pass', 'pass-with-conditions', 'fail']);
-const FIELDS = Object.freeze(['id', 'kind', 'where', 'component', 'scope', 'purpose', 'role', 'architectureArea', 'roleNeedsReview', 'licence', 'controls', 'evidence', 'crypto', 'cveResponse', 'airGap', 'fit', 'conditions', 'reviewer', 'reviewedAt']);
-const ID_PREFIX = Object.freeze({ npm: 'npm:', image: 'image:', action: 'action:', vendored: 'vendor:', chart: 'chart:', tool: 'tool:' });
+const FIELDS = Object.freeze(['id', 'kind', 'where', 'component', 'scope', 'purpose', 'role', 'architectureArea', 'roleNeedsReview', 'licence', 'controls', 'evidence', 'crypto', 'cveResponse', 'airGap', 'fit', 'conditions', 'reviewer', 'reviewedAt', 'supplier', 'supplierJurisdiction']);
+const ID_PREFIX = Object.freeze({ npm: 'npm:', image: 'image:', action: 'action:', vendored: 'vendor:', chart: 'chart:', tool: 'tool:', model: 'model:' });
 const CRYPTO = /^(none|uses-platform|unvalidated|validated:.+)$/;
 const AIR_GAP = /^(ok|no|needs-mirror:.+)$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+// Phase 48.4 D-08: who publishes the resource and the country of that organization's legal seat, as its own pages state it, or unknown.
+const JURISDICTION = /^([A-Z]{2}|unknown)$/;
 const SHA = /^[0-9a-f]{40}$/;
 
 const read = (root, file) => readFileSync(path.join(root, file), 'utf8');
@@ -52,6 +57,11 @@ export function parseImage(ref) {
 /** The `uses:` references of one workflow file's text (comments ignored). */
 export function workflowUses(text) {
   return [...text.matchAll(/^\s*(?:-\s+)?uses:\s*['"]?([^\s'"#]+)/gm)].map((match) => match[1]);
+}
+
+/** The passport ids of one shipped passports file: each row's own `id: '<id>',` line (a nested object's id never starts a line). */
+export function passportIds(text) {
+  return [...text.matchAll(/^\s*id: '([^']+)',/gm)].map((match) => match[1]);
 }
 
 /** The npm packages vendor-libs.mjs copies or bundles (read from its source, never run). */
@@ -117,6 +127,7 @@ export function discover(root) {
   }
   if (existsSync(path.join(root, VENDOR_SCRIPT))) for (const name of vendoredFromScript(read(root, VENDOR_SCRIPT))) add(found, `vendor:${name}`, 'vendored', VENDOR_SCRIPT);
   if (existsSync(path.join(root, VENDORED_JSON))) for (const pkg of JSON.parse(read(root, VENDORED_JSON)).packages ?? []) add(found, `vendor:${pkg.name}`, 'vendored', VENDORED_JSON);
+  for (const file of MODEL_FILES.filter((file) => existsSync(path.join(root, file)))) for (const id of passportIds(read(root, file))) add(found, `model:${id}`, 'model', file);
   for (const entry of found.values()) entry.where.sort();
   return { resources: found, problems };
 }
@@ -180,6 +191,10 @@ export function entryProblems(entry, known = { controls: new Set(), components: 
   else if (known.controls.size) for (const control of entry.controls.filter((control) => !known.controls.has(control))) out.push(say(`control "${control}" is not in the catalogues.`));
   if (!CRYPTO.test(entry.crypto ?? '')) out.push(say('crypto must be none, uses-platform, unvalidated or validated:<certificate or mode>.'));
   if (!AIR_GAP.test(entry.airGap ?? '')) out.push(say('airGap must be ok, no or needs-mirror:<what>.'));
+  if (!nonEmpty(entry.supplier)) out.push(say('supplier must name the organization that publishes it, or say unknown.'));
+  if (!(typeof entry.supplierJurisdiction === 'string' && JURISDICTION.test(entry.supplierJurisdiction))) {
+    out.push(say('supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.'));
+  }
   if (!DATE.test(entry.reviewedAt ?? '') || Number.isNaN(Date.parse(`${entry.reviewedAt}T00:00:00Z`))) out.push(say('reviewedAt must be a date (YYYY-MM-DD).'));
   if (!FITS.includes(entry.fit)) out.push(say(`fit must be one of ${FITS.join(', ')}.`));
   else if (entry.fit === 'fail') out.push(say(`is marked fail: it does not fit the compliance requirements and may not be used. Remove it, or replace it with a resource that fits.${stringList(entry.conditions) ? ` Reason: ${entry.conditions.join(' ')}` : ''}`));
@@ -223,7 +238,8 @@ export function inventory(register, discovered) {
   const byId = new Map((register?.resources ?? []).map((entry) => [entry?.id, entry]));
   return [...discovered.resources.values()].sort((a, b) => a.id.localeCompare(b.id)).map((resource) => {
     const entry = byId.get(resource.id);
-    return { ...resource, registered: Boolean(entry), fit: entry?.fit ?? null, scope: entry?.scope ?? null, component: entry?.component ?? null, licence: entry?.licence ?? null };
+    return { ...resource, registered: Boolean(entry), fit: entry?.fit ?? null, scope: entry?.scope ?? null, component: entry?.component ?? null, licence: entry?.licence ?? null,
+      supplier: entry?.supplier ?? null, supplierJurisdiction: entry?.supplierJurisdiction ?? null };
   });
 }
 

@@ -19,7 +19,7 @@
   },
   "media/compare/compare.js": {
     "em-dash": 1,
-    "glossary": 5
+    "glossary": 4
   },
   "media/cyber/cyber.html": {
     "glossary": 1
@@ -203,8 +203,7 @@
     "bare-team": 14
   },
   "src/services/toolsDirectory.ts": {
-    "bare-team": 3,
-    "glossary": 2
+    "bare-team": 3
   },
   "src/services/usageExport.ts": {
     "glossary": 1
@@ -243,7 +242,7 @@
   "src/staff/replica/singleCopy.ts": {
     "mode-word": 1
   },
-  "src/staff/replica/store.ts": {
+  "src/staff/replica/storeFiles.ts": {
     "mode-word": 1
   },
   "src/team/gitTransport.ts": {

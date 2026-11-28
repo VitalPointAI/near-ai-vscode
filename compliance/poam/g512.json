@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-16",
+    "sc-12",
+    "ia-05.02"
+  ],
+  "gap": "G512",
+  "id": "g512",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "The owner accepted this default on 2026-11-24; it is revisited if a partner or the authorizing official requires revocation lists to be fetched"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Partners' signing certificates on NATO bindings are checked against the trust anchors pinned for each partner in the signed policy, without fetching their certificate revocation lists, because the exchange never dereferences a URI from a partner's file. A partner's certificate is revoked here by your security officer removing that partner's anchor from the signed policy, which turns the partner's earlier arrivals back into not checked. The owner accepted this default on 2026-11-24. It is revisited if a partner or the authorizing official requires revocation lists to be fetched. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
+  "title": "Partners' signing certificates are checked without fetching revocation lists"
+}

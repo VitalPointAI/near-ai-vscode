@@ -13,8 +13,8 @@
 // from the same fold as every client. A session key stands where its certifying device stands, and is on the access list of every stream that device
 // is; it stops when the device is revoked, removed or quarantined, when its own log forks, and, by the hub's clock, at its certificate's notAfter.
 import type { KeyObject } from 'node:crypto';
-import { readGrant, unwrapEpochKey } from '@ext/domain/replica/cellKeys';
-import { unwrapEpochKeyV2, wrapFormatOf } from '@ext/domain/replica/cellWrapV2';
+import { readGrant } from '@ext/domain/replica/cellKeys';
+import { unwrapForDevice } from '@ext/domain/replica/cellWrapV2';
 import type { KemPrivateKeys } from '@ext/domain/replica/cellWrapV2';
 import type { CellGrant } from '@ext/domain/replica/cellKeys';
 import { openBody, parseHeaderShape } from '@ext/domain/replica/entry';
@@ -40,11 +40,7 @@ export interface RosterIdentity {
 
 /** The epoch key in a wrap addressed to the hub, by the wrap's format: v1 with the X25519 key, v2 with the post-quantum keys. Never throws. */
 export function openHubWrap(identity: RosterIdentity, grant: CellGrant, wrap: string): Buffer | undefined {
-  const format = wrapFormatOf(wrap);
-  const where = { cell: grant.cell, epoch: grant.epoch, writer: identity.writer, wrap };
-  if (format.ok && format.format === 1) return unwrapEpochKey({ ...where, privateKey: identity.x25519Private });
-  if (format.ok && format.format === 2 && identity.kem !== undefined) return unwrapEpochKeyV2({ ...where, privateKeys: identity.kem.privateKeys });
-  return undefined;
+  return unwrapForDevice({ cell: grant.cell, epoch: grant.epoch, writer: identity.writer, wrap, x25519: identity.x25519Private, ...(identity.kem === undefined ? {} : { kem: identity.kem.privateKeys }) });
 }
 
 /** A place in one writer's log. */
@@ -294,6 +290,16 @@ export class ProjectRoster {
     const device = this.standing(certificate.device);
     if (device !== 'admitted') return device === 'quarantined' ? 'quarantined' : 'revoked';
     return certifiedWriter(this.view, certificate.writer, this.head) === undefined ? 'revoked' : 'admitted';
+  }
+
+  /**
+   * May this writer act for the lead at the head (the join desk: registering invitations, reading join requests): a lead or deputy device, or a
+   * session key one of them certified that stands (Phase 33 D-62, 33-27). It never writes the roster: roster kinds are the person key's (D-60).
+   */
+  actsForRosterWriter(writer: string): boolean {
+    const certificate = this.sessionOf(writer);
+    if (certificate !== undefined) return this.standing(writer) === 'admitted' && this.isRosterWriter(certificate.device);
+    return this.isRosterWriter(writer);
   }
 
   /** May this device write the roster at the head: a device of the staff lead or the deputy lead there. */

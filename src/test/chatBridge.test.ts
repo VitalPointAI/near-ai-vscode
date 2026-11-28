@@ -74,26 +74,28 @@ test('session history exposes only the immutable non-sensitive attribution snaps
   assert.doesNotMatch(JSON.stringify(message), /api[_ -]?key|refresh[-_ ]?token|private prompt|raw context|command\s*[:=]|\//i);
 });
 
-test('model options preserve catalog IDs and keep pricing display separate', () => {
-  assert.deepEqual(modelOptions([
+test('model options preserve catalog IDs, drop an empty one, and show the row words (74.1-12: the price stays on the Tools page)', () => {
+  const options = modelOptions([
     { id: 'qwen', inputPricePerMillion: 0.2, outputPricePerMillion: 0.8, supportsReasoning: false },
     { id: 'free', supportsReasoning: true },
     { id: ' ', supportsReasoning: false }
-  ]), [
-    { id: 'qwen', label: 'qwen · Privacy unknown · $0.2/$0.8 per 1M', privacy: 'unknown' },
-    { id: 'free', label: 'free · Privacy unknown', privacy: 'unknown' }
+  ], undefined, { organization: false, use: 'T2', now: Date.parse('2026-11-25T00:00:00Z') });
+  assert.deepEqual(options.map((option) => [option.id, option.privacy, option.group, option.text]), [
+    ['qwen', 'unknown', 'Runs on a place your rules do not name', 'qwen · origin unknown · family unknown · Research only; outside your rules for models (report only)'],
+    ['free', 'unknown', 'Runs on a place your rules do not name', 'free · origin unknown · family unknown · Research only; outside your rules for models (report only)']
   ]);
 });
 
-test('model options lead with private models and label forwarded ones with their destination', () => {
+test('model options lead with private models and label forwarded ones with their destination (74.1-12: Runs on groups, full row in the title)', () => {
   const options = modelOptions([
     { id: 'deepseek/deepseek-v4.1-flash', privacyBoundary: 'cloud', forwardedTo: 'openrouter.ai', supportsReasoning: false },
     { id: 'z-ai/glm-5.3', privacyBoundary: 'tee', supportsReasoning: false }
+  ], undefined, { organization: false, use: 'T2', now: Date.parse('2026-11-25T00:00:00Z') });
+  assert.deepEqual(options.map((option) => [option.id, option.privacy, option.group]), [
+    ['z-ai/glm-5.3', 'tee', 'Runs on NEAR AI private hardware (checked each time it is used)'],
+    ['deepseek/deepseek-v4.1-flash', 'forwarded', 'Runs on outside provider (openrouter.ai)']
   ]);
-  assert.deepEqual(options.map((option) => [option.id, option.privacy, option.label]), [
-    ['z-ai/glm-5.3', 'tee', 'z-ai/glm-5.3 · Private · NEAR AI private hardware, checked each time it is used'],
-    ['deepseek/deepseek-v4.1-flash', 'forwarded', 'deepseek/deepseek-v4.1-flash · Not private · forwarded to openrouter.ai']
-  ]);
+  assert.match(options[0]?.label ?? '', /^z-ai\/glm-5\.3 · China · GLM · /);
 });
 
 test('conversation history appends completed assistant turns only', () => {
@@ -154,10 +156,11 @@ test('0.4.28: "Watch the team" asks for Team Live and carries nothing the page c
 
 // Coherence review S4 and the glossary: the picker says where a private model runs and that it is checked each time, never that it is private on the
 // catalog's word alone. The words still start with "Private", which the answer's facts read when no catalog entry says where a model runs.
-test('S4: the picker\'s words for a TEE model say NEAR AI private hardware, checked each time it is used', () => {
-  assert.equal(modelPrivacyLabel({ privacyBoundary: 'tee' }), 'Private · NEAR AI private hardware, checked each time it is used');
-  assert.equal(modelPrivacyLabel({ privacyBoundary: 'local' }), 'Local · runs on this machine');
+test('S4, 74.1-12: the picker\'s words for a TEE model say NEAR AI private hardware, checked each time it is used, with no bare "Private"', () => {
+  assert.equal(modelPrivacyLabel({ privacyBoundary: 'tee' }), 'Runs on NEAR AI private hardware (checked each time it is used)');
+  assert.equal(modelPrivacyLabel({ privacyBoundary: 'local' }), 'Runs on this computer');
   const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
-  assert.ok(page.includes("['tee', 'Private · NEAR AI private hardware, checked each time it is used']"));
   assert.ok(!page.includes('runs in NEAR TEE'));
+  assert.ok(!page.includes('Private ·'), 'no bare Private group label on the page');
+  assert.ok(!page.includes('\u{1F512}') && !page.includes(String.fromCodePoint(0x1F512)), 'no lock emoji');
 });

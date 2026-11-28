@@ -10,7 +10,7 @@ import { COMPACTION_WINDOW, type ProductTextOutput } from '../../domain/replica/
 import { verifyEntry, type VerifiedEntry } from '../../domain/replica/verify';
 import type { HubMemory } from './hubSync';
 import { productOutput } from './productFeed';
-import { isProjectRefused, type ReplicaProject } from './replicaProject';
+import type { ReplicaProject } from './replicaProject';
 
 const MAX_PREPARATION_ENTRIES = 4096;
 const MAX_PREPARATION_BODY_CHARS = 16 * 1024 * 1024;
@@ -175,7 +175,7 @@ export type CompactionRefused = { ok: false; reason: keyof typeof COMPACTION_REF
 const refuseCompaction = (reason: keyof typeof COMPACTION_REFUSALS): CompactionRefused => ({ ok: false, reason, message: COMPACTION_REFUSALS[reason] });
 
 /** The part of a ReplicaProject the compactor uses. */
-export type CompactorProject = Pick<ReplicaProject, 'state' | 'context' | 'appendChecked' | 'ingestForeign' | 'entriesAfter' | 'projectId' | 'deviceWriter'> & Partial<Pick<ReplicaProject, 'checkpoints'>>;
+export type CompactorProject = Pick<ReplicaProject, 'state' | 'context' | 'appendChecked' | 'entriesAfter' | 'projectId' | 'deviceWriter'> & Partial<Pick<ReplicaProject, 'checkpoints'>>;
 
 /**
  * Whether a product may be compacted now: at least COMPACTION_WINDOW accepted updates since the newest compaction of it in the fold, by any writer.
@@ -193,15 +193,13 @@ export function compactionDue(output: ProductTextOutput | undefined, order: read
  * checks again, before the entry is signed, that the roster is still the one the compaction cites and that the window still allows it; the signed
  * entry is then folded in preview and appended only when the fold accepts it.
  */
-export async function publishCompaction(project: Pick<CompactorProject, 'appendChecked' | 'ingestForeign'>, prepared: PreparedCompaction): Promise<{ ok: true; hash: string } | CompactionRefused> {
-  const stored = await project.ingestForeign([], [prepared.blob]);
-  if (isProjectRefused(stored)) return refuseCompaction('refused');
+export async function publishCompaction(project: Pick<CompactorProject, 'appendChecked'>, prepared: PreparedCompaction): Promise<{ ok: true; hash: string } | CompactionRefused> {
   const { stream, payload } = prepared;
   const written = await project.appendChecked<CompactionRefused>(({ roster, fold }) => {
     if (roster.positions[roster.positions.length - 1] !== prepared.rosterHead) return refuseCompaction('stale');
     if (!compactionDue(productOutput(fold, stream, payload.product), fold.order)) return refuseCompaction('not-due');
     return {
-      kind: 'doc.compact', data: payload, options: { stream, roster: prepared.rosterHead },
+      kind: 'doc.compact', data: payload, options: { stream, roster: prepared.rosterHead, contentBlob: prepared.blob },
       check: (preview, hash) => (preview.applied.includes(hash) && productOutput(preview, stream, payload.product)?.compactions.some((item) => item.entry === hash && item.verified))
         ? undefined : refuseCompaction('refused')
     };

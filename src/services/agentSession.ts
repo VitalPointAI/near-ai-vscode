@@ -41,7 +41,7 @@ import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import { displayPath, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
-import { agentModelFor, expandPrompt, fallbackModelsFor, GsdAgent, GsdSkill, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
+import { expandPrompt, fallbackModelsFor, GsdAgent, GsdSkill, PrivacyCandidate, tierOf } from '../gsd/library';
 import { failureReason, modelDisplayName, ModelTrouble, switchNotice } from '../agent/modelFallback';
 import { trustedPreambles } from '../gsd/preamble';
 import { gsdTools, Question } from '../gsd/tools';
@@ -82,7 +82,8 @@ import { staffHostFor } from '../staff/staffHost';
 import { observationStoreFor } from '../staff/observationStore';
 import { attend } from '../staff/watchAttendance';
 import { watchHostFor } from '../staff/watchHost';
-import { privateRefusal, routeAllows, type PrivateRoute } from './privateRoute';
+import { routeAllows, type PrivateRoute } from './privateRoute';
+import { resolveSubagentModel, writingModelsOf } from './subagentModel';
 import { answerFactsOf, type AnswerFacts } from './answerFacts';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
@@ -784,7 +785,7 @@ export class AgentConversation {
         let routeOfRun: SessionRoute | undefined;
         const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result, { ...checked, client: request.client }); };
         const onNotice = (text: string): void => this.post({ type: 'notice', text });
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked, onNotice }) : defaultSessionRoute();
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked, onNotice, use: { tools: true } }) : defaultSessionRoute();
         routeOfRun = runRoute;
         // Coherence review S4: in TEE-only mode every request of the run counts as private only when the gate's own check passes, not on the catalog's word.
         const runAll = () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal));
@@ -1501,27 +1502,10 @@ export class AgentConversation {
         // that member, so the feed says so (member: false) and Team Live and the staff lanes never put it on the member's card.
         const onTeam = Boolean(spawn.agent) && offeredMembers.includes(label);
         const membership = onTeam ? { member: true } : memberNames.includes(label) ? { member: false } : {};
-        const roleModel = spawn.agent && !(teamMember && spawn.agent.model) ? roleModelFor(label, request.roleModels ?? {}) : undefined;
-        // A model the Agent call names that is not on this key fails the call, naming it and the models that are; a role, agent-file or
-        // tier model that is not on this key falls back to the chat's model with a note the lead sees (in the result) and the person sees.
-        // A private member keeps its own resolution below, so its unresolved request still falls back rather than failing.
-        const choice = agentModelFor({ roleModel, requested: spawn.model, agentModel: spawn.agent?.model, tiers, current: request.model, available: request.availableModels });
-        if ('error' in choice && spawn.agent?.privacy !== 'private') throw new ToolError(choice.error);
-        let model = 'error' in choice ? request.model : choice.model;
-        let modelNote = 'error' in choice ? undefined : choice.note;
-        // A member that must stay private runs on a TEE or local model, or not at all: it never falls back to a forwarded model.
-        if (spawn.agent?.privacy === 'private') {
-          const tier = tierOf(roleModel ?? spawn.model ?? spawn.agent.model);
-          const offered = (request.modelCatalog ?? []).filter((candidate) => !request.availableModels || request.availableModels.includes(candidate.id) || candidate.id === request.model);
-          // Fail closed on the route: every sub-agent is sent through this run's one client, so a model is eligible only if it is private on
-          // that client. A local catalog entry is never sent to the NEAR client (NEAR would serve or forward it), and a TEE entry only goes to
-          // NEAR's own endpoint, where its attestation can be checked; never to a local runtime or another endpoint claiming TEE.
-          const candidates = offered.filter((candidate) => routeAllows(request.route, candidate));
-          const chosen = privateModelFor(model, tier, tiers, candidates);
-          if (!chosen || !routeAllows(request.route, candidates.find((candidate) => candidate.id === chosen))) throw new ToolError(privateRefusal(label, tier, request.route));
-          if (chosen !== model || 'error' in choice) modelNote = `${label} must stay private, so it runs on the private model ${chosen}${'error' in choice ? ` (the requested ${spawn.model} is not a model on this key)` : ''}.`;
-          model = chosen;
-        }
+        // The member's model (subagentModel.ts): its own line, the role's model, the tier; a private member stays private; a checker is of another family.
+        const resolved = resolveSubagentModel({ label, spawn, teamMember, request: { ...request, tiers }, writing: writingModelsOf(request), route: currentSessionRoute() });
+        const { model, roleModel, checkFamilies } = resolved;
+        const modelNote = resolved.modelNote;
         // The model the agent runs on goes back to the lead with its report (and in the "Started" line of a background agent), so the lead
         // can say truthfully which model did the work; a fallback is also shown to the person.
         if (modelNote) this.post({ type: 'notice', text: `${label}: ${modelNote}` });
@@ -1713,7 +1697,7 @@ export class AgentConversation {
             // The sub-agent's own route names it in its records, and shares the parent's mark and attestation state, so a helper is routed as its lead is
             // (research 9.1); outside a parent route (a test) it starts from the chat's own state.
             const parentRoute = currentSessionRoute();
-            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}), ...(parentRoute?.onNotice ? { onNotice: parentRoute.onNotice } : {}) }) : parentRoute ?? defaultSessionRoute();
+            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf, parent: parentRoute } : {}), use: { tools: true, context: 'sub-agent', ...(checkFamilies ? { checkingJob: true } : {}) }, ...(checkFamilies ? { checkFamilies } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}), ...(parentRoute?.onNotice ? { onNotice: parentRoute.onNotice } : {}) }) : parentRoute ?? defaultSessionRoute();
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
             // Coherence review S4: a private member (its own line, or a private team's) is sent only when the gate's own check passes: a model on this
             // computer, or a private NEAR AI Cloud model over a connection proven to end inside its private hardware. The catalog's word only chose the model.
@@ -2642,9 +2626,9 @@ export function visibleTurns(messages: AgentMessage[], display = new Map<string,
 
 /** Where the run's models run, for the Agent Activity badge; sub-agents use models at least as private. */
 function runBoundary(request: Pick<AgentTurnRequest, 'local' | 'privacy'>): AgentBoundary | undefined {
-  if (request.local || request.privacy.startsWith('Local')) return 'local';
-  if (request.privacy.startsWith('Private')) return 'tee';
-  if (request.privacy.startsWith('Not private')) return 'cloud';
+  if (request.local || request.privacy.startsWith('Local') || request.privacy === 'Runs on this computer') return 'local';
+  if (request.privacy.startsWith('Private') || request.privacy.startsWith('Runs on NEAR AI private hardware')) return 'tee';
+  if (request.privacy.startsWith('Not private') || /^Runs on (?:an )?outside provider/.test(request.privacy)) return 'cloud';
   return undefined;
 }
 

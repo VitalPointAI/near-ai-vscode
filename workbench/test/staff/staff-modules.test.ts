@@ -38,7 +38,7 @@ test('the backend module binds the live session, the status service and its life
 test('the frontend module calls each of the five browser parts once, binds the status client, and imports nothing of the engine', async () => {
   const imports = readFileSync(`${extensionRoot}src/browser/staff-frontend-module.ts`, 'utf8').split('\n').filter((line) => line.startsWith('import ')).join('\n');
   for (const forbidden of [/\/node\//, /staff-engine/, /session-keys/, /encryption-key/, /yjs/i, /replica/i]) assert.doesNotMatch(imports, forbidden);
-  const { createStaffFrontendModule, StaffStatusEvents } = await import('../../extension/src/browser/staff-frontend-module.ts');
+  const { createStaffFrontendModule, StaffStatusEvents } = await import('../../extension/src/browser/staff-frontend-core.ts');
   const { parts, calls } = spies(['binding', 'presence', 'staffRoom', 'share', 'status'] as const);
   const container = new Container();
   container.load(createStaffFrontendModule(parts));

@@ -2,8 +2,30 @@
 // live tests import, so a test can never run under friendlier limits than production does.
 // Keep these in step with the defaults declared in package.json (agentDefaults.test.ts checks it).
 
+// Phase 74.1 (D-18, D-18a): the model defaults live here only, by job, as shipped passport ids in preference order (src/domain/gate/shippedPassports.ts);
+// src/domain/gate/jobModel.ts turns them into the model a run uses. `reportFallback` holds today's ids, the only place they may appear: used in report mode
+// while no preferred model is in the catalogue, never under enforce.
 export const AGENT_DEFAULTS = {
-  tiers: { deep: 'moonshotai/kimi-k3', standard: 'z-ai/glm-5.3', fast: 'Qwen/Qwen3.6-35B-A3B-FP8' },
+  models: {
+    standard: ['nvidia/nemotron-3-super', 'cohere/command-a-plus', 'openai/gpt-oss'],
+    deep: ['nvidia/nemotron-3-ultra', 'cohere/command-a-plus', 'openai/gpt-oss'],
+    fast: ['nvidia/nemotron-3-nano', 'openai/gpt-oss', 'ibm-granite/granite'],
+    // The owner's classifier order: gpt-oss, Nemotron 3 Nano, then Granite Guardian (trained to detect harm and jailbreaks).
+    safety: ['openai/gpt-oss', 'nvidia/nemotron-3-nano', 'ibm-granite/granite-guardian'],
+    vision: ['cohere/command-a-plus'],
+    transcription: ['openai/whisper-large-v3'],
+    image: ['black-forest-labs/flux.2-klein-4b'],
+    // The Granite Embedding passport comes with Phase 32.2; no Western reranker is passported yet.
+    embed: [],
+    rerank: [],
+    // The backup is the job's next family (74.1-08); the research workspace's model is the person's pick (74.1-07).
+    backup: [],
+    t0: []
+  },
+  reportFallback: {
+    standard: 'z-ai/glm-5.3', deep: 'moonshotai/kimi-k3', fast: 'Qwen/Qwen3.6-35B-A3B-FP8',
+    vision: 'z-ai/glm-5.3-flash', transcription: 'openai/whisper-large-v3', image: 'black-forest-labs/FLUX.2-klein-4B'
+  },
   maxTurns: 60,
   maxParallelAgents: 8,
   maxRunCostUsd: 5,

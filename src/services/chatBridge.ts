@@ -2,12 +2,24 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { ModelInfo, NearAiError, RouteRefusedError, SpendLimitError } from './nearAiClient';
 import { redactSecrets } from '../domain/redaction';
+import { emptyStateCard } from '../domain/gate/emptyState';
+import { MODEL_ROW_TEXT, ROW_PLACE_ORDER, catalogRows, modelRow } from '../domain/gate/modelRow';
+import type { ModelRow } from '../domain/gate/modelRow';
+// 74.1-12 (S4, S6): the row and Insert at cursor words live with the row helper; the chat's host and page read them from here.
+export { APPLY_TEXT, MODEL_ROW_TEXT, applyAllowed } from '../domain/gate/modelRow';
+import type { UseTier } from '../domain/gate/models';
+import type { EmptyStateCard } from '../domain/gate/emptyState';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { ActivitySessionSummary, AttributionSnapshot } from '../domain/activity';
 import { normalizePrompt, PromptResponse, StructuredPrompt, isPromptId, isSessionId, progressCardFromEvent, ProgressCard, safeProgressText } from '../domain/chatProgress';
 import { parseGsdPlanningState } from '../domain/gsdStatus';
 import type { OrganizationProfile } from '../domain/auth';
 import type { ActionPolicyMode } from '../domain/policy';
+import { AGENT_DEFAULTS } from '../domain/agentDefaults';
+import { checkerFor, preferredModels } from '../domain/gate/lineage';
+import type { CheckFamilies } from '../domain/gate/lineage';
+import type { ModelJob, ModelsSection } from '../domain/gate/models';
 import { isPolicyMode } from './approvalPolicy';
 import { isStaffTeamSection } from '../domain/staff/profiles';
 import type { StaffTeamSection } from '../domain/staff/profiles';
@@ -128,24 +140,53 @@ export interface ConversationTurn {
 
 export interface ChatModelOption {
   id: string;
+  /** The full row with the full model id (the option's title). */
   label: string;
   /** "tee" when NEAR runs the model in an attested TEE; "forwarded" when NEAR sends it to another provider. */
   privacy: 'tee' | 'local' | 'forwarded' | 'unknown';
   forwardedTo?: string;
+  /** 74.1 D-21 (74.1-UI-SPEC S4): the optgroup ("Runs on ..."), the option's text, and whether the chat's use forbids it under enforce. */
+  group: string;
+  text: string;
+  disabled: boolean;
+  /** For a forbidden saved choice: the status line that says the chat uses the default instead. */
+  savedForbidden?: string;
+}
+
+/** What the picker's rows are judged against: the effective models section, whether your organization's layer is in force, and the chat's use. */
+export interface ModelRowContext {
+  readonly section?: ModelsSection;
+  readonly organization: boolean;
+  readonly use: UseTier;
+  readonly now: number;
+}
+
+let rowContext: (() => ModelRowContext) | undefined;
+
+/** Sets where the picker and the model directory read their context (the gate host); the returned function clears it while it is still the one set. */
+export function setModelRowContext(read: (() => ModelRowContext) | undefined): () => void {
+  rowContext = read;
+  return () => { if (rowContext === read) rowContext = undefined; };
+}
+
+/** The row context now; with no gate host, report mode with the shipped approvals, agent work (the chat panel's use, 74.1 P4). */
+export function modelRowContext(): ModelRowContext {
+  try {
+    return rowContext?.() ?? { organization: false, use: 'T2', now: Date.now() };
+  } catch {
+    return { organization: false, use: 'T2', now: Date.now() };
+  }
 }
 
 /**
  * The words for a model the catalog lists as running in NEAR AI's private hardware (coherence review S4, glossary): the catalog's word only chooses the
  * model; a request counts as private only when the gate's own check passes, each time it is sent.
  */
-export const PRIVATE_MODEL_LABEL = 'Private · NEAR AI private hardware, checked each time it is used';
+export const PRIVATE_MODEL_LABEL = MODEL_ROW_TEXT.nearPlace;
 
-/** Short, user-facing privacy wording for a model, shared by every chat surface. */
+/** Where a model runs, in the Runs on words (74.1 D-21, design 8.6): shared by every chat surface; no bare "Private". */
 export function modelPrivacyLabel(model?: Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>): string {
-  if (model?.privacyBoundary === 'tee') return PRIVATE_MODEL_LABEL;
-  if (model?.privacyBoundary === 'local') return 'Local · runs on this machine';
-  if (model?.privacyBoundary === 'cloud') return model.forwardedTo ? `Not private · forwarded to ${model.forwardedTo}` : 'Not private · forwarded';
-  return 'Privacy unknown';
+  return modelRow({ id: '', place: model ?? {}, state: { state: 'unknown' }, mode: 'report', organization: false }).group;
 }
 
 export interface GsdArtifactLink {
@@ -463,6 +504,32 @@ export function privateSafetyModel(models: ModelInfo[], chosen: ModelInfo | unde
   return candidate && (candidate.privacyBoundary === 'tee' || candidate.privacyBoundary === 'local') ? candidate.id : undefined;
 }
 
+/** The safety checkers of a run and, when there is none, why a person decides (74.1 D-19). */
+export interface SafetyCheckers {
+  readonly safetyModel?: string;
+  readonly safetyFallbackModel?: string;
+  /** With no checker of another family: the check.same-family sentence and the families, which the run's notice names. */
+  readonly person?: { readonly reason: string; readonly families: CheckFamilies };
+}
+
+/**
+ * The auto mode's safety checker and its second (74.1 D-19, owner's classifier order): checkerFor over the configured model, then the safety job's
+ * preference, never of the run model's family, each at least as private as the run's model (privateSafetyModel) and allowed by the gate for a checking
+ * job. The second is the next such model, so a busy first one never sends the check to the author's family either.
+ */
+export function safetyCheckersFor(input: {
+  readonly models: ModelInfo[]; readonly chosen: ModelInfo | undefined; readonly author: string; readonly configured: string;
+  readonly allows: (modelId: string, job: ModelJob) => boolean; readonly policyModels?: ModelsSection; readonly now: number;
+}): SafetyCheckers {
+  const preference = [input.configured.trim(), ...preferredModels(AGENT_DEFAULTS.models.safety, input.models, input.policyModels, input.now)];
+  const allowed = (id: string): boolean => privateSafetyModel(input.models, input.chosen, id) === id && input.allows(id, 'safety');
+  const context = { models: input.policyModels, now: input.now };
+  const first = checkerFor('safety', input.author, preference, allowed, context);
+  if (!('model' in first)) return { person: { reason: first.reason, families: first.families } };
+  const second = checkerFor('safety', input.author, preference.filter((id) => id !== first.model), allowed, context);
+  return { safetyModel: first.model, ...('model' in second ? { safetyFallbackModel: second.model } : {}) };
+}
+
 /** Embedding, reranking, and speech models cannot hold a conversation. */
 export function isChatModel(model: Pick<ModelInfo, 'id'>): boolean {
   return model.id.trim().length > 0 && !/(?:embed|rerank|whisper|tts|speech|moderation)/i.test(model.id);
@@ -474,18 +541,32 @@ export function defaultChatModel(models: ModelInfo[], configured?: string): stri
   return chat.find((model) => model.id === configured?.trim())?.id ?? chat.find((model) => model.privacyBoundary === 'tee')?.id ?? chat[0]?.id;
 }
 
-export function modelOptions(models: ModelInfo[], configured?: string): ChatModelOption[] {
+/**
+ * The chat picker's rows (74.1 D-21, 74.1-UI-SPEC S4): grouped by Runs on in the contract's order, each `{short name} · {origin} · {family} ·
+ * {approval}`; under enforce a model the chat's use forbids is disabled with the reason in its text, in report mode it is marked (Q1). One helper
+ * (modelRow) builds the picker's, the directory's and the research workspace's words.
+ */
+export function modelOptions(models: ModelInfo[], configured?: string, context: ModelRowContext = modelRowContext()): ChatModelOption[] {
   const preferred = defaultChatModel(models, configured);
   const rank = (model: ModelInfo) => (model.id === preferred ? 0 : model.privacyBoundary === 'tee' || model.privacyBoundary === 'local' ? 1 : 2);
-  return models
-    .filter(isChatModel)
-    .sort((a, b) => rank(a) - rank(b))
-    .map((model) => ({
+  const chat = models.filter(isChatModel).sort((a, b) => rank(a) - rank(b));
+  const rows = catalogRows(chat, context.section, context.now, { use: context.use, organization: context.organization });
+  const rowOf = new Map(rows.map((entry) => [entry.id, entry.row]));
+  const placed = chat.map((model) => {
+    const row = rowOf.get(model.id) as ModelRow;
+    const option: ChatModelOption = {
       id: model.id,
-      label: [model.id, modelPrivacyLabel(model), model.inputPricePerMillion === undefined ? undefined : `$${model.inputPricePerMillion}/$${model.outputPricePerMillion ?? 0} per 1M`].filter(Boolean).join(' · '),
+      label: row.title,
       privacy: model.privacyBoundary === 'tee' ? 'tee' : model.privacyBoundary === 'local' ? 'local' : model.privacyBoundary === 'cloud' ? 'forwarded' : 'unknown',
-      ...(model.forwardedTo ? { forwardedTo: model.forwardedTo } : {})
-    }));
+      ...(model.forwardedTo ? { forwardedTo: model.forwardedTo } : {}),
+      group: row.group, text: row.text, disabled: row.disabled
+    };
+    return { option, place: ROW_PLACE_ORDER.indexOf(row.groupKey) };
+  }).sort((a, b) => a.place - b.place).map((entry) => entry.option);
+  const fallback = placed.find((option) => !option.disabled)?.id;
+  return placed.map((option) => (option.disabled && fallback !== undefined
+    ? { ...option, savedForbidden: MODEL_ROW_TEXT.pickerSavedForbidden.replace('{model}', option.id).replace('{default}', fallback) }
+    : option));
 }
 
 export function appendUserTurn(history: ConversationTurn[], text: string): ConversationTurn[] {
@@ -513,6 +594,24 @@ export function providerErrorMessage(error: unknown): string {
   // mid-reply; its message already says what happened and what to do.
   if (error instanceof Error && (error.name === 'ModelUnavailableError' || error.name === 'ModelStalledError')) return redactSecrets(error.message);
   return 'The NEAR AI request could not be completed. Check your connection and try again.';
+}
+
+/**
+ * What the chat posts for a failed turn (74.1 D-22, 74.1-UI-SPEC S8): the sentence, and for a route.passport refusal that no model would pass, the
+ * empty-state card in place of the reply. With models that would pass, the refusal's own sentence lists them and no card is shown.
+ */
+export function providerErrorPost(error: unknown, options: { readonly hasOrgHostingOption?: boolean; readonly hasVault?: boolean } = {}): { type: 'assistant-error'; text: string; card?: EmptyStateCard } {
+  const text = providerErrorMessage(error);
+  if (!(error instanceof RouteRefusedError) || error.rule !== 'route.passport' || error.passport === undefined) return { type: 'assistant-error', text };
+  const refusal = error.passport;
+  if (refusal.alternatives !== undefined && refusal.alternatives.length > 0) return { type: 'assistant-error', text };
+  const label = refusal.labels.length === 0 ? '' : refusal.labels.map((key) => labelKeyShown(key)).join(', ');
+  // No closed option is offered here: the gate already decided every catalogue model for this request, and none would pass (UI security rule 4).
+  const card = emptyStateCard({
+    use: refusal.use, label, routingTier: 'unknown', place: refusal.place ?? 'this place', catalog: [], allows: () => false, whoToAsk: refusal.whoToAsk,
+    organization: refusal.organization, hasOrgHostingOption: options.hasOrgHostingOption === true, hasVault: options.hasVault === true
+  });
+  return { type: 'assistant-error', text, card };
 }
 
 // ---- Cybersecurity panel ------------------------------------------------------------------------

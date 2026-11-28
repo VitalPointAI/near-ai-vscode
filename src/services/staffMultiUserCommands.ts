@@ -127,6 +127,11 @@ export function shownRefusal(reason: string | undefined, message: string): strin
   return HAS_NEXT_STEP.test(message) ? message : `${message} ${GENERAL_NEXT_STEP}`;
 }
 
+/** True inside the Sterling workbench image, which sets STERLING_WORKBENCH=1 (D-64); the one place the extension reads that variable. */
+export function inSterlingWorkbench(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.STERLING_WORKBENCH === '1';
+}
+
 /** Whether the multi-user commands are switched on. Read at every run, so turning the setting on or off needs no reload. */
 export function multiUserPreviewOn(): boolean {
   return vscode.workspace.getConfiguration().get<boolean>(MULTI_USER_PREVIEW_SETTING, false) === true;
@@ -591,10 +596,10 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
     // Each item carries what it removes (the member id, and the device writer for a device), and the item picked is used as it is (D-04).
     const choice = (await vscode.window.showQuickPick(choices, { title: 'Remove from the staff project', placeHolder: 'Pick a member, a device or an open invitation' }))?.choice;
     if (!choice) return;
-    const { REKEY_KEEP_TEXT } = await import('../domain/replica/cellKeys');
+    const { REKEY_KEEP_TEXT, REKEY_PENDING_TEXT } = await import('../domain/replica/cellKeys');
     if (choice.kind === 'finish') {
       const parts = choice.count === 1 ? 'One part of the project still uses' : `${choice.count} parts of the project still use`;
-      if (!(await confirm('Finish the removal or clearance change left unfinished?', [`${parts} a key that a removed device, or a member no longer cleared for it, holds. Finishing moves them to a new key for the people still on them.`, REKEY_KEEP_TEXT], 'Finish'))) return;
+      if (!(await confirm('Finish the removal or clearance change left unfinished?', [`${parts} a key that a removed device, or a member no longer cleared for it, holds. Finishing requires new keys for the people who still have access.`, REKEY_KEEP_TEXT, REKEY_PENDING_TEXT], 'Finish'))) return;
       show(await membership.finishRekeys(shared));
       return;
     }
@@ -613,8 +618,8 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
     }
     const who = memberLabel(view.members, choice.member);
     const question = choice.kind === 'member' ? `Remove ${who} from the project?` : `Remove this device of ${who} from the project?`;
-    const what = choice.kind === 'member' ? 'Their devices receive nothing new from the project.' : 'That device receives nothing new from the project.';
-    if (!(await confirm(question, [`${what} Every part of the project it was on moves to a new key for the people still on it.`, REKEY_KEEP_TEXT], choice.kind === 'member' ? 'Remove' : 'Remove Device'))) return;
+    const whoHeld = choice.kind === 'member' ? 'the member\'s devices' : 'the device';
+    if (!(await confirm(question, [`Parts ${whoHeld} could read need new keys if anyone still has access.`, REKEY_KEEP_TEXT, REKEY_PENDING_TEXT], choice.kind === 'member' ? 'Remove' : 'Remove Device'))) return;
     show(await membership.removeFromProject(shared, choice.kind === 'member' ? { member: choice.member.member } : { member: choice.member.member, writer: choice.writer }));
   });
 }
@@ -705,7 +710,7 @@ async function updateMemberCommand(context: StaffCommandContext): Promise<void> 
     ];
     const field = (await vscode.window.showQuickPick(fields, { title: `Change ${member.name}`, placeHolder: 'What to change' }))?.label;
     if (!field) return;
-    const { REKEY_KEEP_TEXT } = await import('../domain/replica/cellKeys');
+    const { REKEY_KEEP_TEXT, REKEY_PENDING_TEXT } = await import('../domain/replica/cellKeys');
     let change: { name?: string; seat?: string; roles?: string[]; clearance?: unknown; agentSeats?: string[] } | undefined;
     let what = '';
     const detail: string[] = [];
@@ -724,7 +729,7 @@ async function updateMemberCommand(context: StaffCommandContext): Promise<void> 
       if (clearance) {
         change = { clearance };
         what = `Their declared clearance becomes ${clearance.level}.`;
-        detail.push(`If it is lower than before, every part of the project they are no longer cleared for moves to a new key without their devices. ${REKEY_KEEP_TEXT} If it is higher, they receive the parts they are newly cleared for.`);
+        detail.push(`Parts they lose access to may need new keys. ${REKEY_KEEP_TEXT} ${REKEY_PENDING_TEXT} If the change clears them for more parts, they receive the parts they are newly cleared for.`);
       }
     } else {
       const text = await input(`Agent seats for ${member.name}`, 'The agent seats their devices may run, separated by commas, for example threat-analyst, watch-officer.');
@@ -836,6 +841,8 @@ async function startHistoryAgainCommand(context: StaffCommandContext): Promise<v
  * MULTI_USER_PREVIEW_OFF_TEXT and does nothing else.
  */
 export function registerStaffMultiUserCommands(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>, register: Register): void {
+  // D-64: in the Sterling image only the native engine edits shared projects, so none of these preview commands is registered there.
+  if (inSterlingWorkbench()) return;
   const gated = (id: string, run: () => Promise<void>): void => {
     register(id, async () => {
       if (!multiUserPreviewOn()) { void vscode.window.showInformationMessage(MULTI_USER_PREVIEW_OFF_TEXT); return; }

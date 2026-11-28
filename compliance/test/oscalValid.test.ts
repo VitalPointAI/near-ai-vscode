@@ -131,7 +131,9 @@ test('validateOurs accepts the tracer rules file and refuses an unknown key, a s
 });
 
 test('every schema of our own compiles in strict mode', () => {
-  const ours = readdirSync(SCHEMAS_DIR).filter((file) => file.endsWith('.schema.json'));
+  // Vendored schemas (listed in SOURCES.json: the OSCAL schema, and the CycloneDX 1.6 schemas of 74.1-15) are not ours; compliance/test/aiBom.test.ts checks those.
+  const vendored = new Set((JSON.parse(readFileSync(path.join(SCHEMAS_DIR, 'SOURCES.json'), 'utf8')) as { file: string }[]).map((source) => source.file));
+  const ours = readdirSync(SCHEMAS_DIR).filter((file) => file.endsWith('.schema.json') && !vendored.has(file));
   assert.ok(ours.includes('evidence-rule.schema.json'));
   for (const file of ours) assert.equal(typeof createValidators().oursValidator(file.replace(/\.schema\.json$/, '')), 'function', file);
 });

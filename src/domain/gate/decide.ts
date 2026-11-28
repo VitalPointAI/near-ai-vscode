@@ -147,6 +147,20 @@ export interface GateRuntime {
    * runtime, never from a global, with the policy version every record of the request names (D-10). Absent or undefined: decided as the safety patch did.
    */
   readonly routePolicy?: (now: number) => (RoutePolicy & { readonly policyVersion?: PolicyRecordVersion }) | undefined;
+  /**
+   * The project the run works in (74.1 D-13): its id, which the route policy names, and the facts that raise a request's use (a staff project is
+   * operational work, and agent work with the signed exercise attribute). The host sets it for a run in a folder; absent for a window with no folder.
+   */
+  readonly project?: GateProjectFacts;
+}
+
+/** What the gate knows of a run's project (74.1 D-13). */
+export interface GateProjectFacts {
+  readonly id: string;
+  /** `staff` for a staff project; absent for any other. */
+  readonly kind?: string;
+  /** The project's signed exercise attribute (a staff project at agent work instead of operational work). */
+  readonly exercise?: boolean;
 }
 
 /**

@@ -36,6 +36,10 @@ export const HUB_SIDE: readonly string[] = [
   'domain/replica/roster',
   'domain/replica/rosterMembers',
   'domain/replica/rosterCells',
+  'domain/replica/rotationProof',
+  'domain/replica/rotationGrants',
+  // Positions and postings (Phase 33.1): folded with the roster, so the hub judges posting writes with the same rule.
+  'domain/replica/rosterPositions',
   'domain/replica/cellKeys',
   'domain/replica/invite',
   // The hub file, the session answer and the enrolment MAC (32-15): the hub signs and checks them, so they compile without Yjs.

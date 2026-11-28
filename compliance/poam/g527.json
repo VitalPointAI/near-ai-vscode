@@ -1,0 +1,22 @@
+{
+  "controls": [
+    "sa-09.08",
+    "sa-400.06",
+    "sa-400.07"
+  ],
+  "gap": "G527",
+  "id": "g527",
+  "milestones": [
+    {
+      "phase": "48.4",
+      "title": "Owner raises the points with NEAR AI in a planned discussion; date to be set (48.4-04)"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "NEAR AI's answer is recorded in the external services register, or NEAR AI stays off every label that must stay in Canada"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "NEAR AI Cloud's documentation names no data-centre countries, operating entity or jurisdiction, subprocessors or prompt retention, and the roots of trust of its private hardware are US vendors'. Attestation proves the code and the model weights, not the country. The owner raises these points with NEAR AI in a planned discussion, with the existing hosting ask: the data-centre countries, the operating entity and its jurisdiction, the subprocessors and the retention terms (48.4-04; the owner held the written request on 2026-11-25). Until NEAR AI answers, the sovereignty card shows every NEAR AI fact as Unknown, and a site that needs Canadian processing lists only AI services your organization's rules approve. Sovereignty: data-stored, ai-runs, operator, outside-laws.",
+  "title": "NEAR AI Cloud does not publish where its private hardware runs, who operates it, its subprocessors or how long it keeps prompts"
+}

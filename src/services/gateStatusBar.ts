@@ -114,6 +114,8 @@ export interface GateStatusBarOptions {
   read?: () => { state: BundleState | undefined; now: number; layers?: PolicyLayersView };
   /** The chat in view's mark, read each time the item is shown (D-33). */
   chatMark?: () => ChatMarkShown | undefined;
+  /** 74.1-13: the report-only notice's status words while it is raised (Q9: words and an icon, no background colour). */
+  reportNotice?: () => { readonly text: string; readonly tooltip: string } | undefined;
   timers?: GateStatusTimers;
 }
 
@@ -172,7 +174,11 @@ export function createGateStatusBar(options: GateStatusBarOptions = {}): GateSta
     try { return options.chatMark?.(); } catch { return undefined; }
   };
   const show = (state: BundleState | undefined, now: number, layers?: PolicyLayersView): void => {
-    apply(gateStatusText(state, now, chatMarkNow(), layers));
+    const shown = gateStatusText(state, now, chatMarkNow(), layers);
+    let notice: { readonly text: string; readonly tooltip: string } | undefined;
+    try { notice = options.reportNotice?.(); } catch { notice = undefined; }
+    // A policy problem keeps its own words; otherwise, while the notice is raised, the item says the models are report only.
+    apply(notice !== undefined && !shown.warning ? { text: notice.text, tooltip: notice.tooltip, warning: false } : shown);
     disarm();
     const next = nextStatusChange(state, now);
     if (next !== undefined && !disposed) arm(next - now);

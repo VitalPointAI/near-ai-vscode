@@ -54,3 +54,22 @@ export function stepUpUrl(currentPathAndQuery: string, acr: string): string {
   }
   return `/oauth2/start?rd=${encodeURIComponent(currentPathAndQuery)}&acr_values=${encodeURIComponent(acr)}&max_age=0`;
 }
+
+/** Where the backend serves the summary page of one pending person action and takes its step-up's return (33.1-17, 33.1 D-09). */
+export const ACTION_STEP_UP_PATH = '/sterling/step-up';
+const ACTION_NONCE = /^[A-Za-z0-9_-]{22,64}$/;
+
+/** True for the shape of a backend action nonce: base64url, 22 to 64 characters. */
+export function isActionNonce(value: unknown): value is string {
+  return typeof value === 'string' && ACTION_NONCE.test(value);
+}
+
+/**
+ * The summary page of one pending person action (33.1-17). The backend renders what the person is about to confirm there, and the page's
+ * Continue link is stepUpUrl above with the return path ACTION_STEP_UP_PATH/<nonce>/return, so the nonce reaches the identity provider only
+ * inside the return path. Separate from stepUpUrl, which is unchanged.
+ */
+export function actionStepUpUrl(nonce: string): string {
+  if (!isActionNonce(nonce)) throw new Error('A step-up action address needs the backend action nonce.');
+  return `${ACTION_STEP_UP_PATH}/${nonce}`;
+}

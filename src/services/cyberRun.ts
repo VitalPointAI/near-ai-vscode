@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { beginRun } from '../agent/runActivity';
 import type { AgentTool, ToolContext } from '../agent/tools';
@@ -124,7 +125,7 @@ export interface CyberRunResult {
 /** A run id the engagement store accepts, and that is safe as a directory name. */
 export function newRunId(now: () => Date): string {
   const stamp = isoTimestamp(now()).replace(/[-:]/g, '').replace('T', '-').replace('Z', '');
-  const random = Math.random().toString(36).slice(2, 8).padEnd(6, '0');
+  const random = randomBytes(12).toString('hex');
   return `run-${stamp}-${random}`;
 }
 

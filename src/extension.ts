@@ -18,7 +18,12 @@ import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './servi
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
 import { readAgentLimits, readHistoryLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { activeProvider } from './services/providerCache';
-import { modelOptions } from './services/chatBridge';
+import { isChatModel, modelOptions } from './services/chatBridge';
+import { RESEARCH_WORKSPACE_COMMAND, openResearchWorkspace } from './services/researchWorkspace';
+import { RESEARCH_TEXT } from './domain/gate/researchLane';
+import { catalogRows } from './domain/gate/modelRow';
+import { AI_BOM_COMMAND, exportAiBom } from './services/aiBomExport';
+import { resolvePassport } from './domain/gate/models';
 import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
 import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
@@ -61,7 +66,7 @@ import { registerChatParticipant } from './services/chatParticipant';
 import { openThreadInPanel } from './services/participantRecorder';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, isEmergencyStopped, setEmergencyStop } from './services/emergencyStop';
-import { clearProviderCache } from './services/providerCache';
+import { clearProviderCache, clientFor } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
@@ -154,6 +159,35 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   registerModelComparison(context, auth, gate);
+  // The research workspace (74.1 D-17): its folder in global storage; the open folders are passed only so their files are refused (Q2).
+  context.subscriptions.push(vscode.commands.registerCommand(RESEARCH_WORKSPACE_COMMAND, panelCommand(() => openResearchWorkspace({
+    context,
+    folder: path.join(context.globalStorageUri.fsPath, 'research-workspace'),
+    models: async () => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const active = root ? await activeProvider(root, auth) : undefined;
+      const layers = gate.policyLayers();
+      return active === undefined ? [] : catalogRows(active.models.filter(isChatModel), layers.effective?.models, Date.now(), { organization: layers.organization.state === 'valid' });
+    },
+    endpointFor: async (model) => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const active = root ? await activeProvider(root, auth).catch(() => undefined) : undefined;
+      return active === undefined ? undefined : clientFor(active, model).client;
+    },
+    runtime: () => gate.runtimeFor({ actor: { kind: 'person', sessionId: 'research-workspace' }, presence: 'person', context: 'interactive' }),
+    projectFolders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)
+  }), RESEARCH_TEXT.command)));
+  // Export AI Bill of Materials (74.1 D-24): the open project's model requests, from this computer's own log; Restricted Mode is identical (Q8).
+  context.subscriptions.push(vscode.commands.registerCommand(AI_BOM_COMMAND, () => exportAiBom({
+    folders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({ name: folder.name, root: folder.uri.fsPath })),
+    pick: async (folders, title) => (await vscode.window.showQuickPick(folders.map((folder) => ({ label: folder.name, folder })), { title }))?.folder,
+    globalStorageDir: context.globalStorageUri.fsPath,
+    resolve: (model) => resolvePassport(gate.policyLayers().effective?.models, model, Date.now()),
+    progress: (title, work) => Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title }, work)),
+    info: (message, ...actions) => Promise.resolve(vscode.window.showInformationMessage(message, ...actions)),
+    error: (message) => Promise.resolve(vscode.window.showErrorMessage(message)),
+    open: (file) => Promise.resolve(vscode.window.showTextDocument(vscode.Uri.file(file)))
+  }).catch((error: unknown) => { void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error)); })));
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', panelCommand(() => openOnboarding(context, {
@@ -186,7 +220,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       // path here found no profile and reported "no model is reachable" while chat worked fine.
       startRun: panelCyberRunStarter(context, (root) => activeProvider(root, auth).then((active) => active?.provider.client), {
         root: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-        model: readModelTiers().standard,
+        // No chat-tier fallback (74.1-10): the run's model is the engagement's choice or the abliterated pick.
         gateHost: gate,
         stopped: () => isEmergencyStopped(),
         // Every ask goes to the same approval card the chat uses, so a shell or exploit step is

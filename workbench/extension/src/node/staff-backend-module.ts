@@ -16,6 +16,8 @@ import { SecretStoreService } from '../common/secret-store.js';
 import { StaffStatusServer } from '../common/staff-live.js';
 import { KeyService } from './key-service.js';
 import type { KeyStore } from './key-stores.js';
+import { PendingActionsKey } from './session-identity-backend-module.js';
+import type { PendingActions } from './staff/person-signer.js';
 import { SessionIdentity } from './session-identity.js';
 import { bindBindingPart } from './staff/binding-part.js';
 import { openEncryptionKey } from './staff/encryption-key.js';
@@ -69,7 +71,8 @@ async function createEngine(context: interfaces.Context, log: (line: string) => 
     return new StaffLiveEngine(common);
   }
   const keyService = context.container.get<KeyService>(KeyService);
-  const keys = await startSessionKeys(keyService, identity, { now: () => Date.now() }, { engine });
+  const actions = context.container.isBound(PendingActionsKey) ? context.container.get<PendingActions>(PendingActionsKey) : undefined;
+  const keys = await startSessionKeys(keyService, identity, { now: () => Date.now() }, { engine, actions });
   if (keys.kind === 'refused') { log('staff: the session keys were not made, so shared projects do not open'); return undefined; }
   const encryption = await openEncryptionKey(keyService, secrets, engine);
   if (encryption.kind === 'refused') {

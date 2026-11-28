@@ -21,7 +21,8 @@ import { hintForView } from './reportingToken';
 import { shownSpendAccount, showSpendAccount, SpendAccount } from './spendAccount';
 import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
-import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget, readHistoryLimits } from './settings';
+import { runModelsFor } from './jobModels';
+import { readAgentLimits, readAgentModels, readAgentRules, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget, readHistoryLimits } from './settings';
 import { archiveProblemText } from '../domain/state/archiveProblem';
 import { threadStoreFor } from './threadStore';
 import { applyRetention, protectedThreadIds } from './threadArchive';
@@ -32,7 +33,7 @@ import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './s
 import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { libraryTeamAllowed, projectTeamAllowed, TeamConsent, TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
-import { attachmentsClearedMessage, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
+import { attachmentsClearedMessage, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, parseChatWebviewMessage, providerErrorMessage, providerErrorPost, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
 import { sharedActivityFeed } from './activityView';
 import { runTitleFor } from './activityOverview';
@@ -967,18 +968,17 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const mcp = await (async () => { try { return await mcpRegistry(context).agentTools(); } catch (error) { return { tools: [], problems: [`MCP tools are unavailable: ${(error as Error).message}`] }; } })();
       for (const problem of mcp.problems) tab.post({ type: 'notice', text: problem });
       const imageModel = delegable.find((candidate) => candidate.id === agentModels.imageModel && (candidate.outputModalities ?? []).includes('image'));
-      // Auto approve's safety model must run privately; without one, unclear commands ask.
-      const safetyModel = settings.actionPolicy.mode === 'auto' ? privateSafetyModel(active.models, modelInfo, readSafetyModel()) : undefined;
-      const safetyFallbackModel = safetyModel ? [readModelTiers().standard, model].map((candidate) => privateSafetyModel(active.models, modelInfo, candidate)).find((candidate) => candidate && candidate !== safetyModel) : undefined;
+      const runModels = runModelsFor({ models: active.models, chosen: modelInfo, author: model, local: route.local, host: active.provider.baseUrl, auto: settings.actionPolicy.mode === 'auto' });
+      const { safetyModel, safetyFallbackModel } = runModels;
       if (settings.actionPolicy.mode === 'auto' && !safetyModel && !warnedSafetyModels.has(`${model}|${readSafetyModel()}`)) {
         warnedSafetyModels.add(`${model}|${readSafetyModel()}`);
-        tab.post({ type: 'notice', text: `Auto approve: ${readSafetyModel()} is not available as a private (TEE) model here, so commands the rules cannot decide will ask you.` });
+        tab.post({ type: 'notice', text: runModels.safetyNotice ?? `Auto approve: ${readSafetyModel()} is not available as a private (TEE) model here, so commands the rules cannot decide will ask you.` });
       }
       // PERF-03: a turn that streams nothing for too long is retried once on a backup model, chosen only among models at least as private as the chat's.
       const stallSeconds = vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.modelStallSeconds', AGENT_DEFAULTS.modelStallSeconds);
       const modelStallMs = Math.max(0, Math.min(3_600, typeof stallSeconds === 'number' && Number.isFinite(stallSeconds) ? stallSeconds : AGENT_DEFAULTS.modelStallSeconds)) * 1_000;
       const configuredBackup = String(vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.backupModel', '') ?? '').trim();
-      const backupModel = [configuredBackup, readModelTiers().standard, readModelTiers().deep].find((candidate) => candidate && candidate !== model && delegable.some((option) => option.id === candidate));
+      const backupModel = [configuredBackup, runModels.tiers.standard, runModels.tiers.deep].find((candidate) => candidate && candidate !== model && delegable.some((option) => option.id === candidate));
       const webSearch = await webSearchProvider(context.secrets);
       if (stopped()) { await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Stopped before the run started.' }); return; }
       // The run is given the files now: from here they are its, and they leave the composer for good.
@@ -994,7 +994,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const endRun = beginRun();
       runStarted(root, tab.id);
       try {
-        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), teeOnly: settings.privacyMode === 'tee-only', text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, imageModels: route.local ? undefined : delegable.filter((candidate) => (candidate.outputModalities ?? []).includes('image')), imageReview: vscode.workspace.getConfiguration('nearAi').get<string>('agent.imageReview', AGENT_DEFAULTS.imageReview) === 'off' ? 'off' : 'ask', reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch, budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), teeOnly: settings.privacyMode === 'tee-only', text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, imageModels: route.local ? undefined : delegable.filter((candidate) => (candidate.outputModalities ?? []).includes('image')), imageReview: vscode.workspace.getConfiguration('nearAi').get<string>('agent.imageReview', AGENT_DEFAULTS.imageReview) === 'off' ? 'off' : 'ask', reputation: new ReputationStore(root), tiers: runModels.tiers, roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch, budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
         void runEnded({ root, conversationId: tab.id, runId, outcome: tab.outcome });
@@ -1003,7 +1003,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await sendArtifacts(panel);
     } catch (error) {
       await state.activity.append(session.sessionId, { status: 'failed', summary: 'Agent run failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
-      tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
+      tab.post(providerErrorPost(error));
     } finally {
       // Files this turn read but never gave to a run go back to the composer (carried ones are put back by `receive`).
       if (readStaged && !delivered) for (const attachment of staged) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
@@ -1164,10 +1164,10 @@ function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | u
   return forwarded ? `TEE-only mode is on, and ${forwarded}, which would read your attachment, does not run in NEAR's TEE.` : undefined;
 }
 
-/** CLAS-06: a person sent these files, so their reads are routed (and recorded) as the person's, with the chat's attestation state. The default route without a gate host. */
-async function attachmentRoute(options: { root: string; conversationId: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<SessionRoute> {
+/** CLAS-06: a person sent these files, read as the person's with the chat's attestation and its run's use (74.1 D-13: agent work); else the default route. */
+export async function attachmentRoute(options: { root: string; conversationId: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<SessionRoute> {
   const runtime = await options.gateHost?.runtimeFor({ root: options.root, actor: { kind: 'person', sessionId: options.conversationId }, presence: 'person', context: 'interactive' });
-  return runtime ? sessionRouteFrom(runtime, options.attestation ? { attestation: options.attestation } : {}) : defaultSessionRoute();
+  return runtime ? sessionRouteFrom(runtime, { ...(options.attestation ? { attestation: options.attestation } : {}), use: { inherited: 'T2' } }) : defaultSessionRoute();
 }
 
 /**

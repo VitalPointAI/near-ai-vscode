@@ -1,7 +1,8 @@
 // `coverage` (44.1-07, D-19, D-21): the compliance coverage measure and its ratchet.
 //
 //   coverage [--root <repository>]                              counts per level and component, from sources only
-//   coverage --check [--root <repository>]                      exit 1 on a rise, an unrecorded fall, a statement without an acceptable rule, or applicability drift
+//   coverage --check [--root <repository>]                      exit 1 on a rise, an unrecorded fall, a statement without an acceptable rule, applicability drift,
+//                                                               or generated supply-chain statements that differ from the generator (44.1-09)
 //   coverage --write [--root <repository>]                      rewrite compliance/coverage/<component>.json from the current counts
 //   coverage --work-list --component <id> [--root <repository>] that component's applicable pairs without a statement, Unclassified first
 //   coverage --bundle <dir> [--previous <dir>]                  a Markdown table of cell states per component from a bundle, with the change
@@ -12,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { baselinesFrom, checkCoverage, countCoverage, reportText, summaryTable, workList, type CoverageBaseline } from '../coverage.ts';
 import { run as runApplicability } from './applicability.ts';
+import { supplyChainProblems } from './supply-chain-statements.ts';
 import { loadDashboardSources } from './bundle.ts';
 import { loadJson } from '../validate.ts';
 
@@ -78,7 +80,7 @@ export async function run(args: readonly string[], io: CoverageIo = {}): Promise
       const applicability: string[] = [];
       const code = await runApplicability(['--check', '--root', root], { stdout: () => {}, stderr: (text) => { applicability.push(...text.split('\n').filter(Boolean)); } });
       if (code !== 0 && applicability.length === 0) applicability.push(`applicability --check exited ${code}`);
-      const problems = checkCoverage(report, readBaselines(root), code === 0 ? [] : applicability);
+      const problems = [...checkCoverage(report, readBaselines(root), code === 0 ? [] : applicability), ...supplyChainProblems(root).map((problem) => `supply-chain: ${problem}`)];
       for (const problem of problems) err(`${problem}\n`);
       if (problems.length) return 1;
       out(`coverage: every baseline is current (${Object.keys(report.totals).length} components), every statement has an acceptable rule, and the applicability map is current\n`);

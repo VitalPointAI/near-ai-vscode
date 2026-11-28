@@ -65,11 +65,14 @@ test('a record is valid with every known rule, and refused with a rule or an ope
   assert.equal(strange.ok ? '' : strange.path, 'api.operation');
 });
 
-/** The Phase 41 route rules decideRoute reaches (41-10), moved from the named-ahead list into ROUTE_RULES in this order, each with its sentence unchanged. */
+/**
+ * The Phase 41 route rules decideRoute reaches (41-10), moved from the named-ahead list into ROUTE_RULES in this order, each with its sentence unchanged;
+ * Phase 74.1 moved route.passport last (D-11).
+ */
 const ROUTE_RULES_MOVED = ['route.model-not-allowed', 'route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing',
-  'route.accredited-device', 'route.residency', 'route.clearance'];
+  'route.accredited-device', 'route.residency', 'route.clearance', 'route.passport'];
 /** The Phase 41 route rules still named ahead, in order. */
-const ROUTE_RULES_STILL_AHEAD = ['route.passport', 'route.export-control'];
+const ROUTE_RULES_STILL_AHEAD = ['route.export-control'];
 
 test('D-10, D-51: every route rule Phase 41 writes is named ahead until decideRoute reaches it, on one list only, with a sentence that says nothing was sent', () => {
   const named = [...ROUTE_RULES_NAMED_AHEAD];
@@ -310,4 +313,51 @@ test('every rule-shaped id written in the production sources is a known record i
   }
   assert.deepEqual(unknown, []);
   assert.deepEqual(ruleShapedIds("const rule = 'floor.made-up';\n// 'floor.in-a-comment'\nreturn `policy.load`;"), ['floor.made-up', 'policy.load'], 'the scan finds a planted id and skips a comment');
+});
+
+// ---- Phase 74.1 (D-23): the use and the passport of a model request, optional record version 1 fields ----
+
+const PASSPORT_SHA = 'a1'.repeat(32);
+
+test('74.1 D-23: a model request record carries useTier, the passport by id and hash, and the gap under unmapped.nearAi', () => {
+  const record = buildDecisionRecord(input('route.passport', { capability: { verb: 'infer' } as never, useTier: 'T2', passport: { id: 'z-ai/glm', hash: PASSPORT_SHA }, passportGap: 'tier-exceeded' }));
+  const fields = record.unmapped.nearAi;
+  assert.deepEqual({ useTier: fields.useTier, passport: fields.passport, passportHash: fields.passportHash, passportGap: fields.passportGap }, { useTier: 'T2', passport: 'z-ai/glm', passportHash: PASSPORT_SHA, passportGap: 'tier-exceeded' });
+  assert.equal(validateDecisionRecord(record).ok, true);
+  assert.equal(fields.recordVersion, 1, 'the record version stays 1');
+});
+
+test('74.1 D-23: a record without the passport fields still passes, and has none of them', () => {
+  const record = buildDecisionRecord(input('route.any-cloud'));
+  assert.equal(validateDecisionRecord(record).ok, true);
+  for (const key of ['useTier', 'passport', 'passportHash', 'passportGap']) assert.equal(Object.prototype.hasOwnProperty.call(record.unmapped.nearAi, key), false, key);
+});
+
+test('74.1 D-23: a passport gap outside PASSPORT_GAPS, a use outside USE_TIERS, or a malformed hash or id is refused by the record check', () => {
+  const base = buildDecisionRecord(input('route.passport', { useTier: 'T1', passport: { id: 'openai/gpt-oss', hash: PASSPORT_SHA }, passportGap: 'unknown' }));
+  const withField = (key: string, value: unknown): string => {
+    const checked = validateDecisionRecord({ ...base, unmapped: { nearAi: { ...base.unmapped.nearAi, [key]: value } } });
+    return checked.ok ? 'ok' : `${checked.reason} ${checked.path}`;
+  };
+  assert.equal(withField('passportGap', 'model.same-lineage'), 'not-allowed-here unmapped.nearAi.passportGap');
+  assert.equal(withField('useTier', 'T4'), 'not-allowed-here unmapped.nearAi.useTier');
+  assert.equal(withField('passportHash', 'A1'.repeat(32)), 'not-allowed-here unmapped.nearAi.passportHash');
+  assert.equal(withField('passport', 'Not An Id'), 'not-allowed-here unmapped.nearAi.passport');
+  assert.equal(withField('passportGap', 'not-evaluated'), 'ok');
+});
+
+test('74.1 D-23: a checker\'s record carries both families; one whose checker family is a writer\'s is refused; a record without them still passes', () => {
+  const checked = buildDecisionRecord(input('route.any-cloud', { capability: { verb: 'infer' } as never, checkFamilies: { author: ['nemotron'], checker: 'gpt' } }));
+  assert.deepEqual(checked.unmapped.nearAi.checkFamilies, { author: ['nemotron'], checker: 'gpt' });
+  assert.equal(validateDecisionRecord(checked).ok, true);
+  const withFamilies = (value: unknown): string => {
+    const found = validateDecisionRecord({ ...checked, unmapped: { nearAi: { ...checked.unmapped.nearAi, checkFamilies: value } } });
+    return found.ok ? 'ok' : `${found.reason} ${found.path}`;
+  };
+  assert.equal(withFamilies({ author: ['nemotron', 'gpt'], checker: 'gpt' }), 'not-allowed-here unmapped.nearAi.checkFamilies', 'a forged same-family check');
+  assert.equal(withFamilies({ author: 'nemotron', checker: 'gpt' }), 'not-allowed-here unmapped.nearAi.checkFamilies');
+  assert.equal(withFamilies({ author: [], checker: 'Not A Family' }), 'not-allowed-here unmapped.nearAi.checkFamilies');
+  const plain = buildDecisionRecord(input('route.any-cloud', {}));
+  assert.equal(Object.prototype.hasOwnProperty.call(plain.unmapped.nearAi, 'checkFamilies'), false);
+  assert.equal(validateDecisionRecord(plain).ok, true);
 });

@@ -92,7 +92,7 @@ test('the policy section says what the code does: own storage not the project, o
     'allows what your settings allow',
     'only reading and planning run',
     'Deleting the file does not reset a policy',
-    'Only **Reset my rules** re-signs a policy that failed, and it resets your own rules only',
+    'Only **Reset my Standing Orders** re-signs a policy that failed, and it resets your own rules only',
     'keeps the old file beside the new one',
     'records the reset',
     'Nothing in a decision needs the network',
@@ -373,7 +373,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   assert.deepEqual([setLabel, edit, applyDraft], ['SovAI: Set Label', 'SovAI: Edit Policy', 'SovAI: Apply Policy Draft']);
   // D-44: Edit Policy and Apply Policy Draft left the palette; the docs name the page and its two buttons that run them.
   const words = flat(policySection);
-  for (const phrase of [setLabel, 'open **SovAI: Policy** and use **Edit my rules**, then **Apply my draft**', '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
+  for (const phrase of [setLabel, 'open **SovAI: Standing Orders** and use **Edit my Standing Orders**, then **Apply my draft**', '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
     'anyone who can read the project can read its labels, compartment names included', 'only ever makes a label stricter', 'signed again only after you confirm',
     'or that was deleted, stops agents reading the project', 'through the file tools, searches or a command that names it',
     'Decision records hold the labels involved and stay on this computer', 'Where a labelled chat\'s content may be sent is in']) {
@@ -383,7 +383,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   assert.doesNotMatch(policySection, /NEAR organization/);
 });
 
-test('README names Set Label, Lower This Chat\'s Label and the policy page\'s Edit my rules and Apply my draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
+test('README names Set Label, Lower This Chat\'s Label and the policy page\'s Edit my Standing Orders and Apply my draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
   const words = flat(readmePolicy);
   for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.open']) assert.ok(words.includes(commandName(id)), id);
   assert.ok(words.includes(`Add a clearance in **${commandName('nearAi.policy.open')}** with **Edit my Standing Orders**, then **Apply my draft**.`), 'the clearance sentence names the page');
@@ -667,7 +667,7 @@ test('PR #143 review: SECURITY.md says classified levels stay here whatever tier
   const security = flat(SECURITY);
   assert.match(security, /This holds whatever tier the policy gives those levels: no cloud and no other host is accredited for them today/);
   assert.match(security, /A model on a host your organization names as local counts only when the policy names that exact host and it is reached over https; a `\*\.` pattern or plain http does not\./);
-  assert.match(security, /only for a policy signed by this computer's own key, \*\*SovAI: Policy\*\* offers \*\*Reset my rules\*\*/);
+  assert.match(security, /only for a policy signed by this computer's own key, \*\*SovAI: Standing Orders\*\* offers \*\*Reset my Standing Orders\*\*/);
   assert.match(flat(README), /a host your organization names exactly and reaches over https/);
 });
 
@@ -810,14 +810,14 @@ test('Phase 41: layers, Reset and the policy page', async () => {
   const words = flat(block);
   const setting = { key: 'labels.routing.levels.org/Internal', yours: 'any-cloud', allowed: 'local-only', layer: 'personal' } as const;
   for (const phrase of [
-    '"Your organization\'s rules"', '"Your rules"', '**SovAI: Policy**', `\`${PROPOSAL_FILE_EXTENSION}\``,
+    '"Your organization\'s Standing Orders"', '"Your Standing Orders"', '**SovAI: Standing Orders**', `\`${PROPOSAL_FILE_EXTENSION}\``,
     ignoredSettingsNotice([setting as never]) ?? '', widerThanOrganizationText(setting as never),
     '**Reset touches your own rules only.**', "Your organization's rules, and the files that hold them, stay as they are.",
     'is never reset for you', needsUpdateSentence('0.5.0'),
     'A policy file an earlier version wrote (version 1) is read as it is and never rewritten on its own; the first change you apply writes version 2.',
     'There is no command to leave your organization.',
-    '**Apply to my rules**', '**Save a file for your organization**', '**Discard**', '**Wider**', '**Stricter**',
-    '**Edit my rules**', '**Apply my draft**', '**Show as stored**', '**Reset my rules**'
+    '**Apply to my Standing Orders**', '**Save a file for your organization**', '**Discard**', '**Wider**', '**Stricter**',
+    '**Edit my Standing Orders**', '**Apply my draft**', '**Show as stored**', '**Reset my Standing Orders**'
   ]) assert.ok(words.includes(flat(phrase)), phrase);
   // The page's own words: each button the text names is the page's.
   for (const label of ['Apply to my Standing Orders', 'Save a file for your organization', 'Discard', 'Edit my Standing Orders', 'Apply my draft', 'Show as stored', 'Reset my Standing Orders', 'Wider', 'Stricter']) {
@@ -852,14 +852,16 @@ test('Phase 41: one list of where AI may run, the Protected B rule, residency an
     assert.ok(known.has(id), `${id} is a rule the code names`);
   }
   for (const id of ['route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing', 'route.residency']) assert.ok((ROUTE_RULES as readonly string[]).includes(id), `${id} refuses`);
-  assert.ok((ROUTE_RULES_NAMED_AHEAD as readonly string[]).includes('route.passport'), 'model approvals are still named ahead');
+  // Phase 74.1 (D-11, D-12): model approvals refuse under mode enforce and only record otherwise.
+  assert.ok((ROUTE_RULES as readonly string[]).includes('route.passport'), 'model approvals are a route rule decideRoute reaches');
   const notice = migrationNoticeText([{ host: 'llm.example.test', kind: 'org-plain', lost: [] } as never]) ?? '';
   for (const phrase of [
     notice, '`routing.localHosts`',
     'So Protected B needs a TLS pin or a verified connection plus a Protected B authorization naming that server, for every server that is not this computer.',
     'a place whose region is `unstated` never satisfies such a rule',
     'is not refused unless your organization\'s rules turn on `requireAccreditedDevice`',
-    'is recorded (`route.passport`) and never refused in this version',
+    'is recorded (`route.passport`) and sent, and with no `models` section the shipped approvals are used in this report mode',
+    'When your organization\'s `models` section says `mode: enforce`, the same request is refused before anything is sent, with the reason.',
     'nothing changes where requests go'
   ]) assert.ok(words.includes(flat(phrase)), phrase);
   assert.match(notice, /^Your policy's local servers are now listed with every other place AI may run, with the same effect as before\.$/);
@@ -1025,11 +1027,14 @@ test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
   assert.doesNotMatch(entry, /\b(?:decideRoute|composeLayers|bundleVersion|route\.[a-z-]+|PR #\d+)\b/, 'no internal names');
 });
 
-test('README identifies the current editor and reset labels and neither guide lists the hidden palette commands', () => {
-  assert.doesNotMatch(SECURITY, LEFT_THE_PALETTE, 'the security guide does not list the hidden commands');
-  assert.doesNotMatch(README, LEFT_THE_PALETTE, 'README does not list the hidden commands');
-  assert.ok(README.includes(`**${commandName('nearAi.policy.open')}**`));
-  assert.ok(README.includes('**Reset my Standing Orders**'));
+test('SECURITY and README identify the current editor and reset labels and omit hidden palette commands', () => {
+  const command = commandName('nearAi.policy.open');
+  for (const [name, text] of [['SECURITY', SECURITY], ['README', README]]) {
+    assert.doesNotMatch(text, LEFT_THE_PALETTE, `${name} does not list the hidden commands`);
+    assert.ok(text.includes(`**${command}**`), `${name} names the current editor`);
+    assert.ok(text.includes('**Reset my Standing Orders**'), `${name} names the current reset action`);
+  }
+  assert.doesNotMatch(SECURITY, /SovAI: Policy|(?:Reset|Edit|Apply to) my rules|Policy: reading only/);
 });
 
 test('Phase 41: the new text is clean: no em-dash, no provider name before organization, no bare team', async () => {
@@ -1064,4 +1069,104 @@ test('Phase 41 review: SECURITY.md says what the review fixes do (CR-01, WR-01, 
   assert.match(DAMAGED_PIN_TEXT, /enrolment file again/);
   assert.match(ENDPOINT_SCHEME_TEXT, /^Nothing was sent\. .*https connections only/);
   assert.equal(isNearCloudEndpoint('https://example.org'), false);
+});
+
+// Phase 74.1 (41 D-46, D-27; 74.1-16): "Which models may do what" says what the model approvals do, in the code's own sentences, right after the routing
+// section; it names no edition and offers no security officer's switch, which is not yet available (G418).
+const MODELS_HEADING = '### Which models may do what';
+const MODELS_PAGE = readFileSync(path.join(ROOT, 'docs-site', 'content', 'security', 'models.md'), 'utf8');
+
+test('74.1: SECURITY.md has "Which models may do what" once, right after the routing section and before the sub-agent section', () => {
+  assert.equal(SECURITY.split(`\n${MODELS_HEADING}\n`).length - 1, 1);
+  const here = SECURITY.indexOf(`\n${MODELS_HEADING}\n`);
+  const routing = SECURITY.indexOf(`\n${LABELS_HEADING}\n`);
+  assert.ok(routing >= 0 && routing < here, 'after the routing section');
+  assert.equal(routing + 1 + routingSection.length, here, 'right after it, with nothing between');
+  assert.ok(here < SECURITY.indexOf('\n### Sub-agents nobody is watching\n'));
+});
+
+test('74.1: the section carries the research workspace banner and its notice word for word', async () => {
+  const { RESEARCH_TEXT } = await import('../domain/gate/researchLane');
+  const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+  assert.equal(RESEARCH_TEXT.banner, 'Research workspace. Adversary models allowed. No project data.');
+  assert.equal(RESEARCH_TEXT.laneNotice, 'This is the research workspace. It cannot open project files, run commands or use tools.');
+  assert.ok(words.includes(`"${RESEARCH_TEXT.banner}"`), RESEARCH_TEXT.banner);
+  assert.ok(words.includes(`"${RESEARCH_TEXT.laneNotice}"`), RESEARCH_TEXT.laneNotice);
+});
+
+test('74.1: the section carries the line text copied out of the research workspace starts with, word for word', async () => {
+  const { RESEARCH_TEXT } = await import('../domain/gate/researchLane');
+  assert.equal(RESEARCH_TEXT.copyHeader, 'From the research workspace, model {model}, untrusted');
+  assert.ok(flat(sectionOf(SECURITY, MODELS_HEADING)).includes(`"${RESEARCH_TEXT.copyHeader}"`));
+});
+
+test('74.1: the section carries the different-family sentence as the code builds it', async () => {
+  const { sameFamilyText } = await import('../domain/gate/lineage');
+  const sentence = sameFamilyText('{model}', '{family}');
+  assert.equal(sentence, 'This check was not given to {model}, because it comes from the same family ({family}) as the model it checks, and no approved model of another family is available. A person decides instead.');
+  assert.ok(flat(sectionOf(SECURITY, MODELS_HEADING)).includes(`"${sentence}"`));
+});
+
+test('74.1: the section carries the report-only notice word for word, and says it cannot be dismissed', async () => {
+  const uninstall = installVscodeStub(createVscodeStub());
+  try {
+    const { REPORT_MODE_TEXT } = await import('../services/reportModeNotice');
+    assert.equal(REPORT_MODE_TEXT.noticeOrg, 'Agent work is running outside your organization\'s model policy (report only).');
+    const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+    assert.ok(words.includes(`"${REPORT_MODE_TEXT.noticeOrg}"`), REPORT_MODE_TEXT.noticeOrg);
+    assert.ok(words.includes(`"${REPORT_MODE_TEXT.noticeOwn}"`), REPORT_MODE_TEXT.noticeOwn);
+    assert.ok(words.includes('with no way to close it'));
+  } finally {
+    uninstall();
+  }
+});
+
+test('74.1: the section quotes a refusal in the refusal form as the code builds it: "Nothing was sent." first, "Who to ask:" last', async () => {
+  const { PASSPORT_GAP_TEXT, whoToAsk } = await import('../domain/gate/passportStep');
+  const refusal = PASSPORT_GAP_TEXT['not-evaluated']({ model: 'gpt-oss-120b', use: 'T2', whoToAsk: whoToAsk(undefined, true) } as never);
+  assert.match(refusal, /^Nothing was sent\. .* Who to ask: your organization's security contact\.$/);
+  const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+  assert.ok(words.includes(`"${refusal}"`), refusal);
+  for (const part of ['"Nothing was sent."', '"Who to ask:"']) assert.ok(words.includes(part), part);
+});
+
+test('74.1: exceptions, the commands and the bill of materials are named as the code names them', async () => {
+  const { EXCEPTION_TEXT } = await import('../domain/gate/riskAcceptance');
+  const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+  for (const phrase of [
+    `**${commandName('nearAi.models.openResearchWorkspace')}**`, `**${commandName('nearAi.models.exportAiBom')}**`, `**${EXCEPTION_TEXT.ask}**`,
+    '"Allowed for chat you review by {name} until {date}"', 'at most 90 days', '`.near-ai/state/ai-bom.cdx.json`', 'CycloneDX 1.6'
+  ]) assert.ok(words.includes(phrase), phrase);
+  assert.doesNotMatch(words, /self-signed on this computer/, 'an exception has no self-signed form (D-20)');
+});
+
+test('74.1: the known limits name their gaps, and nothing in SECURITY.md, README or the docs page offers the switch that has not shipped', () => {
+  const section = flat(sectionOf(SECURITY, MODELS_HEADING));
+  for (const id of ['G408', 'G410', 'G411', 'G413', 'G414', 'G418', 'G537']) assert.ok(section.includes(id), id);
+  for (const [name, text] of [['SECURITY.md', SECURITY], ['README', README], ['models.md', MODELS_PAGE]] as const) {
+    const said = flat(text).match(/[^.]*Stop agent work now[^.]*\./g) ?? [];
+    assert.ok(said.every((sentence) => /not yet available/.test(sentence)), `${name}: ${said.join(' | ')}`);
+  }
+});
+
+test('74.1: the docs page says the same for people and assessors, names no edition, links the road to production, and sits after the trust model', async () => {
+  const { RESEARCH_TEXT } = await import('../domain/gate/researchLane');
+  const page = flat(MODELS_PAGE);
+  for (const phrase of [RESEARCH_TEXT.banner, RESEARCH_TEXT.laneNotice, '(./road-to-production.md)', '(./policy.synced.md#which-models-may-do-what)']) assert.ok(page.includes(phrase), phrase);
+  assert.doesNotMatch(MODELS_PAGE, /sterling|defence edition/i);
+  assert.ok(!MODELS_PAGE.includes(EM_DASH));
+  const sidebar = readFileSync(path.join(ROOT, 'docs-site', 'sidebars.js'), 'utf8');
+  assert.match(sidebar, /'security\/trust-model', 'security\/models'/);
+});
+
+test('74.1: README and CHANGELOG name what 74.1 ships in the glossary words, never bare private, and no edition', () => {
+  const unreleased = CHANGELOG.split(/\n(?=## )/).find((section) => section.startsWith('## Unreleased\n')) ?? '';
+  for (const [name, text] of [['README', README], ['CHANGELOG', unreleased]] as const) {
+    const words = flat(text);
+    for (const phrase of ['Approved for', 'Open Research Workspace', 'report only', 'Allowed for chat you review', 'Western defaults', 'Export AI Bill of Materials']) {
+      assert.ok(words.includes(phrase), `${name}: ${phrase}`);
+    }
+  }
+  for (const line of unreleased.split('\n').filter((text) => text.startsWith('- '))) assert.doesNotMatch(line, /\b[Pp]rivate\b(?! hardware)/, `no bare private: ${line.slice(0, 80)}`);
+  assert.doesNotMatch(unreleased, /Sterling|Defence Edition/);
 });

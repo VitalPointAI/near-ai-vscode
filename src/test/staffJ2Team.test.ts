@@ -246,7 +246,7 @@ test('no persona names and no ranks anywhere in the template, its guidance or it
   for (const rendering of RENDERINGS) {
     const output = j2Template(rendering.settings, rendering.echelon ? { echelon: rendering.echelon } : {});
     for (const text of [output.team, output.guidance, ...output.files.map((file) => file.content)]) {
-      const scrubbed = text.replace(/privacy: private/g, '').replace(/\b(?:major|general|private) (?:analytic|military|model|models)\b/gi, '');
+      const scrubbed = text.replace(/privacy: private/g, '').replace(/\b(?:major|general|private) (?:analytic|military|model|models|hardware)\b/gi, '');
       assert.doesNotMatch(scrubbed, RANKS, `${rendering.key}: no rank`);
       assert.doesNotMatch(text, PERSONA, `${rendering.key}: no persona`);
     }

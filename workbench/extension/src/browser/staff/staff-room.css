@@ -1,0 +1,73 @@
+/* The native Staff Room (Phase 33 D-59): the original theme with lifted cards. Theia variables only; state is always said in words beside a dot. */
+.sterling-staff-room-widget {
+  overflow: auto;
+  color: var(--theia-foreground);
+  background: var(--theia-sideBar-background, var(--theia-editor-background));
+  font-family: var(--theia-ui-font-family);
+}
+.sterling-staff-room { padding: 12px 14px 20px; display: grid; gap: 12px; }
+.sterling-staff-room h2 { font-size: 15px; margin: 0; }
+.sterling-staff-room h3 { font-size: 12px; margin: 4px 0 0; color: var(--theia-descriptionForeground); text-transform: none; font-weight: 600; }
+.sterling-staff-room-section { display: grid; gap: 10px; }
+.sterling-staff-room-empty { color: var(--theia-descriptionForeground); margin: 0; }
+.sterling-staff-room ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+
+/* Lifted cards: a slightly lighter surface over the panel, layered shadows from the theme's widget shadow. */
+.sterling-staff-room-card {
+  background: color-mix(in srgb, var(--theia-editorWidget-background, var(--theia-editor-background)) 94%, var(--theia-foreground));
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px var(--theia-widget-shadow), 0 3px 10px color-mix(in srgb, var(--theia-widget-shadow) 55%, transparent);
+}
+/* Dark themes: a 1px highlight along the top edge. */
+body.theia-dark .sterling-staff-room-card {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theia-foreground) 9%, transparent), 0 1px 2px var(--theia-widget-shadow), 0 3px 10px color-mix(in srgb, var(--theia-widget-shadow) 55%, transparent);
+}
+/* High contrast: the theme's contrast border instead of shadows. */
+body.theia-hc .sterling-staff-room-card,
+body.theia-hc-light .sterling-staff-room-card {
+  box-shadow: none;
+  border-color: var(--theia-contrastBorder);
+}
+
+.sterling-staff-room-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.sterling-staff-room-state { font-weight: 600; }
+.sterling-staff-room-sentence { flex: 1 1 14em; }
+.sterling-staff-room-banner { border-left: 3px solid var(--theia-editorWarning-foreground); }
+
+.sterling-staff-room-person { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.sterling-staff-room-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
+.sterling-staff-room-dot.live { background: var(--theia-testing-iconPassed, var(--theia-charts-green)); }
+.sterling-staff-room-dot.away { background: var(--theia-descriptionForeground); }
+.sterling-staff-room-name { font-weight: 600; }
+.sterling-staff-room-position,
+.sterling-staff-room-presence { color: var(--theia-descriptionForeground); }
+
+.sterling-staff-room-card-text { margin: 0 0 6px; line-height: 1.45; }
+.sterling-staff-room-decisions li,
+.sterling-staff-room-branches li { line-height: 1.45; }
+.sterling-staff-room-trust { margin: 4px 0 0; color: var(--theia-descriptionForeground); }
+.sterling-staff-room-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sterling-staff-room-action { margin: 0; }
+.sterling-staff-room-card-contested { border-left: 3px solid var(--theia-editorError-foreground); }
+
+.sterling-staff-room-row { display: grid; gap: 2px; }
+.sterling-staff-room-product { font-weight: 600; }
+.sterling-staff-room-version,
+.sterling-staff-room-label,
+.sterling-staff-room-who { color: var(--theia-descriptionForeground); }
+.sterling-staff-room-unconfirmed { color: var(--theia-editorWarning-foreground); }
+
+.sterling-staff-room-decision { display: grid; gap: 6px; }
+.sterling-staff-room-decision textarea {
+  width: 100%;
+  box-sizing: border-box;
+  color: var(--theia-input-foreground);
+  background: var(--theia-input-background);
+  border: 1px solid var(--theia-input-border, var(--theia-panel-border));
+  border-radius: 4px;
+  font-family: inherit;
+}
+.sterling-staff-room button:focus-visible,
+.sterling-staff-room textarea:focus-visible { outline: 1px solid var(--theia-focusBorder); outline-offset: 1px; }

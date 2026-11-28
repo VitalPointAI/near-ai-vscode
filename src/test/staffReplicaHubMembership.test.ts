@@ -6,7 +6,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
 import test, { mock } from 'node:test';
-import { REKEY_KEEP_TEXT, openLabel, readGrant, unwrapEpochKey } from '../domain/replica/cellKeys';
+import { createHash } from 'node:crypto';
+import { REKEY_KEEP_TEXT, openLabel, readGrant } from '../domain/replica/cellKeys';
+import { kemPrivateFromSeeds, kemPublicFromSeeds, unwrapForDevice } from '../domain/replica/cellWrapV2';
+import type { KemSeeds } from '../domain/replica/cellWrapV2';
+import { signKemBinding } from '../domain/replica/deviceKem';
 import { signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint } from '../domain/replica/checkpoint';
 import { HUB_FILE_REFUSALS, buildHubFile, certPinOf, enrolmentMac } from '../domain/replica/hubFile';
@@ -28,6 +32,8 @@ import type { HubTransportOptions } from '../staff/replica/hubTransport';
 import { FIXTURE_CERT, FakeHubServer } from './helpers/fakeHubServer';
 import type { FakeAnswer, FakeRequest } from './helpers/fakeHubServer';
 import { appendProductEntry, ensureLabelCell, ensureLegacyCell } from '../staff/replica/labelCells';
+import { ReplicaProjectError } from '../staff/replica/replicaProject';
+import { STORE_REFUSALS } from '../staff/replica/store';
 import { WORLD_NOW, bringIn, grantsOn, install, leadWith, ok, orgClearance, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Install, Seat } from './helpers/labelCellWorld';
 import { rosterDevice } from './helpers/replicaRosterWorld';
@@ -40,15 +46,20 @@ const PRODUCT_ROLES = { owner: 'j4-planner', sectionLead: 'j4-lead', releaseGuar
 
 interface TestHub { device: RosterDevice; text: string; enrolmentSecret: string; certPin: string }
 
+// The hub's post-quantum keys (33.2 D-03), fixed by its label like its other keys: a hub made with --generate-key kem carries them in its hub file.
+const hubKemSeeds = (device: RosterDevice): KemSeeds => ({ p256: createHash('sha256').update(`hub kem p256/${device.label}`).digest(), mlkem768: createHash('sha512').update(`hub kem mlkem/${device.label}`).digest() });
+const hubKem = (device: RosterDevice) => signKemBinding(kemPublicFromSeeds(hubKemSeeds(device)), device.writer, (bytes) => device.signer.sign(bytes));
+
 /** A hub file signed by the hub's own key (labels give fixed keys), as the operator prints it, valid for a week from WORLD_NOW unless told. */
-function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; expiresAt?: string } = {}): TestHub {
+function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; expiresAt?: string; legacy?: boolean } = {}): TestHub {
   const device = rosterDevice(label, 'hub');
   const now = options.now ?? WORLD_NOW;
   const enrolmentSecret = Buffer.alloc(32, 7).toString('base64url');
   const certPin = options.certPin ?? CERT_PIN;
   const signed = buildHubFile(device.signer, {
     address: HUB_ADDRESS, certPin, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: 'enr-00112233aabbccdd', enrolmentSecret,
-    expiresAt: options.expiresAt ?? new Date(now.getTime() + 7 * DAY_MS).toISOString(), now
+    expiresAt: options.expiresAt ?? new Date(now.getTime() + 7 * DAY_MS).toISOString(), now,
+    ...(options.legacy ? {} : { kem: hubKem(device) })
   });
   return { device, text: JSON.stringify(signed), enrolmentSecret, certPin };
 }
@@ -56,7 +67,7 @@ function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; e
 const hubIdOfDevice = (device: RosterDevice): string => `hub-${device.writer.slice(0, 16)}`;
 const head = (roster: RosterState): { hash: string; position: number } => ({ hash: roster.positions[roster.positions.length - 1], position: roster.positions.length - 1 });
 
-/** The epochs of each cell the hub's X25519 private key opens from the grants on the install's disk, each checked against the key the lead holds. */
+/** The epochs of each cell the hub's keys open from the grants on the install's disk (v1 or v2 wraps), each checked against the key the lead holds. */
 function hubOpens(seat: Seat, hub: RosterDevice): Map<string, number[]> {
   const opened = new Map<string, number[]>();
   for (const item of grantsOn(seat.at)) {
@@ -64,7 +75,7 @@ function hubOpens(seat: Seat, hub: RosterDevice): Map<string, number[]> {
     if (!read.ok) continue;
     for (const wrap of read.grant.wraps) {
       if (wrap.writer !== hub.writer) continue;
-      const key = unwrapEpochKey({ cell: read.grant.cell, epoch: read.grant.epoch, writer: hub.writer, privateKey: hub.x25519Private, wrap: wrap.wrap });
+      const key = unwrapForDevice({ cell: read.grant.cell, epoch: read.grant.epoch, writer: hub.writer, x25519: hub.x25519Private, kem: kemPrivateFromSeeds(hubKemSeeds(hub)), wrap: wrap.wrap });
       if (key === undefined) continue;
       const held = seat.p.keys.epochKey(read.grant.cell, read.grant.epoch);
       if (held !== undefined) assert.ok(key.equals(held), 'the hub opens the same key the lead holds');
@@ -235,6 +246,30 @@ test('trade-off confirmed: hub.grant and one grant per epoch of the cell with it
   }
 });
 
+test('a hub without hybrid keys cannot be given a new post-quantum cell', async () => {
+  const lead = await leadWith();
+  const hub = hubFile('legacy', { legacy: true });
+  ok(await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }), 'admit the hub with the original base cell');
+  const cell = await labelCell(lead);
+  const before = storeCounts(lead.at, lead.p.projectId);
+  const result = await grantCellToHub(lead.host, { cell, confirmed: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'hub-needs-post-quantum-keys');
+  assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before);
+});
+
+test('admitting a hub without hybrid keys fails before writing when the base cell has a post-quantum epoch', async () => {
+  const lead = await leadWith();
+  const member = await bringIn(lead, 'member', 'Nell Planner', orgClearance('Internal'));
+  ok(await removeFromProject(lead.host, { member: member.member }), 'move the base cell to a new epoch');
+  const hub = hubFile('legacy', { legacy: true });
+  const before = storeCounts(lead.at, lead.p.projectId);
+  const result = await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'hub-needs-post-quantum-keys');
+  assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before);
+});
+
 test('above-hub-ceiling: a cell whose label the hub\'s ceiling does not dominate is refused and nothing is written', async () => {
   const { lead } = await leadAndHub('Internal');
   const cell = await labelCell(lead, 'Confidential');
@@ -302,6 +337,8 @@ test('revoke: hub.revoke, then the base cell and every granted cell move to a ne
   const result = ok(await revokeHub(lead.host, { hub: id }), 'revoke the hub');
   assert.deepEqual([...(result.rekeyed ?? [])].sort(), [lead.p.projectId, cell].sort());
   assert.ok(result.message.endsWith(REKEY_KEEP_TEXT), 'says they keep what they already received');
+  assert.ok(result.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(result.message, /anything new/);
   assert.ok(result.message.includes(id));
   assert.equal(result.hub, id);
   const { roster } = await lead.p.state();
@@ -315,12 +352,83 @@ test('revoke: hub.revoke, then the base cell and every granted cell move to a ne
   assert.deepEqual(reasons, ['hub-revoked', 'hub-revoked']);
 });
 
+for (const failure of ['pre-write', 'confirmation', 'recovery signature'] as const) {
+  test(`hub revoke reports the verified stage when the project refuses ${failure}`, async () => {
+    const { lead, id } = await leadAndHub();
+    const { p } = lead;
+    const before = head((await p.state()).roster);
+    const refusal = new ReplicaProjectError({ refused: 'store-refused', message: STORE_REFUSALS.unreadable, store: 'unreadable' });
+    const append = p.appendOwn.bind(p);
+    const state = p.state.bind(p);
+    const pages = p.signGrantPages.bind(p);
+    const attempts: string[] = [];
+    let saved: string | undefined;
+    let readsAfterSave = 0;
+    const appendMock = mock.method(p, 'appendOwn', async (...args: Parameters<typeof append>) => {
+      attempts.push(args[0]);
+      if (failure === 'pre-write') throw refusal;
+      const result = await append(...args);
+      if ('ok' in result && args[0] === 'hub.revoke') saved = result.hash;
+      return result;
+    });
+    const stateMock = mock.method(p, 'state', async () => {
+      if (saved !== undefined) readsAfterSave += 1;
+      if (saved !== undefined && failure === 'confirmation') throw refusal;
+      return state();
+    });
+    const signMock = mock.method(p, 'signGrantPages', async (...args: Parameters<typeof pages>) => {
+      if (failure === 'recovery signature') throw refusal;
+      return pages(...args);
+    });
+    const result = await revokeHub(lead.host, { hub: id }).finally(() => {
+      appendMock.mock.restore();
+      stateMock.mock.restore();
+      signMock.mock.restore();
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'store-refused');
+    assert.deepEqual(attempts, ['hub.revoke']);
+    const { roster } = await p.state();
+    const after = head(roster);
+    if (failure === 'pre-write') {
+      assert.equal(result.message, STORE_REFUSALS.unreadable);
+      assert.ok(hubAt(roster.members, id, after.position));
+      assert.equal(after.hash, before.hash);
+      return;
+    }
+    assert.ok(saved);
+    assert.equal(after.hash, saved);
+    assert.equal(after.position, before.position + 1);
+    assert.equal(hubAt(roster.members, id, after.position), undefined);
+    assert.deepEqual(epochsAt(roster.cells, p.projectId, after.position).map(({ epoch }) => epoch), [1]);
+    assert.match(result.message, /Check that the folder and its files can be read by your user account/);
+    assert.doesNotMatch(result.message, /Nothing was changed|moved to a new key/);
+    if (failure === 'confirmation') {
+      assert.equal(readsAfterSave, 1);
+      assert.match(result.message, /^The signed change was saved\. This computer could not confirm whether it applied to the roster\./);
+      assert.doesNotMatch(result.message, /was removed|may still read|Devices excluded/);
+    } else {
+      assert.ok(result.message.includes(`The hub (${id}) was removed. This computer could not verify all the required new keys.`));
+      assert.match(result.message, /may still read new work encrypted with them/);
+    }
+    assert.deepEqual(ok(await finishRekeys(lead.host), 'recover after the fault').rekeyed, [p.projectId]);
+  });
+}
+
 test('revoke interrupted after hub.revoke is finished by finishRekeys with the reason hub-revoked', async () => {
   const { lead, hub, id } = await leadAndHub();
   const cell = await labelCell(lead);
   ok(await grantCellToHub(lead.host, { cell, confirmed: true }), 'grant the cell');
-  const written = await lead.p.appendOwn('hub.revoke', { hub: id });
-  assert.equal('ok' in written && written.ok, true, 'the revoke alone is written, as if the computer stopped before the rekeys');
+  const append = lead.p.appendOwn.bind(lead.p);
+  lead.p.appendOwn = (kind, data, options) => kind === 'cell.rekey'
+    ? Promise.resolve({ refused: 'store-refused', message: 'The test refused the hub key change.' }) : append(kind, data, options);
+  const interrupted = await revokeHub(lead.host, { hub: id }).finally(() => { lead.p.appendOwn = append; });
+  const afterRevoke = await lead.p.state();
+  assert.equal(hubAt(afterRevoke.roster.members, id, head(afterRevoke.roster).position), undefined, 'only the revoke has applied');
+  assert.equal(interrupted.reason, 'store-refused');
+  assert.match(interrupted.message, /The test refused the hub key change/);
+  assert.ok(interrupted.message.includes('Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.'));
+  assert.doesNotMatch(interrupted.message, /moved to a new key|anything new/);
   const finished = ok(await finishRekeys(lead.host), 'the next roster flow finishes it');
   assert.deepEqual([...(finished.rekeyed ?? [])].sort(), [lead.p.projectId, cell].sort());
   const reasons = (await lead.p.findOwnAll('cell.rekey', () => true)).map((item) => (item.data as { reason: string }).reason);
@@ -334,13 +442,35 @@ test('revoke again after an interrupted revoke finishes the rekeys; a revoke wit
   const { lead, id } = await leadAndHub();
   const written = await lead.p.appendOwn('hub.revoke', { hub: id });
   assert.equal('ok' in written && written.ok, true, 'the revoke alone is written');
+  const beforeRecovery = storeCounts(lead.at, lead.p.projectId);
+  const signature = mock.method(lead.p, 'signGrantPages', async () => {
+    throw new ReplicaProjectError({ refused: 'signer-refused', message: 'The test refused the replacement key signature.' });
+  });
+  const failed = await revokeHub(lead.host, { hub: id }).finally(() => signature.mock.restore());
+  assert.equal(failed.reason, 'signer-refused');
+  assert.match(failed.message, /was already removed/);
+  assert.match(failed.message, /may still read new work encrypted with them/);
+  assert.match(failed.message, /The test refused the replacement key signature/);
+  assert.deepEqual(storeCounts(lead.at, lead.p.projectId), beforeRecovery);
   const again = ok(await revokeHub(lead.host, { hub: id }), 'revoke again');
   assert.deepEqual(again.rekeyed, [lead.p.projectId]);
   assert.ok(again.message.endsWith(REKEY_KEEP_TEXT));
+  assert.ok(again.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
   const before = storeCounts(lead.at, lead.p.projectId);
   const third = await revokeHub(lead.host, { hub: id });
   assert.equal(third.reason, 'hub-revoked');
   assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before);
+});
+
+test('retrying an already finished hub revoke does not claim a later unrelated recovery for the hub', async () => {
+  const { lead, id } = await leadAndHub();
+  const member = await bringIn(lead, 'later-removal', 'Nell Planner', orgClearance('Internal'));
+  ok(await revokeHub(lead.host, { hub: id }), 'revoke the hub');
+  assert.ok('ok' in await lead.p.appendOwn('member.remove', { member: member.member }));
+  const retry = ok(await revokeHub(lead.host, { hub: id }), 'finish outstanding rotations');
+  assert.deepEqual(retry.rekeyed, [lead.p.projectId]);
+  assert.match(retry.message, /was already removed/);
+  assert.doesNotMatch(retry.message, /moved to a new key|Devices excluded from the new keys/);
 });
 
 // ---- Task 3: refusals before any write, resumable admission, standing, no secrets ------------------------------------------------------------
@@ -584,7 +714,7 @@ function fakeHubFile(address: string, options: { expiresAt?: string; label?: str
   const enrolmentSecret = Buffer.alloc(32, 9).toString('base64url');
   const signed = buildHubFile(device.signer, {
     address, certPin: FAKE_PIN, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: ENROLMENT, enrolmentSecret,
-    expiresAt: options.expiresAt ?? new Date(WORLD_NOW.getTime() + 7 * DAY_MS).toISOString(), now: WORLD_NOW
+    expiresAt: options.expiresAt ?? new Date(WORLD_NOW.getTime() + 7 * DAY_MS).toISOString(), now: WORLD_NOW, kem: hubKem(device)
   });
   return { device, text: JSON.stringify(signed), enrolmentSecret, certPin: FAKE_PIN, address };
 }

@@ -322,6 +322,11 @@ Plans:
   - The Sterling status entry (33-28).
   - Native cursors and Show Who Wrote This (33-29).
   - Two-browser acceptance against the built image (33-30).
+  - The late joiner's text at once, its history fetched and checked, and every obligation settled (33-32, D-70, wave 11 after 33-30).
+  - The history check in the live replicator, its status sentences and the real-hub parity scenario (33-34, D-70, wave 12 after 33-32).
+  - An editing session open at the checkpoint seen at once by a late joiner (33-33, D-71, wave 13 after 33-34, which shares the scenario file), closing G431.
+  - G430 (cells the server does not hold) is POA&M item g430 for Phase 35 (2026-11-25).
+  - The close-out moves to wave 14 after 33-32, 33-33 and 33-34 (33-16), and the release to wave 15 (33-17).
 - **Order:** native plans start after Phase 46-01, 46-02 and 46-07 are on `main`.
 - **Release:** criterion 4's release is the next Sterling container image by digest (33-17 replanned). There is no VSIX or Marketplace release.
 
@@ -341,11 +346,11 @@ Plans:
   6. An industry observer invited into an Observer position until an end date is admitted only after your organization's security contact approves; they see only the copies staff release to them from key groups whose approved releasability allows their nationality or organization, and nothing of the roster (no name, position or member key); they comment in their own stream, which no other observer can read, and cannot edit, decide or post; after the end date your organization's server refuses their writes. (POST-09)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 26 plans in 13 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, 33.1 D-01 to 33.1 D-37 and 21 owner items, 17 of them accepted and item 21 answered by the owner; 33.1 D-36, 33.1 D-37 and plan 26 added 2026-11-24; revised the same day for credentials, 33.1 D-38 to 33.1 D-40)
+**Plans:** 2/26 plans executed in 13 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, 33.1 D-01 to 33.1 D-37 and 21 owner items, 17 of them accepted and item 21 answered by the owner; 33.1 D-36, 33.1 D-37 and plan 26 added 2026-11-24; revised the same day for credentials, 33.1 D-38 to 33.1 D-40)
 **UI hint**: yes
 
 Plans:
-- [ ] 33.1-01-PLAN.md: Wave 1. Tracer and the permanent shapes (checkpoint): a person-key order and the member's own report on two replicas and the real hub
+- [x] 33.1-01-PLAN.md: Wave 1. Tracer and the permanent shapes (checkpoint): a person-key order and the member's own report on two replicas and the real hub
 - [ ] 33.1-02-PLAN.md: Wave 2. The words that follow how a person serves in the Defence Team mode, and the terms register check
 - [ ] 33.1-03-PLAN.md: Wave 2. `positions@1`, the shared project's signed mode and settings, and the person-key rule for every posting act
 - [ ] 33.1-04-PLAN.md: Wave 3. Delegation under `mayDelegate`, who may be posted, device proof by the posting file
@@ -361,7 +366,7 @@ Plans:
 - [ ] 33.1-14-PLAN.md: Wave 7. The acting position checked at your organization's server, on replay and before signing
 - [ ] 33.1-15-PLAN.md: Wave 1. Your organization's people rules handed to the workbench by one hidden extension command
 - [ ] 33.1-16-PLAN.md: Wave 7. Presence that shows each person once, in the position they work in, and grants nothing
-- [ ] 33.1-17-PLAN.md: Wave 1. One passkey confirmation per person action, and only the person signer for person-key kinds
+- [x] 33.1-17-PLAN.md: Wave 1. One passkey confirmation per person action, and only the person signer for person-key kinds
 - [ ] 33.1-18-PLAN.md: Wave 3. Observer shapes, the observer invitation and one fold of an observer stream
 - [ ] 33.1-19-PLAN.md: Wave 8. Observers placed into Observer positions with their own cell; releasability and signer-approved markings at the key grant
 - [ ] 33.1-20-PLAN.md: Wave 11. A holder of your organization's security contact credential approves outside observers, bound to their credential evidence; release markings approved by a release authority; nothing widens without a new approval
@@ -392,7 +397,7 @@ Plans:
   4. New shared work starts switched; a lead switches an existing project in one step, each cell moves at its next epoch, late computers get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap. (WRAP-04)
   5. A Protected B cell is never wrapped with X25519; a CI check fails if any wrap path bypasses the one entry point; SECURITY.md says which wrap protects shared work, and ML-KEM-1024 with P-384 is reserved for Protected C and classified work. (WRAP-05)
 **Undo cost**: High. The wire format, `device.kem` and grant pages are permanent in shared logs; they are settled at 33.2-01's checkpoint.
-**Plans:** 5/8 plans executed in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
+**Plans:** 6/8 plans executed in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
@@ -401,8 +406,8 @@ Plans:
 - [x] 33.2-03-PLAN.md: Wave 2. Grant pages committed by the founding entry
 - [x] 33.2-04-PLAN.md: Wave 3. Where the new private keys live (keyring, Transit envelope, hub) and publishing the binding at open
 - [x] 33.2-05-PLAN.md: Wave 4. `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in the fold and the hub
-- [ ] 33.2-06-PLAN.md: Wave 5. Every wrap path through one entry point; the Protected B rule; the CI check; SECURITY.md
-- [ ] 33.2-07-PLAN.md: Wave 6. The Switch, Move and Give keys cards in the native Staff Room
+- [x] 33.2-06-PLAN.md: Wave 5. Every wrap path through one entry point; the Protected B rule; the CI check; SECURITY.md
+- [ ] 33.2-07-PLAN.md: Wave 6. The Switch, Move and Give keys cards in the native Staff Room (Tasks 1 and 2 done; Task 3 waits on 33-24 and 33-26)
 - [ ] 33.2-08-PLAN.md: Wave 7. Close-out on the built image, the full suites once, the integration PR after the owner's gate approval
 
 ### Phase 34: Offline transports for staff projects
@@ -790,12 +795,12 @@ Plans:
   4. Base TDF objects from the public OpenTDF specification go out to a partner's key and come in through our own non-exportable receiving key in OpenBao. (XCHG-04)
 **Research flags**: (1) Never design the ZTDF half from vendor descriptions (research pitfall 13). (2) Not a cross-domain guard and not accreditation (pitfall 14). (3) The OAEP hash partners accept (45.1-02).
 **Undo cost**: Medium. The label table is policy data; the exchange records are permanent in shared logs (settled at 45.1-03's checkpoint).
-**Plans:** 5 plans in 5 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-10 and four owner items in `45.1-CONTEXT.md`)
+**Plans:** 2/5 plans executed in 5 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-10 and four owner items in `45.1-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
-- [ ] 45.1-01-PLAN.md: Wave 1. Tracer: the `labelInterop` table (feature `label-interop@1`) and the signed label binding
-- [ ] 45.1-02-PLAN.md: Wave 2. Base TDF from the public OpenTDF specification; partner key access; our receiving key in OpenBao
+- [x] 45.1-01-PLAN.md: Wave 1. Tracer: the `labelInterop` table (feature `label-interop@1`) and the signed label binding
+- [x] 45.1-02-PLAN.md: Wave 2. Base TDF from the public OpenTDF specification; partner key access; our receiving key in OpenBao
 - [ ] 45.1-03-PLAN.md: Wave 3. The exchange adapter at the release boundary, with the exchange record shapes checkpoint
 - [ ] 45.1-04-PLAN.md: Wave 4. The binding on every release copy; Export for a partner and Received objects in the workbench
 - [ ] 45.1-05-PLAN.md: Wave 5. SECURITY.md, the full suites once, the verification record, the integration PR after the owner's gate approval
@@ -818,9 +823,9 @@ Plans:
 
 Plans:
 - [ ] 45.2-01-PLAN.md: Wave 1. Tracer: our own narrow XML reader and writer (4778.2 normalization); one label out as ADatP-4774 and back
-- [ ] 45.2-11-PLAN.md: Wave 1. Label policy profiles with provenance (NATO public-unverified, Canadian DND/CAF assumed), the operational rule, a gap row per unverified value
+- [x] 45.2-11-PLAN.md: Wave 1. Label policy profiles with provenance (NATO public-unverified, Canadian DND/CAF assumed), the operational rule, a gap row per unverified value (done 2026-11-25)
 - [ ] 45.2-13-PLAN.md: Wave 1. Inbound adapter interface, the record values checkpoint, tracer: an unlabelled partner file held and labelled by a person; never more trusted, never lower
-- [ ] 45.2-14-PLAN.md: Wave 1. One hardened archive reader for arrivals and the Office tools; the no-fetch rule for inbound adapters
+- [x] 45.2-14-PLAN.md: Wave 1. One hardened archive reader for arrivals and the Office tools; the no-fetch rule for inbound adapters (done 2026-11-25)
 - [ ] 45.2-02-PLAN.md: Wave 2. The `labelXml` table adopting the profiles, every 4774 structure from the text's examples, labels coming in
 - [ ] 45.2-03-PLAN.md: Wave 2. ADatP-4778 binding objects with the ADatP-5636 mandatory metadata; sidecar files; every binding form read
 - [ ] 45.2-04-PLAN.md: Wave 3. Signed bindings to the ADatP-4778.2 cryptographic artefact profile; the `release-p256-<site>` key and certificate; key inventory rows
@@ -1007,6 +1012,86 @@ Plans:
 - [ ] 48.2-13-PLAN.md: Wave 8. Release evidence re-signed with the site key at bundle build and installed; one command to publish operator evidence as the publish identity; the site evidence runbook with key rotation
 - [ ] 48.2-14-PLAN.md: Wave 9 (after 47-29). The offline rescan as site evidence that replaces an ageing release scan
 - [ ] 48.2-15-PLAN.md: Wave 10 (after 48-07 and 48-08). Statements and evidence rules, the documents with the real-time table, the full suites once, the release-preview check and the owner gate
+
+### Phase 48.3: Software supply registry (INSERTED)
+**Goal**: Every dependency and image that Sterling Sovereign AI builds with or runs is pulled only from your organization's software registry, after review: an intake judges it once with your organization's policy, named people approve what is flagged, your organization's site key signs the approval, and the SBOM, scan, VEX and record sit beside it; everything approved is rescanned daily against a vulnerability database your organization syncs and signs itself; air-gapped sites receive it, with the database and withdrawals, in the signed bundle and refresh files; and builds and publication move to runners in Canada once the owner says go.
+**Inserted**: 2026-11-25 from the owner's direction ("For the SBoM, we likely need to host them in our own package registry so we can manage updates to them/properly test them for vulnerabilities and trust"), the research on `docs/research-software-supply-registry`, the owner's answer "accept supply registry defaults" (all eleven research questions) and "let's look to become fully sovereign compliant" (the runner move planned, behind an owner checkpoint).
+**Depends on**: 47-29 (the scan library, offline rescan and signed database refresh), 48.1-17 (signing with the organization site key through PKCS#11), 48.1-22 (the development site key, done); 47-26 and 48.1-06 for the register order; 47-18's lab for the baseline and the lab run. Waves 1 to 3 need nothing else in flight.
+**Requirements**: SSR-01, SSR-02, SSR-03, SSR-04, SSR-05, SSR-06, SSR-07, SSR-08
+**Success Criteria** (what must be TRUE):
+  1. Every npm, OCI, Go, Maven, PyPI and RPM artefact passes the owner's gates (7-day age with a named-approver fast lane, name, install scripts, licence, integrity and signature, provenance regression, publisher change, malware, vulnerabilities, source form) before use; one named person approves a flag, two approve a flagged install script or a fast lane; every state has an exit and nothing is deleted. (SSR-01, SSR-02)
+  2. An approval is a promotion record signed with your organization's site key in the HSM, never the release key, bound to the artefact's digest and stored beside it with its SBOM, scan and VEX as OCI referrers that survive every copy. (SSR-03)
+  3. HQ runs Harbor (OIDC sign-in, audit log in the log store, Trivy off, one robot per job, no egress) and, at the build HQ, Verdaccio (no uplink, only the intake publishes); site Zot writes an audit log; each has a passing fit entry. (SSR-04)
+  4. CI fails on any dependency or image pin not in your organization's signed approved lists, judged by checking code and keys taken only from the protected base ref; image builds take their Go, Maven, RPM and PyPI inputs only from approved files with the network off; the offline bundle carries only approved content with its records, and the site import refuses anything else. (SSR-05)
+  5. Your organization's Grype and OSV databases are synced, checked and signed daily; everything approved is rescanned daily; new KEV, malware or high findings, overdue reviews, unmatched signatures, old databases and a stopped intake raise alerts; OpenVEX is approved and signed; sites receive the database, VEX and withdrawals by signed refresh, and a withdrawal alerts and goes to the change board. (SSR-06)
+  6. The supply-registry component has statements and evidence rules for the supply chain controls, the process document and runbook exist, the OSCAL package validates, gap rows G517 to G525 are on the road-to-production page, and a lab run proved the whole path on the real stack and an air-gapped site. (SSR-07)
+  7. On the owner's go, builds run on single-use runner VMs at HQ in Canada that reach only GitHub and HQ, publish straight to HQ Harbor from protected pushes only, GHCR is optional and audits run offline; G517 is met, and G525 records that the source and job control plane stay on GitHub. On wait, G517 is a dated POA&M item, never claimed closed. (SSR-08)
+  8. A release's workbench image and VSIX have been rebuilt independently from the tagged source and approved files, compared byte for byte, and recorded as reproduced or differs in a record signed with the site key that verifyRebuild checks and the offline bundle carries to sites, with any difference named in G525. (SSR-05, SSR-07)
+**Plans:** 28 plans in 13 waves (planned 2026-11-25 on `docs/phase-48.3-plan`; decisions D-01 to D-39 in `48.3-CONTEXT.md`, D-39 the reproducible-build check, D-01 to D-11 the owner's accepted defaults, D-37 the rule that CI never runs the verifying code or keys of the pull request it checks; revised three times on 2026-11-25 after the independent plan checks; hand-offs 48.3 H-01 to 48.3 H-22 in `48.3-HANDOFFS.md`; gaps G517 to G525, and G526 if the lab has no second approver; each wave with gate files lands as one combined pull request with one owner gate approval)
+
+Plans:
+- [ ] 48.3-01-PLAN.md: Wave 1. Tracer: the owner's policy and the state machine as pure code (gates, approver counts, licence expressions, tighten-only site policy, no stuck state)
+- [ ] 48.3-02-PLAN.md: Wave 1. Spike S-A: cosign 3.1.4 attestation types, OCI referrers on Zot, an attestation signed through a PKCS#11 token attached with stock cosign, copies
+- [ ] 48.3-03-PLAN.md: Wave 1. Spike S-B: whether hauler 2.1.2 carries referrers for images and files through the bundle path; ORAS only if not
+- [ ] 48.3-04-PLAN.md: Wave 1. Gap rows G517 to G521 and G523 with POA&M items, the pinned totals and the road-to-production page
+- [ ] 48.3-05-PLAN.md: Wave 2. Promotion records and approvals: named approvers proven by a device sign-in with passkey step-up through OpenBao; two-person and fast-lane rules; signature reconciliation
+- [ ] 48.3-06-PLAN.md: Wave 2. Spike S-C: the Verdaccio version and tree judged and read from source, the owner's legitimacy checkpoint, then an isolated run proving exact bytes and refused publishes
+- [ ] 48.3-07-PLAN.md: Wave 3. Gate PR: the supply-registry component, osv-scanner pinned, Verdaccio and Harbor's HQ role fit-checked (owner approval)
+- [ ] 48.3-08-PLAN.md: Wave 4 (after 47-29 and 48.1-17). The OCI intake: gather with no key, decide and sign on the signing host, publish with referrers; the review command; our releases re-verified from GHCR
+- [ ] 48.3-09-PLAN.md: Wave 4. HQ Harbor: OIDC and audit settings generated for the install, no admin group; projects, immutable tags, robots and readers as code
+- [ ] 48.3-10-PLAN.md: Wave 4. Registry audit (Harbor forward, Zot audit log) and isolation (no egress); the supply namespace and the status object with its one narrow writer
+- [ ] 48.3-11-PLAN.md: Wave 5. Verdaccio as a SovAI-built image, its chart and per-reader accounts
+- [ ] 48.3-12-PLAN.md: Wave 5. The bundle built only from HQ approved content with records checked, the site import's check, the 2026 SBOM Minimum Elements check (wave gate)
+- [ ] 48.3-13-PLAN.md: Wave 5. The npm intake: age-limited resolution, registry signatures, provenance, malware and vulnerability gates, exact-bytes publish; the signed approved lists with serial, withdrawn and held entries; the verifying code and keys become gate paths
+- [ ] 48.3-14-PLAN.md: Wave 6 (on 47-18's lab). The npm and images baseline judged, approved by named people (install-script items held under G526 without a second approver) and signed by the owner; the build HQ key lands (wave gate)
+- [ ] 48.3-15-PLAN.md: Wave 7. The input check, which CI runs only from the protected base ref with the base's key, so a pull request cannot change what it is judged by (wave gate)
+- [ ] 48.3-16-PLAN.md: Wave 7. Go, Maven, PyPI and RPM snapshots recorded file by file, judged and signed into lists; snapshotsAtHq in the records; the fetch tool
+- [ ] 48.3-17-PLAN.md: Wave 8. oauth2-proxy and the Theia Cloud images built from approved Go and Maven files with the network off, fetched by the base ref's code (wave gate)
+- [ ] 48.3-18-PLAN.md: Wave 9. postgres, the test HSM image and the workbench take approved, signature-checked RPMs; trestle from approved wheels (wave gate)
+- [ ] 48.3-19-PLAN.md: Wave 8. Daily database sync and signing, rescans dated by the database, state moves, reconciliation, alert rules with guards; the audit collector reads offline scan results
+- [ ] 48.3-20-PLAN.md: Wave 9. OpenVEX with approvals; the signed refresh with the database, VEX and withdrawals; the site's alert and change record
+- [ ] 48.3-21-PLAN.md: Wave 10. The process document and runbook, statements and evidence rules, the component in the hosted levels, OSCAL (wave gate)
+- [ ] 48.3-22-PLAN.md: Wave 10 (on 47-18's lab). Lab run on the real stack and an air-gapped site
+- [ ] 48.3-23-PLAN.md: Wave 11. Owner decision on runners in Canada (default wait: G517 becomes a dated POA&M item); on go, the runner egress allow-list and single-use runner VMs
+- [ ] 48.3-24-PLAN.md: Wave 12 (after the owner's go). The runner golden image and pin; build, image and publish jobs on HQ runners reading HQ's registries (wave gate)
+- [ ] 48.3-25-PLAN.md: Wave 13. Publication to HQ, GHCR optional, the exchange register, offline audits; G517 met (wave gate)
+- [ ] 48.3-26-PLAN.md: Wave 12 (on go or wait). The reproducible-build check: a release's image and VSIX rebuilt independently at the lab from the tag and approved files, compared byte for byte, the result signed by the owner and checked by verifyRebuild, G525 honest about what differs
+- [ ] 48.3-27-PLAN.md: Wave 2. Gap rows G522, G524 and G525 with POA&M items, the totals and the page
+- [ ] 48.3-28-PLAN.md: Wave 13 (after 48.2-13). The signed rebuild record verified, re-signed with the site key, carried in the offline bundle and installed in the release-evidence mount as rebuild-<version>.json
+
+### Phase 48.4: Sovereignty status and the path to full sovereignty (INSERTED)
+**Goal**: Every page of the Sterling workbench and of the desktop extension carries a sovereignty badge in the status bar that opens a card showing, for 14 dimensions in four groups, how far the system meets the published Canadian criteria (ITSP.10.033 SA-400 and its enhancements, SA-9(8), the Treasury Board digital sovereignty framework, the national AI strategy), each row with its evidence, source, time and what moves it to Met; the card is a view over the Phase 48.2 evidence engine and never overclaims; and each dimension has planned or handed-off work that moves it to Met, with the outside parties named where Met needs them.
+**Inserted**: 2026-11-25 from the owner's request ("a badge on every page that acts like a sovereignty status badge ... we pin the credibility of our product on it") and decisions ("accept sovereignty defaults (and let's look to become fully sovereign compliant)"); research `.planning/research/sovereignty-status/RESEARCH.md`.
+**Depends on**: Phase 48.2 (the status engine, the trust document and operator files, the live collector, the evidence service and the Compliance view; 48.4-06 after 48.2-08 and 48.2-13, 48.4-07 after 48.2-09 and 48.2-11, 48.4-09 and 48.4-12 after 48.2-10, 48.4-15 after 48.2-15, 48-07 and 48-08); the coherence review amendment in 48.4-01 before any sovereignty screen; `/gsd-ui-phase 48.4` (an approved `48.4-UI-SPEC.md`) before wave 4. Runs beside Phase 48.3 (software supply registry), coordinated through `48.4-HANDOFFS.md` only. Part B hands work to 32.1, 32.2, 33.2, 36, 37, 47, 48.1, 48.3, 74.1 and 74.2 (H-01 to H-22).
+**Requirements**: SVS-01, SVS-02, SVS-03, SVS-04, SVS-05, SVS-06, SVS-07, SVS-08, SVS-09, SVS-10
+**Success Criteria** (what must be TRUE):
+  1. The glossary, experience map and copy lint are amended first: "Sovereignty" appears only as the badge and card name, and "fully sovereign", "100% Canadian" and the other overclaims are refused in user copy and documentation. (SVS-01)
+  2. One pure lens, called by the desktop extension and by the workbench backend from the 48.2 engine, judges each dimension strictly against its Canadian criterion on what the session can reach now; the badge shows "Sovereignty: {state} · {reason}" with the worst state and counts, never a score; a row or control reads Met only when every input it depends on is positively evidenced (a missing, unrestrictive or self-reported-only input caps it below Met, so the Compliance view and the card agree); an allowed but unmet row says both. (SVS-02, SVS-07)
+  3. Every resource records its supplier and supplier jurisdiction and every exchange its operator jurisdiction and location; sovereignty gaps are tagged by dimension and kept equal to the card's map by a test. (SVS-03)
+  4. A site's operator signs a site sovereignty declaration (facility, operator, screening reference, hardware and review references, HSM and CMVP certificate, backups, model servers, operating level) that every session verifies, ages after 90 days and is out of date after 180, cross-checked against the collector's egress, node and seal facts. (SVS-04, SVS-05)
+  5. In both editions the badge opens the card in the original theme with lifted cards; each workbench row deep-links to the Compliance view's Sovereignty filter and back; a policy change shows without a reload; an air-gapped site shows its strongest rows from local sources; the desktop never infers location. One focused browser check proves it on the built image. (SVS-06, SVS-07)
+  6. Each of the 14 dimensions has an owning plan or hand-off to Met (`48.4-CONTEXT.md` D-40); the starting rules keep Canada's Protected B, Protected C and Classified content in Canada (owner O2); the owner's items are recorded; statements, evidence rules, the SA-400 assessment input pack, the "How sovereignty is judged" page and gap rows G527 to G536 exist. (SVS-08, SVS-09, SVS-10)
+**Plans:** 17 plans in 7 waves (planned 2026-11-25 on `docs/phase-48.4-plan`, revised the same day after the independent plan check: the evidence invariant D-41 to D-43, monotonic site-bound declarations D-44, the UI-SPEC step as 48.4-17; decisions D-01 to D-40, owner items O1 to O5 with defaults, hand-offs H-01 to H-22 in `48.4-CONTEXT.md` and `48.4-HANDOFFS.md`; gap rows G527 to G536 filed with the plans; each wave lands as one combined pull request with one owner gate approval)
+**UI hint**: yes (48.4-17 runs `/gsd-ui-phase 48.4` in wave 1 for the owner's approval; 48.4-10 to 48.4-13 depend on it and stop unless `48.4-UI-SPEC.md` is approved on main)
+
+Plans:
+- [ ] 48.4-01-PLAN.md: Wave 1. The coherence amendment (glossary rows, the second status bar item, the review record) and the copy lint's overclaim ban; "Sovereignty" confined to the card's sources
+- [ ] 48.4-02-PLAN.md: Wave 1. Supplier and supplier jurisdiction on every fit register entry; wave 1's gate
+- [ ] 48.4-03-PLAN.md: Wave 1. Operator jurisdiction and location on every exchange and in the interconnections document
+- [ ] 48.4-04-PLAN.md: Wave 1. Owner items O1 to O5 with defaults, and the written request to NEAR AI the owner sends
+- [ ] 48.4-05-PLAN.md: Wave 2. The dimension map, the supplier record and the pure lens for all 14 dimensions; the gap tag drift test
+- [ ] 48.4-06-PLAN.md: Wave 2 (after 48.2-08 and 48.2-13). The signed site sovereignty declaration: format, purpose, freshness, observations, the mount file, publishing and the runbook
+- [ ] 48.4-07-PLAN.md: Wave 2 (after 48.2-09 and 48.2-11). The collector's egress fact and its one extra right, the site's sign-in setting in every session; wave 2's gate
+- [ ] 48.4-08-PLAN.md: Wave 2. The residency rule in the starting rules for Canada's Protected B, Protected C and Classified levels (owner O2)
+- [ ] 48.4-09-PLAN.md: Wave 3. The workbench backend judges sovereignty in the evidence refresh; the gate's report from the bundled VSIX
+- [ ] 48.4-10-PLAN.md: Wave 3. The generated "How sovereignty is judged" documentation page
+- [ ] 48.4-11-PLAN.md: Wave 4 (approved UI-SPEC). The workbench status bar badge and card
+- [ ] 48.4-12-PLAN.md: Wave 4 (approved UI-SPEC). The Compliance view's Sovereignty filter and the links both ways
+- [ ] 48.4-13-PLAN.md: Wave 4 (approved UI-SPEC). The desktop extension's badge and card
+- [ ] 48.4-14-PLAN.md: Wave 5. The one focused browser check on the built image
+- [ ] 48.4-15-PLAN.md: Wave 6 (after 48.2-15, 48-07 and 48-08). Statements and evidence rules (SA-9(8) from the declaration and the network evidence together, SC-12, CA-7, CM-8, SR-4, SA-400(3)) and the SA-400 enhancements per owner O4
+- [ ] 48.4-16-PLAN.md: Wave 7. The SA-400 assessment input pack, SECURITY.md, the full suites once, the integration pull request and the owner gate
+- [ ] 48.4-17-PLAN.md: Wave 1. The UI-SPEC: `/gsd-ui-phase 48.4` and the owner's approval of `48.4-UI-SPEC.md`
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -2285,8 +2370,8 @@ Plans:
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 2/20 | In Progress (drop A release) | - |
-| 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
-| 33.2. Post-quantum cell keys (cell-wrap/v2) | 5/8 | In Progress 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
+| 33.1. Assigned positions and handover | 2/26 | In Progress (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
+| 33.2. Post-quantum cell keys (cell-wrap/v2) | 6/8 | In Progress 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
@@ -2301,13 +2386,15 @@ Plans:
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
-| 45.1. NATO and Five Eyes exchange, part 1 | 0/5 | Planned 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
+| 45.1. NATO and Five Eyes exchange, part 1 | 2/5 | In Progress 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
 | 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/12 | Planned 2026-11-24 (after 45.1's plans; 45.2-12 waits for a partner's KAS and samples) | - |
 | 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 26/35 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 48.2. Live compliance evidence in the workbench | 11/17 | In Progress 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
+| 48.3. Software supply registry | 0/28 | Planned 2026-11-25 (owner: all eleven research defaults accepted; runner move behind an owner checkpoint; waves 1 to 3 can start now, wave 4 after 47-29 and 48.1-17, waves 6 and 10 on 47-18's lab; hand-offs in 48.3-HANDOFFS.md) | - |
+| 48.4. Sovereignty status and the path to full sovereignty | 4/17 | In Progress 2026-11-25 (wave 1 executed; 48.4-02 and 48.4-04 wait on owner checkpoints), revised after the plan check; the owner answered on 2026-11-25 (supplier line split, O2 to O5 at their defaults, O6 to be determined; the NEAR AI request is still to send) (wave 1 can start now, including the UI-SPEC step 48.4-17; waves 2 and 3 after the named 48.2 plans; wave 4 after the approved UI-SPEC; five owner items with defaults in 48.4-04; gap rows G527 to G536 filed; beside 48.3 through 48.4-HANDOFFS.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |

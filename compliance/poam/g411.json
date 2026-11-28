@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "si-07",
+    "sr-04"
+  ],
+  "gap": "G411",
+  "id": "g411",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "NEAR AI answers whether its attestation reports the weights' hash (N5)"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "An approval for a model in NEAR AI's private hardware binds to its model id, not to the exact weights, because the attestation does not report the weights' hash (N5). A change of weights behind the same id cannot be seen there. Your organization's attested hosting (Phase 74.2) reports it. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-15.",
+  "title": "NEAR AI's attestation does not name the model files it runs"
+}

@@ -1,6 +1,7 @@
 // Output-only copy lint. Kept import-free so docs CI can run it with Node alone.
 export const COMPLIANCE_CLAIMS = Object.freeze([
-  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'compliant', 'accredited', 'certified'
+  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'fully sovereign', '100% sovereign',
+  '100% Canadian', 'sovereign by default', 'sovereignty certified', 'certified sovereign', 'compliant', 'accredited', 'certified'
 ]);
 export const NEGATION = /(?<![A-Za-z0-9_])(?:not|never|no|cannot|without|isn['\u2019]t|doesn['\u2019]t)(?![A-Za-z0-9_])/i;
 export const SENTENCE_BREAK = /[.!?]\s+|\n/;

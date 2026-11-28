@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/browser/*.css lib/browser/"
+    "build": "tsc -p tsconfig.json && cp src/browser/*.css lib/browser/ && cp src/browser/staff/*.css lib/browser/staff/"
   },
   "dependencies": {
     "@theia/core": "1.77.0"

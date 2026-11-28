@@ -11,6 +11,9 @@ import { stateFolder } from '../domain/scratch';
 import { newStateId, type SealedBlob } from '../domain/state/keys';
 import { runStateGit, type GitRunner } from './stateGit';
 import { withStateLock } from './stateLocks';
+import { privateFileProblem } from '../team/fileSafety';
+
+export { privateFileProblem } from '../team/fileSafety';
 
 export const STATE_FORMAT = 1 as const;
 const STATE_ID = /^[a-z0-9]{16,40}$/;
@@ -138,32 +141,6 @@ export async function createExclusive(target: string, data: string | Buffer, mod
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
     throw error;
   }
-}
-
-/**
- * Why a file may not be trusted as this user's private file, or undefined when it may. A link, anything that is not a regular file and a parent folder
- * that is a link are refused everywhere. On POSIX the file and its folder must also belong to the user running the editor, and the file must have no
- * group or other permission bits (a file written by this extension is mode 0600, so another editor of the same user passes). A short reason, never a path.
- */
-export async function privateFileProblem(file: string): Promise<string | undefined> {
-  let info;
-  let parent;
-  try {
-    info = await lstat(file);
-    parent = await lstat(path.dirname(file));
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
-  }
-  if (info.isSymbolicLink()) return 'a link';
-  if (!info.isFile()) return 'not a regular file';
-  if (parent.isSymbolicLink() || !parent.isDirectory()) return 'its folder is a link';
-  if (typeof process.getuid === 'function') {
-    const me = process.getuid();
-    if (info.uid !== me) return 'owned by someone else';
-    if (parent.uid !== me) return 'its folder is owned by someone else';
-    if ((info.mode & 0o077) !== 0) return 'readable by others';
-  }
-  return undefined;
 }
 
 export class ProjectStateHome {

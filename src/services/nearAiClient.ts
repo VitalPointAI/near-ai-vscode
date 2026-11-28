@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { AttestationReportCache, NOT_CHECKED_IN_EDITOR, sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
 import { bindingReason, decideRoute, isBindingFresh, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
-import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
+import type { ConnectionBindingFact, PassportRefusal, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
@@ -139,7 +139,7 @@ export function needsRouteCheck(path: string, method: string | undefined): boole
 
 /** A model request the session's route does not allow (CLAS-06): thrown before anything is sent, with the plain sentence that says so. */
 export class RouteRefusedError extends Error {
-  public constructor(public readonly rule: RouteRule, message: string) {
+  public constructor(public readonly rule: RouteRule, message: string, public readonly passport?: PassportRefusal) {
     super(message);
     this.name = 'RouteRefusedError';
   }
@@ -1175,7 +1175,7 @@ export class NearAiClient implements ModelEndpoint {
     this.refreshBinding(host, now);
     // D-37: privacyMode tee-only and a private member or agent team give one floor; decideRoute reads its tier and its allowed models.
     const floor = floorFor({ privateOnly: privateOnlyNow() });
-    const facts = routeFactsFor({ clientRoute: this.options.route, host, info: model === undefined ? undefined : this.models.get(model), attestation: attestationStateOf(route), fact, now, localModelAvailable: this.options.localModelAvailable === true, sessionless: inSession === undefined, allowedModels: floor.allowedModels });
+    const facts = routeFactsFor({ clientRoute: this.options.route, host, info: model === undefined ? undefined : this.models.get(model), attestation: attestationStateOf(route), fact, now, localModelAvailable: this.options.localModelAvailable === true, sessionless: inSession === undefined, allowedModels: floor.allowedModels, catalog: this.models });
     let decision: RouteDecision;
     let mark: Mark = [];
     let checkFailed = false;
@@ -1214,7 +1214,7 @@ export class NearAiClient implements ModelEndpoint {
     if (decision.allowed && !checkFailed) noteNotAccredited(route, decision, facts, model, context);
     let fellBackRecorded = false;
     const recordFallback = (): void => { if (!fellBackRecorded) { fellBackRecorded = true; write(true); } };
-    if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
+    if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.', decision.passportRefusal);
     return {
       route,
       decision,

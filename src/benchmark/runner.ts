@@ -18,6 +18,13 @@ import { SpendLimitError, StreamInterruptedError, type AgentMessage, type UsageM
 import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import { withSpendTag } from '../services/spendLedger';
 import type { ComparisonPlan, ResultRow, RowOutcome } from './results';
+import type { UseInput } from '../domain/gate/useTier';
+
+/**
+ * The use of every Compare Models task request (74.1 D-17, D-18): a comparison on synthetic tasks, in the research workspace's lane, so models approved for
+ * research only can be compared; their records say lane t0. Putting a model to work for a job is a separate, approval-checked step.
+ */
+export const COMPARE_USE: UseInput = Object.freeze({ compare: 'synthetic', lane: 'research' });
 import { costOf, gradeTask, runMetrics, setUpTask, type BenchmarkTask } from './tasks';
 
 // Runs benchmark tasks with the extension's own agent loop, tools, system prompt, and permission
@@ -75,7 +82,7 @@ export async function runAgentInFolder(client: BenchmarkClient, model: string, r
     const messages: AgentMessage[] = [{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }];
     // CLAS-06: every model request of the run (comparison, benchmark and role-suite runs all come here) is routed by a session route built from the run's own
     // gate, so a run with no gate host is decided by the failed-closed policy, and its requests are recorded where its decisions are.
-    const result = await withSessionRoute(sessionRouteFrom(gate, { markOf: () => mark.current() }), () => run.run(messages, options.signal ?? new AbortController().signal));
+    const result = await withSessionRoute(sessionRouteFrom(gate, { markOf: () => mark.current(), use: COMPARE_USE }), () => run.run(messages, options.signal ?? new AbortController().signal));
     const answer = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content ?? '';
     return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started, changed: checkpoints.changedFiles };
   } finally {

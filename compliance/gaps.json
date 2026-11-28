@@ -1514,7 +1514,7 @@
       "id": "G111",
       "ownerRole": "shared",
       "poam": "g111",
-      "remediation": "The sponsor data residency authority and service operator map every assessed processing and storage location, including replicas, backups, failover and relevant subprocessors. Obtain provider and deployment configuration evidence for where processing and storage occur, then demonstrate an assessed location restriction. Record and escalate unverified or out-of-bound flows for remediation.",
+      "remediation": "The sponsor data residency authority and service operator map every assessed processing and storage location, including replicas, backups, failover and relevant subprocessors. Obtain provider and deployment configuration evidence for where processing and storage occur, then demonstrate an assessed location restriction. Record and escalate unverified or out-of-bound flows for remediation. Sovereignty: data-stored, ai-runs, assessments.",
       "title": "In-scope processing and storage locations need verified Canadian boundary evidence"
     },
     {
@@ -1588,7 +1588,7 @@
       "id": "G117",
       "ownerRole": "owner",
       "poam": "g117",
-      "remediation": "The sponsor business owner and designated security, privacy and legal authorities define the assessed business functions, data and jurisdictions. Assess potential injury from external legal compulsion, document jurisdiction-specific threats and vulnerabilities, and update categorization where supported. Retain reviewed risk and treatment decisions for each relevant jurisdiction. Use G111 for separate processing and storage location evidence.",
+      "remediation": "The sponsor business owner and designated security, privacy and legal authorities define the assessed business functions, data and jurisdictions. Assess potential injury from external legal compulsion, document jurisdiction-specific threats and vulnerabilities, and update categorization where supported. Retain reviewed risk and treatment decisions for each relevant jurisdiction. Use G111 for separate processing and storage location evidence. Sovereignty: assessments.",
       "title": "Sovereignty and jurisdiction risk needs an approved sponsor assessment"
     },
     {
@@ -4738,7 +4738,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Choose and buy an HSM model with an active FIPS 140-3 Level 3 certificate, then record the certificate that matches its hardware version, firmware and approved mode, with source and date, in the hosted verification records. SoftHSM2 proves wiring only and never closes this gap.",
+      "remediation": "Choose and buy an HSM model with an active FIPS 140-3 Level 3 certificate, then record the certificate that matches its hardware version, firmware and approved mode, with source and date, in the hosted verification records. SoftHSM2 proves wiring only and never closes this gap. Sovereignty: keys.",
       "title": "The chosen HSM model's FIPS 140-3 certificate is not recorded"
     },
     {
@@ -5138,7 +5138,7 @@
       "id": "G347",
       "ownerRole": "shared",
       "poam": "g347",
-      "remediation": "Node's bundled OpenSSL and Electron's BoringSSL run without FIPS mode. The hosted workbench moves to Node with the RHEL 9 OpenSSL FIPS provider on a FIPS host (Phase 46). The desktop extension has no validated path, so your organization uses it only where its policy does not require a validated module, or its authorizing official accepts the condition. X8 covers the same point for the export overlays.",
+      "remediation": "Node's bundled OpenSSL and Electron's BoringSSL run without FIPS mode. The hosted workbench moves to Node with the RHEL 9 OpenSSL FIPS provider on a FIPS host (Phase 46). The desktop extension has no validated path, so your organization uses it only where its policy does not require a validated module, or its authorizing official accepts the condition. X8 covers the same point for the export overlays. Sovereignty: keys.",
       "title": "The extension's Node and Electron cryptography does not run in a validated module"
     },
     {
@@ -5167,7 +5167,7 @@
       ],
       "id": "G349",
       "ownerRole": "maintainers",
-      "remediation": "The current cell key wrap uses X25519, which ITSP.40.111 version 5 does not list. Phase 33.2 replaces it with cell-wrap/v2 (P-256 with ML-KEM-768). The condition closes when Phase 33.2 merges and every project has switched to the new keys.",
+      "remediation": "The current cell key wrap uses X25519, which ITSP.40.111 version 5 does not list. Phase 33.2 replaces it with cell-wrap/v2 (P-256 with ML-KEM-768). The condition closes when Phase 33.2 merges and every project has switched to the new keys. Sovereignty: keys.",
       "title": "X25519 cell key wraps are not listed in ITSP.40.111"
     },
     {
@@ -5181,7 +5181,7 @@
       ],
       "id": "G350",
       "ownerRole": "maintainers",
-      "remediation": "Verified credentials, DID logs and status lists are signed with Ed25519. FIPS 186-5 approves it, but no module in the stack runs it as validated: Node's FIPS mode is off, OpenBao has no FIPS build (issue 1409), the OpenSSL 3.1.2 provider (CMVP 4985) does not allow it, and the RHEL 9 provider (CMVP 5573) does not offer it. A site whose policy requires validated modules uses the fallback from decision O8: ecdsa-jcs-2019 credentials, with P-256 keys for officers and status lists.",
+      "remediation": "Verified credentials, DID logs and status lists are signed with Ed25519. FIPS 186-5 approves it, but no module in the stack runs it as validated: Node's FIPS mode is off, OpenBao has no FIPS build (issue 1409), the OpenSSL 3.1.2 provider (CMVP 4985) does not allow it, and the RHEL 9 provider (CMVP 5573) does not offer it. A site whose policy requires validated modules uses the fallback from decision O8: ecdsa-jcs-2019 credentials, with P-256 keys for officers and status lists. Sovereignty: keys.",
       "title": "Ed25519 does not run in a validated module anywhere in the stack"
     },
     {
@@ -5199,7 +5199,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "OpenBao holds each site's secrets, its certificate authority and each person's keys, and it is built without a validated module. The request for a FIPS build (issue 1409) is open, and a third party is evaluating a wolfCrypt FIPS build. Record a validated build when one exists. Until then your organization's authorizing official decides whether to accept the condition.",
+      "remediation": "OpenBao holds each site's secrets, its certificate authority and each person's keys, and it is built without a validated module. The request for a FIPS build (issue 1409) is open, and a third party is evaluating a wolfCrypt FIPS build. Record a validated build when one exists. Until then your organization's authorizing official decides whether to accept the condition. Sovereignty: keys.",
       "title": "OpenBao has no FIPS 140-3 validated build"
     },
     {
@@ -5217,7 +5217,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "In development the organization site key lives in a SoftHSM2 token on the owner's computer. Production needs the key generated inside your organization's HSM. The install check refuses a production site whose signing token is SoftHSM2, and refuses a bundle signed by one. G324 records the HSM model's certificate.",
+      "remediation": "In development the organization site key lives in a SoftHSM2 token on the owner's computer. Production needs the key generated inside your organization's HSM. The install check refuses a production site whose signing token is SoftHSM2, and refuses a bundle signed by one. G324 records the HSM model's certificate. Sovereignty: keys.",
       "title": "The organization site key is in SoftHSM2 until a real HSM is installed"
     },
     {
@@ -5243,7 +5243,7 @@
       ],
       "id": "G354",
       "ownerRole": "shared",
-      "remediation": "The exchange follows the public OpenTDF specification in a ZTDF-compatible profile. Checking it against ZTDF needs ACP-240 Edition A with its ZTDF specification, or sample objects from allies, and a test key access server (plan 45.2-10). Your organization requests them through its sponsor. Until then exports are ZTDF-compatible, never called conformant. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-01.",
+      "remediation": "The exchange follows the public OpenTDF specification in a ZTDF-compatible profile. Checking it against ZTDF needs ACP-240 Edition A with its ZTDF specification, or sample objects from allies, and a test key access server (plan 45.2-10). Your organization requests them through its sponsor, and asks DND for ACP-240 Edition A with its ZTDF specification, which is still outstanding (owner action d). Until then exports are ZTDF-compatible, never called conformant. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-01.",
       "title": "ZTDF conformance is not verified"
     },
     {
@@ -5256,8 +5256,8 @@
       "id": "G355",
       "ownerRole": "owner",
       "poam": "g355",
-      "remediation": "Every export carries an originator label in your organization's own national policy, with its policy identifier and values, and an alternative label in the common partner policy. The national policy identifier and values come from your national security authority, and your organization's security officer sets and signs them in the signed policy. Until they are set, every export is refused. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03 and D-04.",
-      "title": "Your organization's national label policy and NATO label values are not set, so exports are refused"
+      "remediation": "Exports in the Government of Canada scales are labelled from the Canadian DND/CAF label policy profile (resources/label-profiles/can-dnd.label-profile.json). Its values are assumed from how DND security orders write markings: the policy identifier CAN and the classifications PROTECTED A, PROTECTED B, PROTECTED C, CONFIDENTIAL, SECRET and TOP SECRET, in an assumed order. The identifier's OID, the caveats, the releasability rules and a versioned policy information file are not known, so the OID is a placeholder set per target system and no OID is invented. An operational export always refuses the placeholder, and refuses the assumed values unless your organization's security officer records an exception for them; a trial export may use them and says so. Your organization asks the DND project technical authority for the target system's label-policy owner, who supplies the verified values (owner action a); each value is then replaced and marked verified. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-21 and D-22.",
+      "title": "The Canadian DND/CAF label policy values are assumed, so operational exports that use them are refused"
     },
     {
       "appliesAt": "coalition-exchange",
@@ -5803,7 +5803,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Register each external service (model endpoints, the container registry, CI and the signing transparency service) as a fit-checked resource with its function, data sent, location, jurisdiction and terms, found from the code, and bring the model endpoints into the hosted levels (48.1-06).",
+      "remediation": "Register each external service (model endpoints, the container registry, CI and the signing transparency service) as a fit-checked resource with its function, data sent, location, jurisdiction and terms, found from the code, and bring the model endpoints into the hosted levels (48.1-06). Sovereignty: data-travels, outside-laws.",
       "title": "External services are not fit-checked or in the hosted scope"
     },
     {
@@ -5920,7 +5920,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Separate the supplier release key from the organization site key (owner decision a): sign bundles, re-signed images, person exports, certificate requests and revocation lists with the site key through its PKCS#11 address, kept in SoftHSM2 in development and in the HSM in production (48.1-17, 48.1-22). The SoftHSM2 module itself is G352.",
+      "remediation": "Separate the supplier release key from the organization site key (owner decision a): sign bundles, re-signed images, person exports, certificate requests and revocation lists with the site key through its PKCS#11 address, kept in SoftHSM2 in development and in the HSM in production (48.1-17, 48.1-22). The SoftHSM2 module itself is G352. Sovereignty: keys.",
       "title": "One signing key serves supplier releases and site trust files"
     },
     {
@@ -6107,6 +6107,150 @@
     },
     {
       "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "74.1",
+      "controls": [
+        "sa-04",
+        "sa-09"
+      ],
+      "id": "G407",
+      "ownerRole": "owner",
+      "remediation": "Command A+ (05-2026) is Apache 2.0 (Cohere's blog, docs and Hugging Face, read 2026-11-24 and again 2026-11-25). The owner decided on 2026-11-24 that it runs through Cohere Model Vault or on your organization's own on-premise hosting under your organization's passport with its artifact hash, and not in NEAR AI's private hardware. The shipped approval follows this. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-05.",
+      "title": "Command A+ hosting decided: Model Vault and your organization's on-premise hosting"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "sa-09",
+        "sr-03"
+      ],
+      "id": "G408",
+      "ownerRole": "owner",
+      "poam": "g408",
+      "remediation": "Every chat, embedding, reranking and vision model in NEAR AI's private hardware comes from a developer in the People's Republic of China, so under your organization's rules agent work has no private model there. The owner has asked NEAR AI to host Nemotron 3, Command A+, gpt-oss and Western embedding and reranking models (N1, N2, N2a, N7). Until then use your organization's own attested hosting (Phase 74.2), a Cohere vault, or a model on this computer. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-26.",
+      "title": "No Western model runs in NEAR AI's private hardware"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "cm-06",
+        "sr-03"
+      ],
+      "id": "G409",
+      "ownerRole": "shared",
+      "poam": "g409",
+      "remediation": "Without your organization's policy, or with it set to report, model approvals are only reported: today's models, including PRC-origin ones, keep doing agent work, every use outside the rules is recorded as would-refuse, and a notice that cannot be dismissed says so. This closes when your organization's policy is in enforce mode with an evaluated Western model for agent work. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-18a and D-22.",
+      "title": "Report mode runs agent work outside your organization's model policy until enforce"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "sa-11",
+        "sr-04"
+      ],
+      "id": "G410",
+      "ownerRole": "shared",
+      "poam": "g410",
+      "remediation": "The shipped approvals carry no evaluation. Under enforce, every role above research needs your organization's own evaluation and red team of the exact model files, cited in its approval. Until one exists, enforce refuses agent work and checks go to a person; report mode keeps the product working. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-16.",
+      "title": "No model may take a role under enforce until your organization evaluates it"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "si-07",
+        "sr-04"
+      ],
+      "id": "G411",
+      "ownerRole": "owner",
+      "poam": "g411",
+      "remediation": "An approval for a model in NEAR AI's private hardware binds to its model id, not to the exact weights, because the attestation does not report the weights' hash (N5). A change of weights behind the same id cannot be seen there. Your organization's attested hosting (Phase 74.2) reports it. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-15.",
+      "title": "NEAR AI's attestation does not name the model files it runs"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-04",
+        "sa-09"
+      ],
+      "id": "G412",
+      "ownerRole": "owner",
+      "poam": "g412",
+      "remediation": "Models used through NEAR AI carry their publishers' licences (for example NVIDIA's Nemotron licence and its dataset terms). Whether and how those terms pass through to your organization is question N8. Record the answer in the approvals and the fit register. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-26.",
+      "title": "How NEAR AI passes model licences through is not answered"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "cm-07",
+        "sc-07",
+        "sc-39"
+      ],
+      "id": "G413",
+      "ownerRole": "maintainers",
+      "poam": "g413",
+      "remediation": "The research workspace keeps adversary models away from project data and tools through the extension's own checks. The cyber harness's scan tools run on this computer with today's approvals and scope checks, not in a separate machine. Phase 72's execution backend and the v0.8.0 enclave add machine isolation. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-17.",
+      "title": "The research workspace is isolated by the extension, not by the operating system"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "au-10",
+        "ia-02"
+      ],
+      "id": "G414",
+      "ownerRole": "maintainers",
+      "poam": "g414",
+      "remediation": "An exception that lets a named senior person allow a model for chat they review exists only under your organization's rules, which list the person's key; that key is the person's device key until a credential replaces it. The roadmap says Phase 71 replaces the signer, but no Phase 71 plan does it yet. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-20.",
+      "title": "Model exceptions are signed with a device key, not a person's credential"
+    },
+    {
+      "appliesAt": "confidential",
+      "blocksProduction": false,
+      "controls": [
+        "sa-11",
+        "sr-03"
+      ],
+      "id": "G415",
+      "ownerRole": "owner",
+      "poam": "g415",
+      "remediation": "NVIDIA trained Nemotron 3 from scratch, but part of its post-training data came from DeepSeek, Qwen and Kimi models (and gpt-oss). This is recorded in its approval's lineage. Before approving it for operational work, your organization's evaluation includes trigger sweeps with Canadian and defence context. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-07.",
+      "title": "Nemotron 3 was post-trained on outputs of models from the People's Republic of China"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "ac-03",
+        "cm-06"
+      ],
+      "id": "G417",
+      "ownerRole": "shared",
+      "poam": "g417",
+      "remediation": "The security officer's switch is not yet available (G418). Once it ships, a hosted session is to apply a security officer's switch within a minute, while a desktop or edge install applies it only at its next policy fetch or rules import, and a disconnected edge keeps working under its last rules until then. Your organization's operating procedure says how often edges import rules and who carries the switch to them. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-28.",
+      "title": "An offline edge will apply Stop agent work now only at its next rules import"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "74.1",
+      "controls": [
+        "cm-06",
+        "ir-04"
+      ],
+      "id": "G418",
+      "ownerRole": "maintainers",
+      "remediation": "Report mode keeps the product working, but no security officer can yet switch your organization to enforce at once. Until the switch lands (it needs Phase 71's credential checker and hub, Phase 46's step-up and 47-32's live site record), enforce comes only from a new signed organization policy. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-02 and D-28.",
+      "title": "Stop agent work now is not yet available; report mode runs without a fast stop"
+    },
+    {
+      "appliesAt": "now",
       "blocksProduction": true,
       "closesInPhase": "71",
       "controls": [
@@ -6255,15 +6399,28 @@
     {
       "appliesAt": "now",
       "blocksProduction": false,
-      "closesInPhase": "33",
       "controls": [
         "cp-10",
         "sa-11"
       ],
       "id": "G430",
       "ownerRole": "maintainers",
-      "remediation": "A person who joins a shared project late now starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server after the trade-off: the server checkpoints no other cell, so there the history is read in full (nothing is left out, and the person is told so). A summary of a product's text also counts only once the registrations of the editing sessions it holds have arrived, and those are written before the checkpoint, so the text is complete only when the earlier history has been served. Decide how a summary may name the sessions it holds without their registrations, then build serving the earlier history after the start. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md.",
-      "title": "A late joiner starts from a checkpoint only in cells the server holds, and its text waits for the earlier history"
+      "poam": "g430",
+      "remediation": "A person who joins a shared project late starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server: the server checkpoints no other cell (the trade-off of Phase 33 D-63), so there the history is read in full. Nothing is left out, and the person is told so. Phase 35, together with the server items Phase 33 D-33 moved there, decides how a late joiner starts in a cell the server cannot open. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md and 33-CONTEXT.md D-70.",
+      "title": "A late joiner starts from a checkpoint only in cells the server holds"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "cp-10",
+        "sa-11"
+      ],
+      "id": "G431",
+      "ownerRole": "maintainers",
+      "remediation": "Changes made after the checkpoint in an editing session that was already open at it reach a person who joins late only once the earlier history has been served, because that session registered itself before the checkpoint and its changes wait for the registration. From plan 33-32 on, the joiner's status says the earlier history is still being checked, the history is fetched in the background, and the changes then appear; before 33-32, all text from before the checkpoint waits the same way. Plan 33-33 lets such a change count at once, marked not verified, when its client's slot belongs to the change's own writer and that writer's log starts at the checkpoint, after its own threat and version-safety analysis. Source: .planning/phases/33-live-multi-user-staff-projects/33-CONTEXT.md D-70 and D-71.",
+      "title": "A late joiner sees changes from an editing session open at the checkpoint only after the earlier history arrives"
     },
     {
       "appliesAt": "now",
@@ -6683,6 +6840,162 @@
       "title": "Some OpenTDF forms are refused as not supported yet"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "ra-03",
+        "sa-11"
+      ],
+      "id": "G537",
+      "ownerRole": "maintainers",
+      "poam": "g537",
+      "remediation": "An exception for chat you review has one evidence text, and the request form puts the mission benefit there. The design expects the evidence to hold the benefit and a reference to your organization's assessment of the model, and under enforce the exception stands in for that evaluation, but no assessment reference is recorded. Until the record gains a second field (a new signed shape, so a later phase), your organization records its assessment reference in the change note of the rules update that carries the exception, and whoever reviews the request checks it. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-16 and D-20; 74.1-11-SUMMARY.md.",
+      "title": "A model exception records its mission benefit, not a reference to your organization's assessment"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-09.08",
+        "sa-400.06",
+        "sa-400.07"
+      ],
+      "id": "G527",
+      "ownerRole": "owner",
+      "poam": "g527",
+      "remediation": "NEAR AI Cloud's documentation names no data-centre countries, operating entity or jurisdiction, subprocessors or prompt retention, and the roots of trust of its private hardware are US vendors'. Attestation proves the code and the model weights, not the country. The owner raises these points with NEAR AI in a planned discussion, with the existing hosting ask: the data-centre countries, the operating entity and its jurisdiction, the subprocessors and the retention terms (48.4-04; the owner held the written request on 2026-11-25). Until NEAR AI answers, the sovereignty card shows every NEAR AI fact as Unknown, and a site that needs Canadian processing lists only AI services your organization's rules approve. Sovereignty: data-stored, ai-runs, operator, outside-laws.",
+      "title": "NEAR AI Cloud does not publish where its private hardware runs, who operates it, its subprocessors or how long it keeps prompts"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.4",
+      "controls": [
+        "sa-09.08",
+        "sa-400.04",
+        "sa-400.07",
+        "sa-400.08"
+      ],
+      "id": "G528",
+      "ownerRole": "shared",
+      "remediation": "Software cannot prove where a facility is, who operates it or what hardware it holds. Phase 48.4 adds the signed site sovereignty declaration (sterling-site-sovereignty/1): the facility country and province, the operator and its jurisdiction, the administrator screening reference, the hardware inventory with its supply chain integrity review, the HSM model and its CMVP certificate, and the countries of the backups and the off-site copy, signed with an operator key your site trust document names and declared again at least every 180 days. Each site's operator signs and publishes one (deploy/runbooks/site-evidence.md); until then the card shows those rows as Unknown. It is part of the evidence G111 asks for. The mapping of each outside egress destination (a CIDR) to the register entry it reaches is declared too: software cannot check that an address belongs to the named service, so the card and the SA-9(8) detail label that mapping Declared, never Verified. Sovereignty: data-stored, keys, hardware, operator.",
+      "title": "No site declares its facility country, operator, administrator screening, hardware or backup location"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "48.4",
+      "controls": [
+        "cm-08",
+        "sa-09",
+        "sa-400.02",
+        "sa-400.08"
+      ],
+      "id": "G529",
+      "ownerRole": "maintainers",
+      "remediation": "compliance/resources.json gains supplier and supplierJurisdiction for every entry, and compliance/hosted/exchanges.json gains operatorJurisdiction and location for every exchange, with unknown allowed and shown as Unknown (48.4-02, 48.4-03). The values come from each component's SBOM supplier and its publisher's pages, each with the date read. Sovereignty: data-travels, software, switch-off, outside-laws.",
+      "title": "Resources and exchanges record no supplier, supplier jurisdiction, operator jurisdiction or location"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-09",
+        "sa-400.08",
+        "sa-400.09"
+      ],
+      "id": "G530",
+      "ownerRole": "owner",
+      "poam": "g530",
+      "remediation": "A site runs offline from signed bundles, but every update is built on GitHub Actions and published through the GitHub Container Registry, operated by GitHub (Microsoft) under US jurisdiction. Phase 48.3 makes your organization's registry at HQ in Canada the only place sites take releases from, and plans moving the build and publication to runners in Canada as the owner's decision. Until both land, the card shows where the software comes from and who can switch it off as Partly met at best. Sovereignty: software, switch-off.",
+      "title": "Every site update starts on GitHub Actions and the GitHub Container Registry, US services"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-400.08",
+        "sr-04"
+      ],
+      "id": "G531",
+      "ownerRole": "shared",
+      "poam": "g531",
+      "remediation": "The shipped defaults are of PRC origin until Phase 74.1 ships Western defaults, and those (Nemotron 3, gpt-oss-120b, Whisper, FLUX) are of US or German origin, so where models come from reads Partly met at best. Cohere's Command A+ (Apache-2.0) is the only Canadian-origin model family: run it on your organization's server or this computer (Phase 32.2), or in a Cohere vault in Canada (Phase 36, Partly met because Cohere can change the weights it serves), with your organization's passport, the artifact hash and your organization's evaluation, and prefer it where it is reachable (the owner accepted this on 2026-11-25, O3; 74.1-05). Sovereignty: models.",
+      "title": "No Canadian-origin model is the default for any job; the Western defaults are of allied origin"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-09.08",
+        "sa-400.06"
+      ],
+      "id": "G532",
+      "ownerRole": "shared",
+      "poam": "g532",
+      "remediation": "Data in use has no approved encryption (ITSP.10.033 SA-400(6)), so where AI runs is judged by location and operator. No attested service runs in Canada today: your organization's attested hosting is Phase 74.2, Cohere's Encrypted vault runs only in the US (Phase 37 waits on a Canadian region), and NEAR AI states no locations (G527). Until one exists, Protected B work that needs attested hosting stays on this computer or on your organization's own server at a site declared in Canada. Sovereignty: ai-runs.",
+      "title": "No attested model service runs in Canada"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-400.08",
+        "sr-06"
+      ],
+      "id": "G533",
+      "ownerRole": "owner",
+      "poam": "g533",
+      "remediation": "No Canadian-made general-purpose CPU or GPU exists at scale, so hardware is judged by a supply chain integrity review of each hardware model (the ITSAP.10.071 criteria) plus site isolation, never by the country of manufacture (48.4 D-05). Your organization reviews each hardware model it runs, the lab's AMD Strix Halo and NVIDIA GB10 first, and cites the review in the site sovereignty declaration. Sovereignty: hardware.",
+      "title": "No supply chain integrity review is recorded for any hardware model"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "sa-400.07",
+        "sa-400.09"
+      ],
+      "id": "G534",
+      "ownerRole": "owner",
+      "poam": "g534",
+      "remediation": "Recorded by the owner on 2026-11-25: Sterling Computers Canada, ULC is incorporated in Canada and, since a tax reorganization, wholly US-controlled: 99% is held by Sterling North Technologies, which Sterling Computers Corporation (US) owns outright, and 1% by a holding company owned by an individual; neither holding company has staff or property, and all operations sit in Sterling Computers Canada, ULC and Sterling Computers Corporation. Before the reorganization it was wholly owned by Sterling MSP, itself wholly owned by Sterling Computers Corporation. The supplier's jurisdiction is Canada, a Canadian corporation, which the sovereignty card shows as Met; this row is about control. Through its US parent the supplier is subject to foreign compulsion (SA-400(7)), and SA-400(9), arrangements under Canadian public ownership for the life of the system, is not met for the supplier. The exposure is real and can only be mitigated: no supplier access to any site (47 D-01), air-gapped operation, keys your organization holds (KM-3), signed intake and builds from approved inputs at your organization's HQ (48.3), a reproducible-build check (48.3, once run), and source held by a Canadian escrow agent, which the owner has left to be determined (O6, 2026-11-25), so it shows as planned. The card shows each mitigation as active only when its evidence exists, and as planned until then. The sovereignty card shows \"Supplier's control: US parent\" as Partly met with these mitigations and notes that Sterling holds no client data, keys or site access. Your organization's authorizing official decides whether to accept the residual risk. Foreign ownership, control or influence under PSPC's Contract Security Program sits with the owner's counsel. Sovereignty: switch-off, outside-laws.",
+      "title": "Supplier's control: a US parent, so the supplier is subject to foreign compulsion"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-400.01",
+        "sa-400.02",
+        "sa-400.03",
+        "sa-400.04",
+        "sa-400.05",
+        "sa-400.06",
+        "sa-400.07",
+        "sa-400.08",
+        "sa-400.09"
+      ],
+      "id": "G535",
+      "ownerRole": "owner",
+      "poam": "g535",
+      "remediation": "The Medium profile selects SA-400 without its nine enhancements, which are the clearest Canadian statement of what sovereign means, and the sovereignty card uses them as its criteria. The owner decided on 2026-11-25 (O4) that hosted Protected B selects SA-400(3) to SA-400(9) as organization-defined additions; 48.4-15 adds their statements and evidence rules from the same facts the card reads, and SA-400(1) and SA-400(2) stay your organization's assessments. Sovereignty: assessments.",
+      "title": "The SA-400 enhancements are not selected or assessed for the hosted levels"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "ca-02",
+        "sa-400"
+      ],
+      "id": "G536",
+      "ownerRole": "owner",
+      "poam": "g536",
+      "remediation": "Every credible sovereignty label is issued by an assessor at a stated assurance level (CAN/DGSI 100-8 and its SovereignReady programme; the EU framework's assurance levels). The sovereignty card is a self-check from evidence and says so. The owner decided on 2026-11-25 (O5) to seek a CAN/DGSI 100-8 SovereignReady review once the lab site's rows reach Met; the card's scope line then names that assessment and its level. Sovereignty: assessments.",
+      "title": "No independent sovereignty assessment exists; the sovereignty card is a self-check from evidence"
+    },
+    {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "controls": [
@@ -6716,6 +7029,136 @@
       ],
       "remediation": "Hosted workbench sessions send prompts and context up to Protected A or B to the model servers your organization's signed policy lists (the model-servers exchange), but compliance/levels.json does not list model-endpoints in the hosted levels, so the model servers have no rows there and no section in the hosted applicability map. Plan 48.1-06 (D-12) adds model-endpoints to hosted-protected-a, hosted-protected-b and hosted-itsp-10-171. When it lands, the applicability map gains a model-endpoints section at those levels that your organization must review before it takes effect, and the existing hosted sections, whose reasons name the components that carry each facet, must be re-checked and signed again. This closes when 48.1-06 has landed and the hosted stages are signed with the model-endpoints section.",
       "title": "The hosted levels do not yet assess the model servers"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "33",
+      "controls": [
+        "ac-03",
+        "ia-11"
+      ],
+      "id": "G440",
+      "ownerRole": "maintainers",
+      "remediation": "Share with people signs its person-key changes (the genesis and its grant, roster changes, grants, invitations, join requests and hub.readmit) through the person signer under the step-up window of 33-23: any of them signs while the latest sign-in is fresh. The action-bound step-up of 33.1-17 (one confirmation signs exactly the one action whose summary the person saw) is on the Phase 33.1 branch, not on the Phase 33 branch. When the two are merged, begin and resume one pending action per Share with people action and pass its action id to the person signer. Source: .planning/phases/33-live-multi-user-staff-projects/33-27-SUMMARY.md.",
+      "title": "Share with people's person-key signatures are not yet bound to one confirmed action"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "33",
+      "controls": [
+        "si-07"
+      ],
+      "id": "G441",
+      "ownerRole": "maintainers",
+      "remediation": "Sharing a staff project from SovAI converts its legacy staff ledgers after checking their hash chain and signatures, but the workbench backend cannot read the key history of the extension that signed them, so any signing key is accepted as current. Someone who could write the person's workspace volume could put forged ledger lines into the shared history at conversion. Give the conversion the extension's key history (or the person's verified credential for that key) before Phase 33 closes. Source: .planning/phases/33-live-multi-user-staff-projects/33-27-SUMMARY.md.",
+      "title": "A conversion from SovAI trusts any key that signed the legacy staff ledgers"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "sa-04"
+      ],
+      "id": "G435",
+      "ownerRole": "maintainers",
+      "remediation": "33-12 built the presence loop (src/staff/replica/livePresence.ts) and expected the native engine (33-24) to run it, but StaffLiveEngine starts no LivePresence. The native Staff Room (33-26) takes its people list from a people source and, until one runs, lists only the person at this computer as Live. Start one LivePresence per open shared work in the live engine (the replicator's postPresence and onPresence, the held cells and their epoch keys, the roster's names and positions) and pass its people to the Staff Room service before Phase 33 closes; 33-29's cursors need the same loop. Source: .planning/phases/33-live-multi-user-staff-projects/33-26-SUMMARY.md.",
+      "title": "The native live engine does not run presence yet, so the Staff Room shows only this person"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "sa-11"
+      ],
+      "id": "G436",
+      "ownerRole": "maintainers",
+      "remediation": "D-69 asks the copy lint's no-project-in-Defence-text check (Phase 32.1 plan 21) to also read every exported *_TEXT constant in src/domain/staff and src/staff with applyFolderWords. Neither that check nor applyFolderWords is on the Phase 33 branch yet, so 33-26 added only the source scan that keeps sentences out of the native staff widgets, and wrote its own new sentences with 'shared work'. Extend the 32.1 check to those constants when 32.1 plan 21 merges, and change the older constants it finds (for example the binding's header notice). Source: .planning/phases/33-live-multi-user-staff-projects/33-26-SUMMARY.md.",
+      "title": "The Defence-text folder-word check does not read the staff sentence constants yet"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G455",
+      "ownerRole": "shared",
+      "poam": "g455",
+      "remediation": "The OpenTDF reference tools wrap a payload key for an RSA key with RSA-OAEP and SHA-1, while OpenBao Transit opens RSA only with OAEP and SHA-256. So an object a partner's stock OpenTDF tool addresses to your organization's receiving key exchange-receive-<site> cannot be opened, and an export to a partner's RSA key uses the hash the partner names, which for the OpenTDF reference server is SHA-1. Partners are asked for an EC key (ec:secp256r1) or SHA-256, and to address objects to their own key access server, which Phase 45.2 reaches through rewrap. Whether SHA-1 in OAEP padding is acceptable under ITSP.40.111 is not verified; your organization's security officer decides before any export uses it. Source: .planning/phases/45.1-nato-and-five-eyes-exchange-labels-and-adapter/45.1-RESEARCH.md sections 1 and 5.",
+      "title": "RSA key access with partners' OpenTDF tools needs OAEP with SHA-1, which our receiving key cannot open"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "ca-03"
+      ],
+      "id": "G510",
+      "ownerRole": "owner",
+      "poam": "g510",
+      "remediation": "No allied test cell is arranged to check your organization's exports and partners' objects against an ally's own key access server and samples, so the exchange is checked only against the public OpenTDF quickstart, which proves wiring and never counts as acceptance. Your organization asks the DND project technical authority for an introduction to the Canadian Joint Warfare Centre (CJWC) experimentation and interoperability team, which runs the FMN trials and Project OLYMPUS (owner action a). The acceptance trial (plan 45.2-12) runs once the cell supplies a test key access server with its own samples. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+      "title": "No allied test cell is arranged for the acceptance trial"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "ca-03"
+      ],
+      "id": "G511",
+      "ownerRole": "owner",
+      "poam": "g511",
+      "remediation": "No vendor has supplied sample containers paired with a non-production key access server of its own, so the exchange cannot yet be checked against a second implementation; a sample paired with an unrelated key server does not count. Your organization asks Virtru's systems-integrator team or XQ Message for such samples (owner action c). The acceptance trial (plan 45.2-12) may use them in place of an allied test cell. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+      "title": "No vendor samples paired with a non-production key access server"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "sc-12",
+        "ia-05.02"
+      ],
+      "id": "G512",
+      "ownerRole": "owner",
+      "poam": "g512",
+      "remediation": "Partners' signing certificates on NATO bindings are checked against the trust anchors pinned for each partner in the signed policy, without fetching their certificate revocation lists, because the exchange never dereferences a URI from a partner's file. A partner's certificate is revoked here by your security officer removing that partner's anchor from the signed policy, which turns the partner's earlier arrivals back into not checked. The owner accepted this default on 2026-11-24. It is revisited if a partner or the authorizing official requires revocation lists to be fetched. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
+      "title": "Partners' signing certificates are checked without fetching revocation lists"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "ac-03",
+        "sc-12"
+      ],
+      "id": "G551",
+      "ownerRole": "maintainers",
+      "poam": "g551",
+      "remediation": "A clearance reduction and its cell key rotations are separate signed entries. If a computer has verified the reduction but has yet to verify rotation of every affected cell, local writes can still use a key known to an earlier recipient whose device remains a member. Record the affected cells and pending rotations in authenticated roster state, pause local writes under the previous keys, and resume only once the new keys are verified and wrapped to cleared recipients.",
+      "title": "An unfinished clearance reduction can leave local writes using the old cell key"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "ac-03",
+        "sc-12"
+      ],
+      "id": "G552",
+      "ownerRole": "maintainers",
+      "poam": "g552",
+      "remediation": "A computer can verify a device revocation before receiving an earlier supplemental grant that gave that device the current cell key. Commit the current key recipients or pending rotations to authenticated history so each computer can verify whether the key is safe for new work. Keep affected writes paused until that proof or a verified rotation arrives, including across partial synchronization.",
+      "title": "A computer can lack proof that a revoked device held the current cell key"
     },
     {
       "appliesAt": "now",

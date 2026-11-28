@@ -14,7 +14,7 @@ import type { Mark } from '../domain/gate/dominance';
 import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
-import type { DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
+import type { CheckRecordFamilies, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import { ROUTE_REFUSALS, notAccreditedText, routingWhileFailedClosed, thisComputerOnlyLabelOf, tierForLabel } from '../domain/gate/routing';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { RouteDecision, RouteEventId, RouteFacts, RoutePolicy, RoutingTable, VerifiedAuthorization } from '../domain/gate/routing';
@@ -25,6 +25,11 @@ import type { PolicyLayersView } from './organizationStore';
 import { clearancesInForce } from './clearances';
 import type { ClearanceWalletView } from './clearances';
 import type { InferTier } from '../domain/gate/vocabulary';
+import type { ReevaluationTrigger, UseTier } from '../domain/gate/models';
+import { passportTriggeredText } from '../domain/gate/passportStep';
+import { raiseUseTier, useTierFor } from '../domain/gate/useTier';
+import type { UseInput } from '../domain/gate/useTier';
+import { recordLaneOf } from '../domain/gate/researchLane';
 
 /**
  * Shared by a chat and every route it builds, so a failed answer check stops attested-cloud for the chat and its helpers alike (D-55). `closed` is set when
@@ -82,6 +87,13 @@ export interface SessionRoute {
   readonly onNotice?: (text: string) => void;
   /** The effective policy's inputs to each request's route decision, from the route's own host (GateRuntime.routePolicy, D-36). */
   readonly routePolicy?: GateRuntime['routePolicy'];
+  /**
+   * The local facts of the session's use (74.1 D-13): its tools, writes, checking job, lane, project and feature. Read at each request; the route's mark
+   * is added by the client. Absent: chat you review, raised only by the mark.
+   */
+  readonly useOf?: () => UseInput;
+  /** A checking route's families (74.1 D-19, D-23): the writers' and the checker's, which every record of the route names. */
+  readonly checkFamilies?: CheckRecordFamilies;
 }
 
 /** The empty mark: the session has read nothing above the policy's default label. */
@@ -91,8 +103,14 @@ const EMPTY_MARK: Mark = Object.freeze([]);
  * The route of one run, from its gate runtime: the runtime's policy, actor, sink and clock. `markOf` defaults to the empty mark (the default label);
  * plan 22 gives a chat's runs the chat's mark. `attestation` is the chat's shared object, so a sub-agent and its parent share one route state.
  */
-export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void } = {}): SessionRoute {
-  return {
+export function sessionRouteFrom(
+  runtime: GateRuntime,
+  options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: UseInput | (() => UseInput); parent?: SessionRoute; checkFamilies?: CheckRecordFamilies } = {}
+): SessionRoute {
+  // 74.1 D-13: the runtime's context and the project's facts, then the caller's own facts, which can only add to them (useTierFor takes the highest row).
+  const own = options.use;
+  const project = runtime.project?.kind === undefined ? {} : { project: { kind: runtime.project.kind, ...(runtime.project.exercise === true ? { exercise: true } : {}) } };
+  const route: SessionRoute = {
     markOf: options.markOf ?? (() => EMPTY_MARK),
     bundleState: runtime.bundleState,
     actor: runtime.actor,
@@ -103,8 +121,43 @@ export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () =>
     ...(runtime.routePolicy === undefined ? {} : { routePolicy: runtime.routePolicy }),
     attestation: options.attestation ?? { failed: false },
     ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked }),
-    ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice })
+    ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice }),
+    useOf: () => ({ context: runtime.context, ...project, ...(typeof own === 'function' ? own() : own ?? {}) }),
+    ...(options.checkFamilies === undefined ? {} : { checkFamilies: options.checkFamilies })
   };
+  // A sub-agent's route starts at the use its parent is at now: the highest it has asked for, or what its own facts give.
+  if (options.parent !== undefined) raiseSessionUse(route, parentUse(options.parent));
+  return route;
+}
+
+/** The use a parent route passes to a child: its high-water raised by what its own facts and mark give now; operational work if they cannot be read. */
+function parentUse(parent: SessionRoute): UseTier {
+  const held = useHighWater.get(parent) ?? 'T0';
+  try {
+    const own = parent.useOf?.() ?? {};
+    const mark = parent.markOf().map((label) => ({ scale: label.scale, level: label.level }));
+    return raiseUseTier(held, useTierFor({ ...own, mark: [...(own.mark ?? []), ...mark] }));
+  } catch {
+    return 'T3';
+  }
+}
+
+// ---- The use of a session (74.1 D-13) ----
+
+/** The highest use each route has asked for, kept on the route object itself: a session's use only rises, so a later request never checks lower. */
+const useHighWater = new WeakMap<SessionRoute, UseTier>();
+
+/** Raises `route`'s use to at least `use` and returns the use its next request is checked at: the higher of the two. */
+export function raiseSessionUse(route: SessionRoute, use: UseTier): UseTier {
+  const held = useHighWater.get(route);
+  const raised = held === undefined ? use : raiseUseTier(held, use);
+  useHighWater.set(route, raised);
+  return raised;
+}
+
+/** The highest use `route` has asked for so far, or undefined before its first request. A sub-agent's route starts at its parent's (74.1-03). */
+export function sessionUseOf(route: SessionRoute): UseTier | undefined {
+  return useHighWater.get(route);
 }
 
 /** The policy a route reads now, or a failed-closed one when it cannot be read: a state that throws is never treated as valid. */
@@ -136,6 +189,19 @@ export function withSessionRoute<T>(route: SessionRoute, work: () => T): T {
 /** The route of the work running now, or undefined outside every route. */
 export function currentSessionRoute(): SessionRoute | undefined {
   return routes.getStore();
+}
+
+/**
+ * Runs `work` as a checking job (74.1 D-16, D-19): in a route that is the current one (or the default one outside every route) with `checkingJob: true`
+ * added to its use facts, starting at the use the current route is at. A checker's requests are then checked as agent work and, under enforce, need your
+ * organization's evaluation of the checking model.
+ */
+export function withCheckingJob<T>(work: () => T): T {
+  const parent = currentSessionRoute() ?? defaultSessionRoute();
+  const route: SessionRoute = { ...parent, useOf: () => ({ ...(parent.useOf?.() ?? {}), checkingJob: true }) };
+  const held = useHighWater.get(parent);
+  if (held !== undefined) raiseSessionUse(route, held);
+  return withSessionRoute(route, work);
 }
 
 // ---- The private floor (coherence review S4) ----
@@ -255,9 +321,27 @@ export function routePolicyFor(
     organization: organization !== undefined,
     requireAccreditedDevice: effective.agents.requireAccreditedDevice === true,
     deviceId: deviceFingerprint,
+    ...securityContactOf(effective),
     now,
     policyVersion
   });
+}
+
+/** The first security contact of the effective policy, which every passport refusal names (74.1 D-11). */
+function securityContactOf(effective: PolicyDocument): { readonly contact?: { readonly name: string; readonly how: string } } {
+  const contact = effective.onboarding?.contacts.find((entry) => entry.topic === 'security');
+  return contact === undefined ? {} : { contact: Object.freeze({ name: contact.name, how: contact.how }) };
+}
+
+// ---- The report-only notice (74.1 D-22) ----
+
+/** Told once per would-refuse of route.passport (report mode): the notice service listens. A listener that throws never changes a request. */
+export const passportReportListeners = new Set<() => void>();
+
+function notePassportReport(): void {
+  for (const listener of [...passportReportListeners]) {
+    try { listener(); } catch { /* a notice never changes a request */ }
+  }
 }
 
 // ---- The record of a model request (GATE-07, D-20, D-52) ----
@@ -328,6 +412,8 @@ export interface RouteRecordContext {
  * the default label, no label. The connection state is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
  */
 export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: RouteRecordContext): DecisionRecord {
+  // 74.1 D-22: every model request's decision passes here once; one route.passport would-refuse raises the report-only notice for the session.
+  if (decision.allowed && decision.wouldRefuse?.includes('route.passport') === true) notePassportReport();
   const recordId = (route.newRecordId ?? randomUUID)();
   const provider = facts.clientRoute === 'local' ? 'local' : facts.clientRoute === 'near' ? 'near-ai' : 'unknown';
   const model = recordedModelName(request.model);
@@ -362,8 +448,25 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     ...(context.connectionFallback === undefined ? {} : { connectionFallback: context.connectionFallback }),
     ...(context.policyVersion === undefined ? {} : { policyVersion: context.policyVersion }),
     // The report-only rules that would have refused (D-34, D-42), kept so a later version can say what your organization's switch would change.
-    ...(decision.wouldRefuse === undefined ? {} : { wouldRefuse: decision.wouldRefuse })
+    ...(decision.wouldRefuse === undefined ? {} : { wouldRefuse: decision.wouldRefuse }),
+    // The use, the passport by id and hash, and the gap the passport step found (74.1 D-23).
+    ...(decision.useTier === undefined ? {} : { useTier: decision.useTier }),
+    ...(decision.passport === undefined ? {} : { passport: decision.passport }),
+    ...(decision.passportGap === undefined ? {} : { passportGap: decision.passportGap }),
+    // The families of a check (74.1 D-23): the writers' and the checker's, so the record shows no work was checked by its own family.
+    ...(route.checkFamilies === undefined ? {} : { checkFamilies: route.checkFamilies }),
+    // The research workspace's requests say so in every record (74.1 D-17).
+    ...(laneOf(route) === undefined ? {} : { lane: 't0' as const })
   });
+}
+
+/** The record lane of a route: `t0` when its use facts say the research lane; none when they cannot be read. */
+function laneOf(route: SessionRoute): 't0' | undefined {
+  try {
+    return recordLaneOf(route.useOf?.());
+  } catch {
+    return undefined;
+  }
 }
 
 /** Why an answer sent at attested-cloud could not be checked at all (PR #89 review): recorded as unavailable, so no such answer goes unrecorded. */
@@ -407,6 +510,39 @@ export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, re
     bundleHash,
     ...(mark.length === 0 ? {} : { mark }),
     attestation: request.attestation
+  });
+}
+
+/**
+ * The record that a re-evaluation trigger ended a model's approval (`route.passport-triggered`, 74.1 D-15): written once per passport hash and trigger,
+ * beside the request's own record. It refuses nothing itself; the passport step does. The capability's tier is the one the model's place serves (this
+ * computer, private hardware, or the cloud). Names the passport by id and hash, never a host or a path.
+ */
+export function passportTriggeredRecordFor(
+  route: SessionRoute,
+  request: { readonly model: string; readonly provider: 'near-ai' | 'local' | 'unknown'; readonly privacyBoundary?: string; readonly passport: { readonly id: string; readonly hash: string }; readonly trigger: ReevaluationTrigger }
+): DecisionRecord {
+  const recordId = (route.newRecordId ?? randomUUID)();
+  const model = recordedModelName(request.model);
+  const tier: InferTier = request.privacyBoundary === 'local' ? 'local-only' : request.privacyBoundary === 'tee' ? 'attested-cloud' : 'any-cloud';
+  let bundleHash = '';
+  try { bundleHash = routingOf(route).bundleHash; } catch { /* no policy hash then */ }
+  return buildDecisionRecord({
+    recordId,
+    sequence: 0,
+    time: clockOf(route),
+    productVersion: route.productVersion ?? UNKNOWN_PRODUCT_VERSION,
+    actor: route.actor,
+    model: { name: model, provider: request.provider },
+    callId: `route.passport-triggered-${recordId}`,
+    capability: { verb: 'infer', tier, provider: request.provider, model },
+    resource: { name: model, type: 'model' },
+    outcome: 'allowed',
+    rule: 'route.passport-triggered',
+    reason: passportTriggeredText(model, request.trigger),
+    bundleHash,
+    passport: request.passport,
+    passportGap: 'expired'
   });
 }
 

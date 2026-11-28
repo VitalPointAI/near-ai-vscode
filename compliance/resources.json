@@ -13,6 +13,8 @@
       "role": "Checks in tests that credentials we sign verify with the reference implementation and that its proofs verify with ours, and gives the RFC 8785 canonical form our canonical JSON is compared with. Nothing from it ships. Without it we would trust our own reading of the specification alone.",
       "architectureArea": "build-and-test",
       "licence": "BSD-3-Clause",
+      "supplier": "Digital Bazaar, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-11",
         "sa-15",
@@ -44,6 +46,8 @@
       "role": "Issues and verifies credentials in tests with a static document loader that holds the needed contexts and refuses any other address, so no test reaches the network. Nothing from it ships. Without it we would trust our own reading of the specification alone.",
       "architectureArea": "build-and-test",
       "licence": "BSD-3-Clause",
+      "supplier": "Digital Bazaar, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-11",
         "sa-15",
@@ -75,6 +79,8 @@
       "role": "Reads and checks status lists we build in tests, so our lists match the W3C Recommendation. Nothing from it ships. Without it we would trust our own reading of the specification alone.",
       "architectureArea": "build-and-test",
       "licence": "BSD-3-Clause",
+      "supplier": "Digital Bazaar, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-11",
         "sa-15",
@@ -104,6 +110,8 @@
       "role": "Decodes the source world image when a developer rebuilds the COP map's bundled globe tiles (scripts/build-globe-tiles.mjs). Without it the tile builder would need a native image tool on the developer's machine. Nothing from it ships; only the tiles it helps make.",
       "architectureArea": "build-and-test",
       "licence": "Apache-2.0",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -128,6 +136,8 @@
       "role": "Encodes the WebP map tiles that ship with the COP map: the bundled globe tiles and the environment pack tiles (scripts/lib/webp.mjs). These tiles let the map work offline. Without it the tiles would need a native encoder on the build machine. It runs only when a developer rebuilds tiles; the encoder never ships.",
       "architectureArea": "build-and-test",
       "licence": "Apache-2.0",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -152,6 +162,8 @@
       "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:@modelcontextprotocol/sdk). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:@modelcontextprotocol/sdk for why the MCP client is needed.",
       "architectureArea": "workbench",
       "licence": "MIT",
+      "supplier": "Anthropic, PBC",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -176,6 +188,8 @@
       "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:@resvg/resvg-wasm). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:@resvg/resvg-wasm for why the SVG renderer is needed.",
       "architectureArea": "workbench",
       "licence": "MPL-2.0",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -205,6 +219,8 @@
       "architectureArea": "build-and-test",
       "roleNeedsReview": true,
       "licence": "MIT",
+      "supplier": "DefinitelyTyped (community project)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -229,6 +245,8 @@
       "role": "Describes the VS Code extension API to the type check. Without it the compiler cannot check the extension's calls into the editor. Types only: nothing ships.",
       "architectureArea": "build-and-test",
       "licence": "MIT",
+      "supplier": "DefinitelyTyped (community project)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -253,6 +271,8 @@
       "role": "Downloads a real VS Code build and runs the end-to-end tests inside it (the e2e CI job). Without it the extension could only be tested outside the editor, and faults in how it works with the editor would first appear for users.",
       "architectureArea": "build-and-test",
       "licence": "MIT",
+      "supplier": "Microsoft Corporation",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-11",
         "sr-03"
@@ -277,6 +297,8 @@
       "role": "Packages the compiled extension as the VSIX file that each release records with its checksum and puts inside the workbench image. It is the editor maker's own packager; without it we would write and maintain our own VSIX packer.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "Microsoft Corporation",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-14",
         "sa-10",
@@ -302,6 +324,8 @@
       "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:dejavu-fonts-ttf). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:dejavu-fonts-ttf for why the fonts is needed.",
       "architectureArea": "workbench",
       "licence": "Bitstream-Vera AND LicenseRef-Arev-Fonts",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -330,6 +354,8 @@
       "architectureArea": "build-and-test",
       "roleNeedsReview": true,
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03",
@@ -355,6 +381,8 @@
       "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:imagetracerjs). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:imagetracerjs for why the image tracer is needed.",
       "architectureArea": "workbench",
       "licence": "Unlicense",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -379,6 +407,8 @@
       "role": "Helper library that Yjs is built on. It is bundled with Yjs into the extension's vendor/yjs/yjs.cjs and hash-pinned in scripts/crdt-vendor.json. Yjs does not work without it.",
       "architectureArea": "workbench",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -403,6 +433,8 @@
       "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:pdfjs-dist). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:pdfjs-dist for why the PDF reader is needed.",
       "architectureArea": "workbench",
       "licence": "Apache-2.0",
+      "supplier": "Mozilla (pdf.js project)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -427,6 +459,8 @@
       "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:pptxgenjs). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:pptxgenjs for why the PowerPoint writer is needed.",
       "architectureArea": "workbench",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -456,6 +490,8 @@
       "architectureArea": "build-and-test",
       "roleNeedsReview": true,
       "licence": "Apache-2.0",
+      "supplier": "Microsoft Corporation",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -480,6 +516,8 @@
       "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:yjs). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:yjs for why the shared-text merge library is needed.",
       "architectureArea": "workbench",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -504,6 +542,8 @@
       "role": "The relay's planned library for signing and verifying its JSON Web Tokens, and its only runtime dependency: the relay workspace test (relay/test/workspace.test.ts) requires exactly this dependency. No relay source imports it yet; the relay channel phases are the first to use it, for token checks. Without it the relay would need its own JWT code.",
       "architectureArea": "sync-and-relay",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "ia-05",
         "sc-13",
@@ -529,6 +569,8 @@
       "role": "Builds this documentation site into static pages that need no code running on a server. Without it we would need another site generator.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Meta Platforms, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -553,6 +595,8 @@
       "role": "Turns the Markdown pages under docs-site/content, and the repository documents copied in at build time, into the site's pages and menu. Docusaurus cannot render documentation pages without it.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Meta Platforms, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -577,6 +621,8 @@
       "role": "The page layout, menu, search box and styles of the site. Docusaurus needs a theme to render any page.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Meta Platforms, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -601,6 +647,8 @@
       "role": "Draws the diagrams in these pages, such as the architecture diagrams, from text, in the browser. Without it diagrams would be images kept up to date by hand, or drawn by a remote service that an air-gapped site cannot reach.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Meta Platforms, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -625,6 +673,8 @@
       "role": "Builds the search index with the site, so search works offline and sends nothing anywhere. A hosted search service would not work at an air-gapped site.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "UWinTech (EasyOps)",
+      "supplierJurisdiction": "CN",
       "controls": [
         "sa-15",
         "sr-03"
@@ -649,6 +699,8 @@
       "role": "Renders MDX pages, the pages that embed live components, such as the Accreditation pages. Docusaurus requires it as a peer package.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "sr-03"
@@ -673,6 +725,8 @@
       "role": "Highlights code blocks; the site configuration takes its colour theme from it (docs-site/docusaurus.config.js). Without it code examples would show as plain text.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Nearform Commerce (formerly Formidable Labs)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -697,6 +751,8 @@
       "role": "Docusaurus is built on React, and the site's own components, such as the Accreditation tables, are React components. The site cannot be built without it.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Meta Platforms, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -721,6 +777,8 @@
       "role": "Renders the React components into the site's pages, at build time and in the browser. React needs it on the web.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Meta Platforms, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-15",
         "sr-03"
@@ -745,6 +803,8 @@
       "role": "Serves the built site from disk on the documentation host (docs-site/scripts/serve.mjs). It is a small static file server; without it we would write our own or run a separate web server.",
       "architectureArea": "documentation-site",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sc-07",
         "sr-03"
@@ -769,6 +829,8 @@
       "role": "Checks every OSCAL document, and the compliance package's own JSON files, against their schemas, offline. Without it a malformed control document could reach an assessor package. A JSON Schema validator of our own would be large and easy to get wrong.",
       "architectureArea": "compliance-tooling",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "ca-07",
         "sa-15",
@@ -794,6 +856,8 @@
       "role": "Adds the date, date-time and URI checks the OSCAL schema uses. Without it ajv would skip those checks.",
       "architectureArea": "compliance-tooling",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "ca-07",
         "sa-15",
@@ -819,6 +883,8 @@
       "role": "Parses the published control catalogue web pages, such as the Cyber Centre's ITSG-33 pages, when the catalogues are imported. A parser that follows the HTML standard avoids fragile pattern matching on web pages.",
       "architectureArea": "compliance-tooling",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "ca-07",
         "sa-15",
@@ -844,6 +910,8 @@
       "role": "Reads YAML in the compliance tooling: workflow files and imported data such as the CISO Assistant cross-check. Node.js has no YAML parser built in.",
       "architectureArea": "compliance-tooling",
       "licence": "ISC",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "ca-07",
         "sa-15",
@@ -870,6 +938,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "ac-03",
         "cm-07",
@@ -907,6 +977,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "cm-07",
         "sa-15",
@@ -935,6 +1007,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "cm-07",
         "sa-15",
@@ -966,6 +1040,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "cm-07",
         "sa-15",
@@ -994,6 +1070,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "cm-07",
         "sa-15",
@@ -1022,6 +1100,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "ac-03",
         "cm-07",
@@ -1057,6 +1137,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "cm-07",
         "sa-15",
@@ -1085,6 +1167,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "ac-03",
         "ac-17",
@@ -1118,6 +1202,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "cm-07",
         "sa-15",
@@ -1146,6 +1232,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "cm-07",
         "sa-15",
@@ -1176,6 +1264,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "MIT (its tree: elkjs 0.11.1 EPL-2.0 and entities 7.0.1 BSD-2-Clause, build stage only; none of them reaches the runtime image)",
+      "supplier": "Craft Docs",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-07",
         "sa-15",
@@ -1208,6 +1298,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-15",
         "si-10",
@@ -1234,6 +1326,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "MIT (this repository)",
+      "supplier": "Sterling Computers Canada, ULC",
+      "supplierJurisdiction": "CA",
       "controls": [
         "ac-12",
         "sa-11",
@@ -1261,6 +1355,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "Apache-2.0",
+      "supplier": "Microsoft Corporation",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-11",
         "sr-03"
@@ -1291,6 +1387,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "MIT (Node.js); Debian packages under their own licences (only the Node binary, headers and npm are copied out)",
+      "supplier": "Node.js project (Docker Official Images)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-02",
         "cm-07",
@@ -1326,6 +1424,8 @@
       "role": "The final, minimal base of the relay and hub images: Node.js as a non-root user, with no shell or package manager. This removes most of the attack surface a full operating system image would add.",
       "architectureArea": "sync-and-relay",
       "licence": "Apache-2.0 (distroless); Node.js MIT and Debian packages under their own licences",
+      "supplier": "Google LLC",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-02",
         "cm-07",
@@ -1361,6 +1461,8 @@
       "role": "The planned Signal channel sidecar for the relay (Phase 82). It is off by default and is not started until Phase 82 re-pins it to a current release and re-reviews this entry; the relay does not send or receive Signal messages yet. Without it the relay would need its own Signal client.",
       "architectureArea": "sync-and-relay",
       "licence": "MIT (signal-cli-rest-api); bundles signal-cli (GPL-3.0) and libsignal (AGPL-3.0), run as a separate unmodified container",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "ac-20",
         "sa-09",
@@ -1395,6 +1497,8 @@
       "role": "Compiles our own oauth2-proxy from pinned source with the Go FIPS module. Building it ourselves, instead of using the upstream image, is what puts the session sign-in proxy on a UBI 9 base. Build stage only: just the compiled program reaches the final image.",
       "architectureArea": "identity",
       "licence": "Red Hat UBI EULA (redistributable); Go BSD-3-Clause",
+      "supplier": "Red Hat, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "ia-02",
         "ac-03",
@@ -1430,6 +1534,8 @@
       "architectureArea": "identity",
       "roleNeedsReview": true,
       "licence": "Red Hat UBI EULA (redistributable); RHEL packages under their own licences",
+      "supplier": "Red Hat, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "ia-02",
         "ac-03",
@@ -1464,6 +1570,8 @@
       "role": "Build stage of the test-only image that adds SoftHSM2 to OpenBao, so the lab and CI can test HSM sealing without a hardware HSM. It never reaches production.",
       "architectureArea": "secrets-and-keys",
       "licence": "Red Hat UBI EULA (redistributable)",
+      "supplier": "Red Hat, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-12",
         "sc-13"
@@ -1494,6 +1602,8 @@
       "role": "The OpenBao server, on UBI 9, that our OpenBao image extends with the kms-pkcs11 plugin. OpenBao holds each site's secrets, the internal certificate authority and each person's keys. Without it the site would need another secrets manager; HashiCorp Vault is excluded (D-04).",
       "architectureArea": "secrets-and-keys",
       "licence": "MPL-2.0 (OpenBao); Red Hat UBI EULA (base)",
+      "supplier": "The Linux Foundation (OpenSSF), OpenBao project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-12",
         "sc-13",
@@ -1532,6 +1642,8 @@
       "architectureArea": "workbench",
       "roleNeedsReview": true,
       "licence": "MPL-2.0",
+      "supplier": "The Linux Foundation (OpenSSF), OpenBao project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-12",
         "sc-28",
@@ -1562,6 +1674,8 @@
       "role": "Build stage (Maven) of our rebuilds of the Theia Cloud operator, service and conversion webhook from the 1.2.0 source. We rebuild them because the upstream images do not meet the Protected B base-image requirement.",
       "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); OpenJDK GPL-2.0 with Classpath Exception",
+      "supplier": "Red Hat, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "ac-03",
         "ac-06",
@@ -1598,6 +1712,8 @@
       "role": "Java runtime base of our rebuilt Theia Cloud operator, service and conversion webhook. These start, track and stop each person's workbench session; without them there are no sessions.",
       "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); OpenJDK GPL-2.0 with Classpath Exception",
+      "supplier": "Red Hat, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "ac-03",
         "ac-06",
@@ -1634,6 +1750,8 @@
       "role": "Build stage of our rebuilt Theia Cloud landing page. Build stage only.",
       "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); Node.js MIT",
+      "supplier": "Red Hat, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "ac-03",
         "ac-06",
@@ -1669,6 +1787,8 @@
       "role": "Serves our rebuilt Theia Cloud landing page, where a signed-in person opens their workbench. Until Phase 46 publishes the workbench image it is also the lab stand-in session image.",
       "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); nginx BSD-2-Clause",
+      "supplier": "Red Hat, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "ac-03",
         "ac-06",
@@ -1704,6 +1824,8 @@
       "role": "Issues and renews every TLS certificate at the site from the site's own certificate authority, with no ACME or internet certificate authority. Without it certificates would be issued and rotated by hand, and an expired certificate would stop sign-in and sessions.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), cert-manager project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-08",
         "sc-12",
@@ -1736,6 +1858,8 @@
       "role": "Checks cert-manager's own resources when they are created or changed. cert-manager does not run without it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), cert-manager project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-08",
         "sc-12",
@@ -1768,6 +1892,8 @@
       "role": "Writes certificate authority bundles into webhook configurations, so the Kubernetes API trusts the site's in-cluster webhooks. cert-manager does not run without it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), cert-manager project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-08",
         "sc-12",
@@ -1800,6 +1926,8 @@
       "role": "Runs once at install and waits until cert-manager's API answers, so the install steps that create certificates do not fail.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), cert-manager project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-08",
         "sc-12",
@@ -1832,6 +1960,8 @@
       "role": "The site ingress: the one entry point that terminates TLS and routes people to sign-in, the landing page and their own workbench session. Without an ingress nobody could reach the site. ingress-nginx is archived and is not used (D-07).",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0 (controller); HAProxy under its own GPL-2.0 licence, run unmodified",
+      "supplier": "HAProxy Technologies (an LLC in the US and a SASU in France)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sc-07",
         "sc-08",
@@ -1863,6 +1993,8 @@
       "role": "The admission controller that refuses to start any container image not signed with your organization's key. It is the second check after the import check, so an unsigned or swapped image cannot run even if it reaches the registry.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Kyverno project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -1897,6 +2029,8 @@
       "role": "Init container that prepares Kyverno before the admission controller starts. Kyverno needs it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Kyverno project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -1931,6 +2065,8 @@
       "role": "Used by the Kyverno chart's test pods and by its pre-delete hook, which removes Kyverno's webhooks on uninstall so the cluster is not left refusing changes.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Kyverno project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -1965,6 +2101,8 @@
       "role": "The site's own image registry for the lab and small sites. Every image runs from the site registry, with its signature stored beside it, so nothing is pulled from the internet.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "The zot project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2000,6 +2138,8 @@
       "role": "Harbor's API: projects, access and the registry's audit log. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2034,6 +2174,8 @@
       "role": "Harbor's web screen for registry administrators. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2068,6 +2210,8 @@
       "role": "Runs Harbor's background jobs, such as replication and retention. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2102,6 +2246,8 @@
       "role": "The registry inside Harbor that stores and serves the images. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2136,6 +2282,8 @@
       "role": "Controls Harbor's registry, for example its storage clean-up. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2170,6 +2318,8 @@
       "role": "Harbor's own PostgreSQL database. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0 (Harbor packaging); PostgreSQL Licence",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2204,6 +2354,8 @@
       "role": "Harbor's cache and job queue (Redis-compatible). Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0 (Harbor packaging); Valkey BSD-3-Clause",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -2238,6 +2390,8 @@
       "role": "Signs people in at the site with passkeys or hardware security keys only, with no passwords. The session sign-in proxy and the parts behind it trust the identity Keycloak issues. Without it each part would need its own sign-in.",
       "architectureArea": "identity",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Keycloak project",
+      "supplierJurisdiction": "US",
       "controls": [
         "ia-02",
         "ia-05",
@@ -2274,6 +2428,8 @@
       "role": "Applies the site's sign-in settings (flows, clients and policies) from the repository at install and on every update, as a one-off Job. The settings are reviewed like code and cannot drift through hand changes.",
       "architectureArea": "identity",
       "licence": "Apache-2.0",
+      "supplier": "adorsys GmbH & Co. KG",
+      "supplierJurisdiction": "DE",
       "controls": [
         "ia-02",
         "ia-05",
@@ -2311,6 +2467,8 @@
       "role": "Runs Longhorn, the reference storage at the site: encrypted volumes for each person's workspace and for the databases and the log store. Without it the site would depend on whatever storage the cluster has, with no encryption check.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2342,6 +2500,8 @@
       "role": "The engine that serves each Longhorn volume and keeps its copies on other nodes in step. Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2373,6 +2533,8 @@
       "role": "Runs the engine and replica processes on each node. Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2404,6 +2566,8 @@
       "role": "Serves volumes that several pods use at the same time (ReadWriteMany). Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2435,6 +2599,8 @@
       "role": "Manages backing images, the base disk images a volume can start from. Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2466,6 +2632,8 @@
       "role": "The storage administration screen, reachable only from the site administration network. Operators use it to see and repair volumes.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2498,6 +2666,8 @@
       "role": "Collects Longhorn's logs and state into a support bundle when an operator asks for one, to troubleshoot storage.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2529,6 +2699,8 @@
       "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that attaches Longhorn volumes to the node where a pod runs. Kubernetes cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2560,6 +2732,8 @@
       "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that creates and deletes Longhorn volumes when a workload asks for storage. Kubernetes cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2591,6 +2765,8 @@
       "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that registers the Longhorn driver with Kubernetes on each node. Kubernetes cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2622,6 +2798,8 @@
       "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that grows Longhorn volumes when a workload asks for more space. Kubernetes cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2653,6 +2831,8 @@
       "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that takes Longhorn volume snapshots, used for restores. Kubernetes cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2684,6 +2864,8 @@
       "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that reports whether the Longhorn driver is healthy, so Kubernetes restarts it if it hangs. Kubernetes cannot use Longhorn volumes without it.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -2715,6 +2897,8 @@
       "role": "The site's log and audit store. Container logs, Keycloak events, the OpenBao audit device and the Kubernetes audit log all land here, at the site. Audit records are what an investigation reads after an incident. Loki is not used (AGPL).",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "OpenSearch Software Foundation (The Linux Foundation)",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -2748,6 +2932,8 @@
       "role": "Collects logs and audit records on every node and sends them to OpenSearch at the site. Without it logs would stay on each node and be lost when a pod or node goes away.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Fluent Bit project",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -2780,6 +2966,8 @@
       "role": "Collects metrics about the site's nodes, Kubernetes objects, OpenBao and the log shipper, and evaluates the alert rules of deploy/values/prometheus-alerts.yaml. The Phase 48 load tests read its metrics to measure a site.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Prometheus project",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -2813,6 +3001,8 @@
       "role": "Receives the alerts Prometheus raises from deploy/values/prometheus-alerts.yaml and emails them to the site setting alertRecipients through the site's own mail server. It has one receiver and no webhook, chat or remote receiver.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Prometheus project",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-05",
         "si-04.05"
@@ -2843,6 +3033,8 @@
       "role": "Reloads Prometheus and Alertmanager when their configuration changes, without a restart.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Prometheus Operator project",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "au-02",
         "au-03",
@@ -2876,6 +3068,8 @@
       "role": "Turns the state of Kubernetes objects (pods, deployments, volumes) into metrics for Prometheus.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Kubernetes project",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -2909,6 +3103,8 @@
       "role": "Reports host metrics (processor, memory, disk) from every node to Prometheus.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Prometheus project",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -2948,6 +3144,8 @@
       "role": "Checks out the repository at the exact commit in every CI and release job, without keeping credentials. Every workflow job starts with it.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sr-03",
@@ -2977,6 +3175,8 @@
       "role": "Installs the pinned Node.js version in CI and release jobs, so tests and builds run on a known Node.js version.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sr-03",
@@ -3005,6 +3205,8 @@
       "role": "Keeps test reports, SBOMs, the VSIX and the evidence bundle between jobs and for the retention period. The release and the compliance package are assembled from these files; without it each job would have to rebuild what an earlier job made and checked.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-09",
         "sa-10",
@@ -3033,6 +3235,8 @@
       "role": "Fetches what earlier jobs uploaded, so the release publishes exactly the files the build job made and checked.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sr-03",
@@ -3058,6 +3262,8 @@
       "role": "Caches the VS Code download for the e2e job, so the end-to-end tests do not download the editor on every run.",
       "architectureArea": "build-and-test",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sr-03",
@@ -3084,6 +3290,8 @@
       "role": "Installs Java for oscal-cli, which validates and resolves the OSCAL documents in the release and daily evidence workflows.",
       "architectureArea": "compliance-tooling",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sr-03",
@@ -3109,6 +3317,8 @@
       "role": "Installs Python for the Compliance Trestle import check in the release workflow, which shows that the assessor package opens in a second OSCAL tool.",
       "architectureArea": "compliance-tooling",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sr-03",
@@ -3135,6 +3345,8 @@
       "role": "Creates signed build provenance for the VSIX and the compliance package, and provenance and SBOM attestations for the rebuilt deployment images. Anyone can then check with gh attestation verify that a file came from this repository's workflow. It adds to the SHA-256 checksums; it does not replace them.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "si-07",
@@ -3164,6 +3376,8 @@
       "role": "Starts CodeQL code scanning, which looks for security flaws in the code of every change. Its alerts are part of the code-scanning evidence.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "ra-05",
         "sa-11",
@@ -3189,6 +3403,8 @@
       "role": "Runs the CodeQL analysis started by init and uploads its alerts to GitHub code scanning.",
       "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
+      "supplier": "GitHub, Inc. (Microsoft)",
+      "supplierJurisdiction": "US",
       "controls": [
         "ra-05",
         "sa-11",
@@ -3214,6 +3430,8 @@
       "role": "Reads the text of PDF files a person gives the agent, inside the extension and with no network. Without it the agent could not read PDFs, or the file would have to go to an outside service.",
       "architectureArea": "workbench",
       "licence": "Apache-2.0",
+      "supplier": "Mozilla (pdf.js project)",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-08",
         "sr-03",
@@ -3244,6 +3462,8 @@
       "role": "Draws SVG to PNG and decodes raster images inside the extension, for the agent's graphics tools and document images. Its WebAssembly build has no file access, so an SVG cannot pull in local files. Without it the extension would need a native image library for each platform.",
       "architectureArea": "workbench",
       "licence": "MPL-2.0",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-08",
         "sr-03",
@@ -3273,6 +3493,8 @@
       "role": "Traces a raster image into an SVG drawing for the agent's graphics tools, on the person's machine with no network.",
       "architectureArea": "workbench",
       "licence": "Unlicense",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-08",
         "sr-03",
@@ -3302,6 +3524,8 @@
       "role": "Fonts that the SVG renderer (resvg) uses to draw text. The WebAssembly renderer cannot read the computer's fonts, so without these, text in rendered images would be missing.",
       "architectureArea": "workbench",
       "licence": "Bitstream-Vera AND LicenseRef-Arev-Fonts",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-08",
         "sr-03",
@@ -3331,6 +3555,8 @@
       "role": "Writes PowerPoint (.pptx) slide decks for the agent's slide tool, on the person's machine. Without it the extension would have to write the Office file format itself.",
       "architectureArea": "workbench",
       "licence": "MIT; bundled dependencies listed with their licences in vendor/pptxgenjs/LICENSES.txt",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-08",
         "sr-03",
@@ -3360,6 +3586,8 @@
       "role": "The MCP client that connects the agent to the MCP tool servers a person or your organization sets up. MCP is the standard protocol for such tools; without the client the extension would implement the protocol itself. Only the client is shipped.",
       "architectureArea": "workbench",
       "licence": "MIT; bundled dependencies listed with their licences in vendor/mcp/LICENSES.txt",
+      "supplier": "Anthropic, PBC",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-08",
         "sc-08",
@@ -3390,6 +3618,8 @@
       "role": "Merges edits that several people make to shared staff project text, without conflicts. Without it edits made at the same time would overwrite each other, or need a merge algorithm of our own.",
       "architectureArea": "workbench",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-08",
         "si-07",
@@ -3420,6 +3650,8 @@
       "role": "Draws the COP map and globe in the Staff Room, from the bundled offline tiles. Without it we would write a map renderer.",
       "architectureArea": "workbench",
       "licence": "BSD-3-Clause",
+      "supplier": "MapLibre Organization",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-08",
         "si-07",
@@ -3450,6 +3682,8 @@
       "role": "Draws standard military symbols for units and features on the COP map.",
       "architectureArea": "workbench",
       "licence": "MIT",
+      "supplier": "Individual maintainers",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-08",
         "si-07",
@@ -3480,6 +3714,8 @@
       "role": "Installs cert-manager, which issues the site's certificates at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), cert-manager project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-08",
         "sc-12",
@@ -3511,6 +3747,8 @@
       "role": "Installs the HAProxy ingress controller, the site's one entry point at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "HAProxy Technologies (an LLC in the US and a SASU in France)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sc-07",
         "sc-08",
@@ -3541,6 +3779,8 @@
       "role": "Installs the Kyverno admission controller (only the admission controller) at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Kyverno project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -3574,6 +3814,8 @@
       "role": "Installs the Zot registry at the lab and small sites at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "The zot project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -3606,6 +3848,8 @@
       "role": "Installs the Harbor registry at HQ and large sites (second wave) at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Harbor project",
+      "supplierJurisdiction": "US",
       "controls": [
         "cm-07",
         "cm-14",
@@ -3639,6 +3883,8 @@
       "role": "Installs Longhorn, the site's encrypted storage at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Longhorn project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-28",
         "sc-13",
@@ -3671,6 +3917,8 @@
       "role": "Installs OpenBao, with our rebuilt OpenBao image at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "secrets-and-keys",
       "licence": "MPL-2.0",
+      "supplier": "The Linux Foundation (OpenSSF), OpenBao project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-12",
         "sc-13",
@@ -3707,6 +3955,8 @@
       "role": "Installs Keycloak, with the official Keycloak image at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "identity",
       "licence": "Apache-2.0",
+      "supplier": "codecentric AG",
+      "supplierJurisdiction": "DE",
       "controls": [
         "ia-02",
         "ia-05",
@@ -3743,6 +3993,8 @@
       "role": "Installs the cluster-wide pieces Theia Cloud needs at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "workbench",
       "licence": "EPL-2.0",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "ac-03",
         "ac-06",
@@ -3776,6 +4028,8 @@
       "role": "Installs the Theia Cloud resource types (sessions, workspaces and app definitions) and our rebuilt conversion webhook at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "workbench",
       "licence": "EPL-2.0",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "ac-03",
         "ac-06",
@@ -3809,6 +4063,8 @@
       "role": "Installs the Theia Cloud operator, service and landing page, which start one workbench session per person at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "workbench",
       "licence": "EPL-2.0",
+      "supplier": "Eclipse Foundation AISBL",
+      "supplierJurisdiction": "BE",
       "controls": [
         "ac-03",
         "ac-06",
@@ -3843,6 +4099,8 @@
       "role": "Installs OpenSearch, the site's log and audit store at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "OpenSearch Software Foundation (The Linux Foundation)",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -3877,6 +4135,8 @@
       "role": "Installs Fluent Bit, which sends logs to the site store at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Fluent Bit project",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -3909,6 +4169,8 @@
       "role": "Installs Prometheus with kube-state-metrics and node-exporter at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Prometheus project",
+      "supplierJurisdiction": "US",
       "controls": [
         "au-02",
         "au-03",
@@ -3940,6 +4202,8 @@
       "role": "The reference OSCAL tool. It validates every OSCAL document and resolves the profiles, in CI and for the release package. It is an independent second check, beside ajv, that the assessor package is valid OSCAL.",
       "architectureArea": "compliance-tooling",
       "licence": "CC0-1.0 per the metaschema-framework project (confirm at the next bump)",
+      "supplier": "Metaschema Framework (community project)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sa-10",
         "sa-15",
@@ -3969,6 +4233,8 @@
       "architectureArea": "release-and-supply-chain",
       "roleNeedsReview": true,
       "licence": "Apache-2.0",
+      "supplier": "Anchore, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sa-15",
@@ -3998,6 +4264,8 @@
       "architectureArea": "release-and-supply-chain",
       "roleNeedsReview": true,
       "licence": "Apache-2.0",
+      "supplier": "Anchore, Inc.",
+      "supplierJurisdiction": "US",
       "controls": [
         "sa-10",
         "sa-15",
@@ -4035,6 +4303,8 @@
       "architectureArea": "release-and-supply-chain",
       "roleNeedsReview": true,
       "licence": "Apache-2.0",
+      "supplier": "The Linux Foundation (OpenSSF), Sigstore project",
+      "supplierJurisdiction": "US",
       "controls": [
         "si-07",
         "sr-04",
@@ -4067,6 +4337,8 @@
       "role": "Packs images, charts and files into one offline bundle, and loads the bundle into the site registry. This is how an air-gapped site receives software without internet access.",
       "architectureArea": "release-and-supply-chain",
       "licence": "Apache-2.0",
+      "supplier": "Rancher Government Solutions",
+      "supplierJurisdiction": "US",
       "controls": [
         "si-07",
         "sr-04",
@@ -4100,6 +4372,8 @@
       "role": "Keycloak's database: user records and passkey public credentials, kept across restarts. We build it ourselves on UBI 9 from signed packages. Keycloak cannot keep its users without a database.",
       "architectureArea": "identity",
       "licence": "PostgreSQL Licence",
+      "supplier": "PostgreSQL Global Development Group",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "ia-02",
         "ia-05",
@@ -4138,6 +4412,8 @@
       "role": "Renders every chart offline in CI to check the site settings, and installs the vendored chart tarballs at the site. Every site part is installed through it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Cloud Native Computing Foundation (The Linux Foundation), Helm project",
+      "supplierJurisdiction": "US",
       "controls": [
         "si-07",
         "sr-04",
@@ -4170,6 +4446,8 @@
       "role": "The Kubernetes every site runs, installed from the air-gap tarball in its FIPS build, with the CIS profile, an audit policy and secrets encryption. Every other site part runs on it.",
       "architectureArea": "site-platform",
       "licence": "Apache-2.0",
+      "supplier": "Rancher (SUSE)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "cm-02",
         "cm-06",
@@ -4215,6 +4493,8 @@
       "role": "OpenBao plugin that seals OpenBao with a key held in the site HSM, so the key that unlocks OpenBao never sits on disk. Shamir key shares are the fallback.",
       "architectureArea": "secrets-and-keys",
       "licence": "MPL-2.0",
+      "supplier": "The Linux Foundation (OpenSSF), OpenBao project",
+      "supplierJurisdiction": "US",
       "controls": [
         "sc-12",
         "sc-13",
@@ -4251,6 +4531,8 @@
       "role": "A software HSM built into the test-only OpenBao image, so the lab and CI can test HSM sealing without hardware. It never reaches production.",
       "architectureArea": "secrets-and-keys",
       "licence": "BSD-2-Clause",
+      "supplier": "SoftHSM project (formerly part of OpenDNSSEC)",
+      "supplierJurisdiction": "unknown",
       "controls": [
         "sc-12",
         "sc-13"
@@ -4269,6 +4551,608 @@
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "model:anthropic/claude",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Anthropic's Claude (closed weights): origin US, family claude, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "supplier": "Anthropic, PBC",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:black-forest-labs/flux.2-klein-4b",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Black Forest Labs's FLUX.2 klein 4B: origin DE, family flux, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "supplier": "Black Forest Labs",
+      "supplierJurisdiction": "DE",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: attribution.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:cohere/command-a-plus",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Cohere's Command A+ 05-2026 (MoE, 218B total, 25B active; text and image input): origin CA, family command, licence Apache-2.0, approved at most for T2 on vendor-region, vendor-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "supplier": "Cohere",
+      "supplierJurisdiction": "CA",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on the Cohere Model Vault classes (vendor-region, vendor-tee) under Cohere's Usage Policy, or on your organization's own on-premise hosting through your organization's passport with the artifact hash; never on NEAR AI's private hardware (owner's decision of 2026-11-24, 74.1 D-05).",
+        "Apache-2.0: keep the attribution."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:deepseek-ai/deepseek",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for DeepSeek's DeepSeek: origin CN, family deepseek, licence MIT, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "MIT",
+      "supplier": "DeepSeek",
+      "supplierJurisdiction": "CN",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence MIT; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:google/gemini",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Google's Gemini (closed weights): origin US, family gemini, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "supplier": "Google LLC",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:ibm-granite/granite",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for IBM's Granite 4.x (pretrained by IBM; synthetic data made by IBM, no teacher named): origin US, family granite, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "supplier": "IBM",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: attribution.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:ibm-granite/granite-guardian",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for IBM's Granite Guardian 4.x (fine-tuned from Granite 4.1 by IBM Research): origin US, family granite, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "supplier": "IBM",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: attribution.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:moonshotai/kimi",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Moonshot AI's Kimi: origin CN, family kimi, licence Kimi K3 License, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Kimi K3 License",
+      "supplier": "Moonshot AI",
+      "supplierJurisdiction": "CN",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence Kimi K3 License; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/llama-nemotron",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Meta, post-trained by NVIDIA's Llama (Meta), post-trained by NVIDIA: origin US, family llama, licence NVIDIA Open Model License, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "NVIDIA Open Model License",
+      "supplier": "NVIDIA",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence NVIDIA Open Model License: attribution; Llama Community License.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek-R1); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/nemotron-3-nano",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for NVIDIA's Nemotron 3 Nano (pretrained from scratch by NVIDIA): origin US, family nemotron, licence NVIDIA Nemotron Open Model License, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "NVIDIA Nemotron Open Model License",
+      "supplier": "NVIDIA",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence NVIDIA Nemotron Open Model License: attribution; check NVIDIA dataset licences.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/nemotron-3-super",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for NVIDIA's Nemotron 3 Super (pretrained from scratch by NVIDIA): origin US, family nemotron, licence NVIDIA Nemotron Open Model License, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "NVIDIA Nemotron Open Model License",
+      "supplier": "NVIDIA",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence NVIDIA Nemotron Open Model License: attribution; check NVIDIA dataset licences.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/nemotron-3-ultra",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for NVIDIA's Nemotron 3 Ultra (pretrained from scratch by NVIDIA): origin US, family nemotron, licence OpenMDW-1.1, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "OpenMDW-1.1",
+      "supplier": "NVIDIA",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence OpenMDW-1.1: attribution; check NVIDIA dataset licences.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/openreasoning-nemotron",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Alibaba (Qwen), post-trained by NVIDIA's Qwen2.5, post-trained by NVIDIA: origin CN, family qwen, licence CC-BY-4.0, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "CC-BY-4.0",
+      "supplier": "NVIDIA",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence CC-BY-4.0; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:openai/gpt",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for OpenAI's GPT (closed weights): origin US, family gpt, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "supplier": "OpenAI",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:openai/gpt-oss",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for OpenAI's gpt-oss (open weights; training data not published): origin US, family gpt, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "supplier": "OpenAI",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: OpenAI's gpt-oss usage policy.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:openai/whisper-large-v3",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for OpenAI's Whisper large-v3: origin US, family whisper, licence MIT, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "MIT",
+      "supplier": "OpenAI",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence MIT: attribution; the Hugging Face card says apache-2.0.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:qwen/qwen",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Alibaba (Qwen)'s Qwen: origin CN, family qwen, licence Apache-2.0, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "supplier": "Alibaba (Qwen)",
+      "supplierJurisdiction": "CN",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence Apache-2.0; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:x-ai/grok",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for xAI's Grok (closed weights): origin US, family grok, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "supplier": "xAI",
+      "supplierJurisdiction": "US",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:z-ai/glm",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Zhipu AI's GLM: origin CN, family glm, licence GLM-5.3 License, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "GLM-5.3 License",
+      "supplier": "Zhipu AI",
+      "supplierJurisdiction": "CN",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence GLM-5.3 License; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
     }
   ]
 }

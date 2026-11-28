@@ -61,6 +61,7 @@ export interface EngineDeviceRecord {
 
 /** The roster state, as far as the live engine reads it; anything else of it is passed back to the engine untouched. */
 export interface EngineRoster {
+  readonly required?: readonly string[];
   readonly positions: readonly string[];
   readonly members: { readonly devices: ReadonlyMap<string, readonly EngineDeviceRecord[]> };
 }
@@ -126,8 +127,78 @@ export interface StaffLiveApi {
   cellOrderHook(options: { readonly now?: () => Date }): unknown;
 }
 
+/** One replacement in a bound document: `length` characters at `offset` become `text` (src/staff/replica/editorBinding.ts DocumentEdit). */
+export interface EngineDocumentEdit {
+  readonly offset: number;
+  readonly length: number;
+  readonly text: string;
+}
+
+/** A change of a bound document (editorBinding.ts BoundDocumentChange). */
+export interface EngineDocumentChange {
+  readonly edits: readonly EngineDocumentEdit[];
+  readonly text: string;
+  readonly version: number;
+  readonly reason?: 'undo' | 'redo';
+}
+
+/** The document the binding core edits (editorBinding.ts BoundDocument). */
+export interface EngineBoundDocument {
+  readonly version: number;
+  getText(): string;
+  applyEdits(edits: readonly EngineDocumentEdit[], expectedText: string, baseVersion: number, lineEndings?: 'lf'): Promise<boolean>;
+  onDidChange(listener: (change: EngineDocumentChange) => void): () => void;
+}
+
+/** One open binding (editorBinding.ts EditorBinding). */
+export interface EngineEditorBinding {
+  text(): string;
+  undo(): Promise<boolean>;
+  redo(): Promise<boolean>;
+  flush(): Promise<{ appended: number; queued: number }>;
+  refresh(): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** A product as the projection states it, as far as the binding reads it: its section folder. */
+export interface EngineProductState {
+  readonly record: { readonly section: string };
+}
+
+/** The editor binding names (33-25): the binding core and the projection's paths and headers. */
+export interface StaffBindingApi {
+  readonly EditorBinding: {
+    open(document: EngineBoundDocument, product: { project: never; stream: string; product: string; actor: { kind: 'person' }; header(): string },
+      hooks: { notice?(text: string): void; log?(line: string): void; onAppended?(): void }): Promise<EngineEditorBinding>;
+  };
+  readonly HEADER_KEPT_TEXT: string;
+  readonly RESYNC_LOG_LINE: string;
+  projectProductStates(input: never): Map<string, EngineProductState>;
+  projectProductFile(state: never, body: string): string;
+  staffProductPath(section: never, product: string): string;
+}
+
+/** The Staff Room's names (33-26): the live model, the version acts, the contested cards and version rows, and the roster split. */
+export interface StaffRoomApi {
+  staffRoomLive(input: never): unknown;
+  memberNameAt(roster: never, member: string, at: string): string | undefined;
+  whoCanSee(roster: never, stream: string): string[];
+  readonly VersionActs: new (project: never, actor: never, context?: never) => unknown;
+  readonly CHANGED_WHILE_DECIDING_TEXT: string;
+  contestedCards(products: never, names: (member: string, roster: string) => string | undefined): unknown[];
+  changesSinceRows(products: never): unknown[];
+  pendingConfirmation(products: never): unknown[];
+  chooseRosterBranch(shared: never, branch: string): Promise<unknown>;
+  describeRosterBranches(shared: never): Promise<unknown[]>;
+  /** 33.2-07: the cards of the switch to post-quantum keys this computer sees, and their three actions (src/staff/replica/wrapUpgrade.ts). */
+  wrapCardsFor(shared: never): Promise<unknown[]>;
+  switchToV2(shared: never): Promise<unknown>;
+  moveCellsToV2(shared: never, options?: { readonly includeWaiting?: boolean }): Promise<unknown>;
+  giveKeys(shared: never): Promise<unknown>;
+}
+
 /** The engine names the staff backend calls. */
-export interface StaffEngine extends StaffLiveApi {
+export interface StaffEngine extends StaffLiveApi, StaffBindingApi, StaffRoomApi {
   newKemSeeds(): KemSeeds;
   kemPublicFromSeeds(seeds: KemSeeds): KemPublicKeys;
   kemPrivateFromSeeds(seeds: KemSeeds): KemPrivateKeys;

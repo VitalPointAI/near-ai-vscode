@@ -200,7 +200,9 @@ test('a person signer that refuses: the decision returns the refusal in its own 
   assert.equal((await versionsOf(h.hosted, h.stream)).versions[0]?.state, 'awaiting-decision');
 });
 
-test('a hosted session with no person signer signs a person-key kind with the session key, and the fold refuses it person-key-required: the roster does not move', async () => {
+// 33.1-17 task 3 (D-09) moved this refusal into the one append path: the session key is no longer asked to sign a person-key kind at all. The fold's
+// own refusal of a session-key roster entry stays covered in replicaSessionCertify.test.ts and in the hub's sessionCertify.test.ts.
+test('a hosted session with no person signer refuses a person-key kind person-key-required before the session key signs it: the roster does not move', async () => {
   const lead = await leadWith({ roles: ['member', 'section_lead:j4', 'decision_for:commander'] });
   const sessionKey = fixedSigner('HOSTED-SESSION-ONLY');
   const { roster } = await lead.p.state();
@@ -210,11 +212,14 @@ test('a hosted session with no person signer signs a person-key kind with the se
   assert.ok('ok' in certified, 'ok' in certified ? undefined : certified.message);
   const hosted = project(await ReplicaProject.open(lead.at.root, { ...lead.at.deps, sessionSigner: sessionKey.signer }));
   assert.equal(hosted.signerOf('version.decide'), sessionKey.signer);
-  // A roster change by the session key is written, kept, and changes nothing.
+  // A roster change is refused before the session key signs it, and changes nothing.
   const before = (await hosted.state()).roster.positions.length;
+  const stored = streamEntries(lead.at, lead.p.projectId).length;
   const update = await hosted.appendOwn('member.update', { member: lead.member, name: 'Lead Renamed' });
-  assert.ok('ok' in update, 'ok' in update ? undefined : update.message);
+  assert.ok('refused' in update);
+  assert.deepEqual(update, { refused: 'person-key-required', message: 'Only the person\'s own key can make this change.' });
   const after = await hosted.state();
   assert.equal(after.roster.positions.length, before);
-  assert.equal(after.roster.refused.find((item) => item.hash === update.hash)?.reason, 'person-key-required');
+  assert.equal(streamEntries(lead.at, lead.p.projectId).length, stored, 'nothing was written');
+  assert.ok(!streamEntries(lead.at, lead.p.projectId).some((entry) => entry.header.writer === sessionKey.writer), 'the session key signed nothing');
 });

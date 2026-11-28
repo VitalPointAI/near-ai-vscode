@@ -14,10 +14,10 @@
     "resource": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "where", "component", "scope", "purpose", "role", "architectureArea", "licence", "controls", "evidence", "crypto", "cveResponse", "airGap", "fit", "reviewer", "reviewedAt"],
+      "required": ["id", "kind", "where", "component", "scope", "purpose", "role", "architectureArea", "licence", "controls", "evidence", "crypto", "cveResponse", "airGap", "fit", "reviewer", "reviewedAt", "supplier", "supplierJurisdiction"],
       "properties": {
-        "id": { "type": "string", "pattern": "^(npm|image|action|vendor|chart|tool):\\S+$" },
-        "kind": { "enum": ["npm", "image", "action", "vendored", "chart", "tool"] },
+        "id": { "type": "string", "pattern": "^(npm|image|action|vendor|chart|tool|model):\\S+$" },
+        "kind": { "enum": ["npm", "image", "action", "vendored", "chart", "tool", "model"] },
         "where": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/text" } },
         "component": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$" },
         "scope": { "enum": ["runtime", "build", "test"] },
@@ -34,7 +34,9 @@
         "fit": { "enum": ["pass", "pass-with-conditions", "fail"] },
         "conditions": { "type": "array", "items": { "$ref": "#/definitions/text" } },
         "reviewer": { "$ref": "#/definitions/text" },
-        "reviewedAt": { "type": "string", "format": "date" }
+        "reviewedAt": { "type": "string", "format": "date" },
+        "supplier": { "$ref": "#/definitions/text" },
+        "supplierJurisdiction": { "type": "string", "pattern": "^([A-Z]{2}|unknown)$" }
       },
       "if": { "properties": { "fit": { "const": "pass-with-conditions" } } },
       "then": { "properties": { "conditions": { "type": "array", "minItems": 1 } }, "required": ["conditions"] }

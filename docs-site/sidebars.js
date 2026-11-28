@@ -28,7 +28,7 @@ export default {
     {
       type: 'category',
       label: 'Security',
-      items: ['security/trust-model', 'security/road-to-production', 'security/policy.synced', ...folder('Security documents', 'security/documents')]
+      items: ['security/trust-model', 'security/models', 'security/road-to-production', 'security/policy.synced', ...folder('Security documents', 'security/documents')]
     },
     ...folder('Accreditation', 'accreditation'),
     {

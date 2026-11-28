@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { IMAGE_FILES, check, discover, knownIds, main } from '../resource-check.mjs';
+import { IMAGE_FILES, MODEL_FILES, check, discover, entryProblems, inventory, knownIds, main } from '../resource-check.mjs';
 
 const SHA = 'a'.repeat(40);
 const DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -21,7 +21,7 @@ function fixture(files) {
 
 const entry = (id, kind, where, extra = {}) => ({
   id, kind, where, component: 'extension', scope: 'build', purpose: 'p', role: 'r', architectureArea: 'build-and-test', licence: 'MIT', controls: ['sa-15'], evidence: 'none', crypto: 'none',
-  cveResponse: 'npm audit', airGap: 'ok', fit: 'pass', reviewer: 'r', reviewedAt: '2026-11-23', ...extra
+  cveResponse: 'npm audit', airGap: 'ok', fit: 'pass', reviewer: 'r', reviewedAt: '2026-11-23', supplier: 'Microsoft Corporation', supplierJurisdiction: 'US', ...extra
 });
 
 const REPO = {
@@ -88,6 +88,48 @@ test('an entry without a role or an architecture area fails closed, and an area 
   assert.match(run(REPO, [{ ...CLEAN[0], architectureArea: 'somewhere' }, ...CLEAN.slice(1)]).join('\n'), /architectureArea "somewhere" is not one of build-and-test, workbench/);
   assert.match(run(REPO, [{ ...CLEAN[0], roleNeedsReview: false }, ...CLEAN.slice(1)]).join('\n'), /roleNeedsReview is true when present/);
   assert.deepEqual(run(REPO, [{ ...CLEAN[0], roleNeedsReview: true }, ...CLEAN.slice(1)]), []);
+});
+
+test('48.4 D-08 supplier fields: supplier is text and supplierJurisdiction an ISO 3166-1 alpha-2 code or unknown, never a name or lower case', () => {
+  const withSupplier = (extra) => [{ ...CLEAN[0], ...extra }, ...CLEAN.slice(1)];
+  assert.deepEqual(run(REPO, withSupplier({ supplier: 'Eclipse Foundation AISBL', supplierJurisdiction: 'BE' })), []);
+  assert.deepEqual(run(REPO, withSupplier({ supplier: 'unknown', supplierJurisdiction: 'unknown' })), []);
+  for (const bad of ['Belgium', 'be', '', ['BE'], 'BEL']) {
+    assert.deepEqual(run(REPO, withSupplier({ supplier: 'Eclipse Foundation AISBL', supplierJurisdiction: bad })),
+      ['compliance/resources.json npm:typescript: supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.'], JSON.stringify(bad));
+  }
+  for (const bad of ['', '  ', ['Microsoft'], 42]) {
+    assert.deepEqual(run(REPO, withSupplier({ supplier: bad, supplierJurisdiction: 'US' })),
+      ['compliance/resources.json npm:typescript: supplier must name the organization that publishes it, or say unknown.'], JSON.stringify(bad));
+  }
+});
+
+test('48.4 D-08 supplier fields are required: an entry missing either is refused, naming the entry and the field', () => {
+  const { supplier, supplierJurisdiction, ...bare } = CLEAN[0];
+  assert.ok(supplier && supplierJurisdiction);
+  assert.deepEqual(run(REPO, [bare, ...CLEAN.slice(1)]), [
+    'compliance/resources.json npm:typescript: supplier must name the organization that publishes it, or say unknown.',
+    'compliance/resources.json npm:typescript: supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.'
+  ]);
+  assert.deepEqual(run(REPO, [{ ...bare, supplier }, ...CLEAN.slice(1)]),
+    ['compliance/resources.json npm:typescript: supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.']);
+  const schema = JSON.parse(readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'compliance', 'schemas', 'resources.schema.json'), 'utf8'));
+  for (const field of ['supplier', 'supplierJurisdiction']) assert.ok(schema.definitions.resource.required.includes(field), `the schema requires ${field}`);
+});
+
+test('48.4 D-08 inventory: the --json inventory carries supplier and supplierJurisdiction per entry, unknown as written', () => {
+  const root = fixture(REPO);
+  const resources = [
+    { ...CLEAN[0], supplier: 'Microsoft Corporation', supplierJurisdiction: 'US' },
+    { ...CLEAN[1], supplier: 'unknown', supplierJurisdiction: 'unknown' },
+    (({ supplier, supplierJurisdiction, ...rest }) => rest)(CLEAN[2])
+  ];
+  const rows = Object.fromEntries(inventory({ resources }, discover(root)).map((row) => [row.id, row]));
+  assert.equal(rows['npm:typescript'].supplier, 'Microsoft Corporation');
+  assert.equal(rows['npm:typescript'].supplierJurisdiction, 'US');
+  assert.equal(rows['image:docker.io/library/node'].supplier, 'unknown');
+  assert.equal(rows['image:docker.io/library/node'].supplierJurisdiction, 'unknown');
+  assert.equal(rows['action:actions/checkout'].supplierJurisdiction, null, 'an entry without the field shows null, never a country');
 });
 
 test('the check fails when the architecture area list is missing', () => {
@@ -162,6 +204,34 @@ test('workbench: no Dockerfile the fit check reads names its base image through 
   assert.deepEqual(argFromFiles(repo, IMAGE_FILES), []);
   const root = fixture({ 'workbench/Dockerfile': `ARG BASE\nFROM --platform=linux/amd64 \${BASE} AS build\n`, 'hub/Dockerfile': `FROM a/b:1@${DIGEST}\n` });
   assert.deepEqual(argFromFiles(root, IMAGE_FILES), ['workbench/Dockerfile']);
+});
+
+// Phase 74.1-01 (D-10): every shipped model passport is a `model` resource with a reviewed licence and fit entry.
+const PASSPORTS = 'src/domain/gate/shippedPassports.ts';
+const modelEntry = (id) => entry(id, 'model', [PASSPORTS], { component: 'model-endpoints', scope: 'runtime', fit: 'pass-with-conditions', conditions: ['Research only.'] });
+
+test('a shipped passport id line is discovered as a model resource', () => {
+  assert.deepEqual([...MODEL_FILES], [PASSPORTS]);
+  const text = "export const SHIPPED = [\n  row({\n    id: 'openai/gpt-oss',\n    match: ['openai/gpt-oss-120b'],\n    licence: { inherited: [], id: 'Apache-2.0', obligations: [] }\n  })\n];\n";
+  const { resources, problems } = discover(fixture({ [PASSPORTS]: text }));
+  assert.deepEqual(problems, []);
+  assert.deepEqual(resources.get('model:openai/gpt-oss'), { id: 'model:openai/gpt-oss', kind: 'model', where: [PASSPORTS] });
+  assert.equal([...resources.keys()].filter((id) => id.startsWith('model:')).length, 1, 'only row id lines are models');
+});
+
+test('a shipped passport with no register entry fails, and a model entry nothing discovers is stale', () => {
+  const files = { ...REPO, [PASSPORTS]: "  row({\n    id: 'openai/gpt-oss',\n  }),\n" };
+  const known = { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline', 'model-endpoints']), areas: new Set(['build-and-test', 'workbench']) };
+  const missing = check({ resources: CLEAN }, discover(fixture(files)), known);
+  assert.deepEqual(missing, [`model:openai/gpt-oss (used in ${PASSPORTS}) has no entry in compliance/resources.json. Check its compliance fit and add an entry before using it.`]);
+  assert.deepEqual(check({ resources: [...CLEAN, modelEntry('model:openai/gpt-oss')] }, discover(fixture(files)), known), []);
+  const stale = check({ resources: [...CLEAN, modelEntry('model:openai/gpt-oss'), modelEntry('model:example/gone')] }, discover(fixture(files)), known);
+  assert.match(stale.join('\n'), /model:example\/gone: nothing in the repository uses it any more/);
+});
+
+test('a model entry needs the model: prefix', () => {
+  assert.deepEqual(entryProblems(modelEntry('model:openai/gpt-oss')), []);
+  assert.match(entryProblems(modelEntry('npm:openai/gpt-oss')).join('\n'), /the id of a model resource starts with "model:"/);
 });
 
 test('the repository itself passes the check, against the real catalogues and components', () => {

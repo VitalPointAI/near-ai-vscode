@@ -64,7 +64,8 @@ function deps(overrides: Partial<CyberPanelDeps> = {}): CyberPanelDeps {
       installCommand: (tool: string) => (tool === 'nmap' ? 'sudo apt-get install -y nmap' : undefined)
     }),
     installTool: async () => ({ ok: true }),
-    models: { read: () => undefined, write: async () => undefined, defaultModel: () => 'chat-model', available: async () => ['chat-model', 'other-model'] },
+    // The person chose this engagement's model in the panel (74.1-10: a run never starts on a model nobody chose).
+    models: { read: () => 'chat-model', write: async () => undefined, defaultModel: () => 'chat-model', available: async () => ['chat-model', 'other-model'] },
     now: () => new Date('2026-11-02T12:00:00Z'),
     ...overrides
   };
@@ -449,7 +450,7 @@ test('the chat handoff sends the run prompt as a chat message, naming the engage
 
 // ---- A scan runs on an abliterated model (owner decision 2026-11-05) ------------------------------------------------------------------------
 // A scan sends exploits and attack strings, which safety-tuned chat models refuse, so the panel runs it on an abliterated model: the only one
-// offered is used silently, several ask once per engagement, and none falls back to the chat tier with a plain note.
+// offered is used silently, several ask once per engagement, and with none no model is set and the person chooses (74.1-10).
 
 function abliteratedModels(list: string[], options: { picked?: string } = {}) {
   const stored = new Map<string, string>();
@@ -504,27 +505,27 @@ test('with several abliterated models the person is asked once, the answer is re
     box.panel.dispose();
   }
 
-  // A question the person closes falls back to the chat tier and says so, so a scan is never silently started on a model that may refuse it.
+  // A question the person closes sets no model and says so (74.1-10: no chat-tier fallback), so a scan never starts on a model nobody chose.
   const declined = abliteratedModels(['chat-standard', 'a-abliterated', 'b-abliterated']);
   const box2 = attach({ models: declined.models });
   try {
     await createEngagement(box2);
     const posted = await engagementModel(box2);
-    assert.equal(posted.model, 'chat-standard');
+    assert.equal(posted.model, undefined);
     assert.match(posted.modelNote ?? '', /Several abliterated models are offered/);
   } finally {
     box2.panel.dispose();
   }
 });
 
-test('with no abliterated model offered the chat tier stands and the panel says a scan may be refused', async () => {
+test('with no abliterated model offered no model is set and the panel asks the person to choose (74.1-10, no fixed fallback)', async () => {
   const { models, asked } = abliteratedModels(['chat-standard', 'other-model']);
   const box = attach({ models });
   try {
     await createEngagement(box);
     const posted = await engagementModel(box);
-    assert.equal(posted.model, 'chat-standard');
-    assert.match(posted.modelNote ?? '', /no abliterated model/);
+    assert.equal(posted.model, undefined);
+    assert.equal(posted.modelNote, 'Choose a model for this engagement. Nothing is sent until you press Run.');
     assert.deepEqual(asked, []);
   } finally {
     box.panel.dispose();
@@ -543,6 +544,26 @@ test('a run with no model named by the page still uses the engagement\'s abliter
     await box.send({ type: 'run', engagementId, mode: 'defensive', depth: 'quick', vehicle: 'chat' });
     assert.deepEqual(started, [{ model: 'deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated' }], 'the panel run used the abliterated model');
     assert.deepEqual(handed, [{ model: 'deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated' }], 'and so did the chat run');
+  } finally {
+    box.panel.dispose();
+  }
+});
+
+test('74.1-10: a run with no chosen model and no abliterated model offered is refused with the choose sentence, and nothing starts', async () => {
+  let started = 0;
+  const box = attach({
+    models: { read: () => undefined, write: async () => undefined, defaultModel: () => 'chat-model', available: async () => ['chat-model'] },
+    startRun: async () => { started += 1; return { runId: 'run-0001-abcdef', outcome: 'completed', findings: [] }; },
+    handToChat: async () => { started += 1; }
+  });
+  try {
+    await createEngagement(box);
+    const engagementId = (box.posted.filter((entry) => entry.type === 'engagement').pop() as unknown as { engagement: { id: string } }).engagement.id;
+    await box.send({ type: 'run', engagementId, mode: 'defensive', depth: 'quick', vehicle: 'panel' });
+    await box.send({ type: 'run', engagementId, mode: 'defensive', depth: 'quick', vehicle: 'chat' });
+    assert.equal(started, 0);
+    const errors = box.posted.filter((entry) => entry.type === 'error').map((entry) => (entry as { text?: string }).text);
+    assert.deepEqual(errors, ['Choose a model for this engagement. Nothing is sent until you press Run.', 'Choose a model for this engagement. Nothing is sent until you press Run.']);
   } finally {
     box.panel.dispose();
   }

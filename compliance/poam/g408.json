@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "sa-09",
+    "sr-03"
+  ],
+  "gap": "G408",
+  "id": "g408",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "NEAR AI answers whether it hosts Nemotron 3, Command A+, gpt-oss and Western embedding and reranking models (N1, N2, N2a, N7)"
+    },
+    {
+      "phase": "74.2",
+      "title": "Your organization's own attested hosting (org-tee) serves a Western model"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Every chat, embedding, reranking and vision model in NEAR AI's private hardware comes from a developer in the People's Republic of China, so under your organization's rules agent work has no private model there. The owner has asked NEAR AI to host Nemotron 3, Command A+, gpt-oss and Western embedding and reranking models (N1, N2, N2a, N7). Until then use your organization's own attested hosting (Phase 74.2), a Cohere vault, or a model on this computer. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-26.",
+  "title": "No Western model runs in NEAR AI's private hardware"
+}

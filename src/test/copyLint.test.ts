@@ -6,7 +6,7 @@
 // purpose, so it can never pass silently), review the diff of src/test/copy-lint-baseline.json, and run it again without the flag. A new hit is fixed in the
 // copy with the glossary's user word, never by raising the baseline; re-record only to move a count with code that moved, or to drop counts a fix removed.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -14,7 +14,7 @@ import { MODES, ModeId, ModeRow } from '../domain/org/modes';
 import {
   ALLOWED_CLAIM_CONTEXTS, ALLOWED_CONTEXTS, BASELINE_PATH, COMPLIANCE_CLAIMS, COPY_RULES, CopyCounts, DISTINCTIVE_MODE_WORDS, GLOSSARY_WORDS, MODEL_INSTRUCTIONS,
   REPO_ROOT, baselineText, checkTightness, compareWithBaseline, copySourceFiles, countHits, extractCopy, extractPackage, increaseMessage, modeWordsFromTable,
-  documentationFiles, productNameHits, readBaseline, scanRepository, writeBaselineAndFail
+  documentationFiles, overclaimHits, productNameHits, readBaseline, scanRepository, writeBaselineAndFail
 } from './helpers/copyLintScan';
 
 const EM_DASH = String.fromCharCode(0x2014);
@@ -378,6 +378,97 @@ test('D-64 rule 7: a phrase in a file listed in the claim contexts is not counte
   assert.equal(counted('src/services/other.ts', 'Supplier certified on the date shown.'), 1, 'only the listed file');
 });
 
+// ---- Rule 7: sovereignty overclaims (48.4 D-35; GLOSSARY section 5 rule 6) ----
+
+const OVERCLAIMS = ['fully sovereign', '100% sovereign', '100% Canadian', 'sovereign by default', 'sovereignty certified', 'certified sovereign'];
+
+test('48.4 D-35 overclaim in copy: each sovereignty overclaim counts once, in any case, in a command title, a message and a workbench common module', () => {
+  const common = 'workbench/extension/src/common/example.ts';
+  for (const phrase of OVERCLAIMS) {
+    for (const variant of [phrase, phrase.toUpperCase(), phrase.replace(/^./, (first) => first.toUpperCase())]) {
+      const manifest = { contributes: { commands: [{ command: 'nearAi.example', title: `SovAI: Show ${variant} status`, category: 'SovAI' }] } };
+      assert.equal(countHits(extractPackage(manifest), 'package.json')['package.json']?.['compliance-claim'], 1, `title: ${variant}`);
+      const message = `import * as vscode from 'vscode';\nvoid vscode.window.showInformationMessage('This workspace is ${variant} now.');\n`;
+      assert.equal(countHits(extractCopy(message, SERVICE), SERVICE)[SERVICE]?.['compliance-claim'], 1, `message: ${variant}`);
+      const module = `export const STATUS = 'This workspace is ${variant} now.';\n`;
+      assert.equal(countHits(extractCopy(module, common), common)[common]?.['compliance-claim'], 1, `common module: ${variant}`);
+    }
+  }
+  // The longest phrase wins: "certified sovereign" and "sovereignty certified" are one claim each, never also "certified".
+  assert.equal(one('The product is certified sovereign.')['compliance-claim'], 1);
+  assert.equal(one('The product is sovereignty certified.')['compliance-claim'], 1);
+  // The product's name is a name, never a claim.
+  assert.equal(one('Sterling Sovereign AI keeps your rules.')['compliance-claim'], undefined);
+  for (const phrase of OVERCLAIMS) assert.ok(COMPLIANCE_CLAIMS.includes(phrase), phrase);
+});
+
+test('48.4 D-35 honest negation: a sentence that negates the overclaim before it is not counted', () => {
+  for (const honest of ['SovAI is not fully sovereign today.', 'Nothing here is 100% Canadian.', 'It is never sovereign by default.']) {
+    assert.equal(one(honest)['compliance-claim'], undefined, honest);
+    assert.deepEqual(overclaimHits(honest), [], honest);
+  }
+  assert.deepEqual(overclaimHits('This is not new. SovAI is fully sovereign.'), ['fully sovereign'], 'a negation in an earlier sentence does not cover it');
+  // overclaimHits reads only the six sovereignty phrases, never the general claims.
+  assert.deepEqual(overclaimHits('The extension is certified and compliant.'), []);
+});
+
+test('48.4 D-35 overclaim in documentation: the guides and README files never overclaim, and a planted line is named with its file and phrase', () => {
+  const scan = (root: string): string[] => documentationFiles(root).flatMap((file) =>
+    overclaimHits(readFileSync(path.join(root, file), 'utf8')).map((phrase) => `${file}: ${phrase}`));
+  // A fixture repository with one honest and one overclaiming page.
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-overclaim-'));
+  mkdirSync(path.join(root, 'docs'), { recursive: true });
+  mkdirSync(path.join(root, 'docs-site', 'content', 'security'), { recursive: true });
+  writeFileSync(path.join(root, 'README.md'), '# Sterling Sovereign AI\n\nSovAI is not fully sovereign, and the card says why.\n');
+  writeFileSync(path.join(root, 'docs-site', 'content', 'security', 'planted.md'), '# Planted\n\nThis product is 100% Canadian\nand more.\n');
+  assert.deepEqual(scan(root), ['docs-site/content/security/planted.md: 100% Canadian']);
+  // The real repository: the whole file at once, like rule 8.
+  assert.deepEqual(scan(REPO_ROOT), [], 'say what the sovereignty card shows, never "fully sovereign", "100% Canadian" or another overclaim');
+});
+
+// ---- Rule 1: "Sovereignty" only in the badge and card sources (48.4 D-35, D-04) ----
+
+test('48.4 D-35 sovereignty word: Sovereignty is a glossary word outside its allowed contexts; SEAL and sovereignty score count everywhere', () => {
+  const card = 'src/domain/sovereignty/words.ts';
+  const contexts = [{ file: card, words: ['sovereignty'], why: 'the badge and card words (test row)' }];
+  const counted = (text: string, file: string): number | undefined => countHits([{ text }], file, { allowedContexts: contexts })[file]?.glossary;
+  for (const text of ['Sovereignty: Met', 'Open the sovereignty card.', 'SOVEREIGNTY']) {
+    assert.equal(counted(text, SERVICE), 1, `${text} outside the card`);
+    assert.equal(counted(text, card), undefined, `${text} in the card`);
+  }
+  for (const text of ['The SEAL level is 3.', 'Your sovereignty score is high.']) {
+    assert.equal(counted(text, SERVICE), 1, `${text} outside the card`);
+    assert.equal(counted(text, card), 1, `${text} in the card`);
+  }
+  // SEAL is case-sensitive: the ordinary word "seal" (a sealed vault) is not the glossary word.
+  assert.equal(counted('The vault is sealed and the seal type is pkcs11.', SERVICE), undefined);
+  // The edition's name is still a name, and "sovereign" alone is still its own glossary word.
+  assert.equal(counted('Sterling Sovereign AI', SERVICE), undefined);
+  assert.equal(counted('A sovereign region.', card), 1);
+  for (const word of ['sovereignty', 'SEAL', 'sovereignty score']) assert.ok(GLOSSARY_WORDS.some((entry) => entry.word === word), word);
+});
+
+test('48.4 D-35 sovereignty sources: src/domain/sovereignty is read as user copy (every string literal) when it exists, and skipped when absent', () => {
+  const file = 'src/domain/sovereignty/words.ts';
+  const source = [
+    `export const DIMENSIONS = { 'data-stored': 'Where your data is stored' };`,
+    `const reason = 'Declared by your operator, not verified';`,
+    `const slug = 'data-stored';`
+  ].join('\n');
+  assert.deepEqual(texts(source, file), ['Where your data is stored', 'Declared by your operator, not verified']);
+  // The same source elsewhere in src/domain gives only exported text constants (none here).
+  assert.deepEqual(texts(source, 'src/domain/example.ts'), []);
+  // A fixture repository with the folder lists it; the real scan works whether or not it exists yet.
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-sovereignty-'));
+  mkdirSync(path.join(root, 'src', 'domain', 'sovereignty'), { recursive: true });
+  mkdirSync(path.join(root, 'media'), { recursive: true });
+  for (const folder of ['workbench/extension/src/browser', 'workbench/extension/src/common', 'workbench/extension/src/node']) mkdirSync(path.join(root, folder), { recursive: true });
+  writeFileSync(path.join(root, 'package.json'), '{}');
+  writeFileSync(path.join(root, file), source);
+  assert.ok(copySourceFiles(root).includes(file));
+  assert.equal(copySourceFiles().includes(file), existsSync(path.join(REPO_ROOT, file)));
+});
+
 // ---- The baseline (Task 1, final in Task 3) ----
 
 test('D-41: the repository passes against its baseline', () => {
@@ -421,4 +512,20 @@ test('D-45 pattern: the tightness check fails on a stale count only when the bas
 test('D-45 pattern: the baseline is tight (enforced at the close of a phase with NEAR_AI_BASELINE_TIGHT=1)', (t) => {
   const { stale } = compareWithBaseline(scanRepository(), readBaseline());
   checkTightness(stale, process.env.NEAR_AI_BASELINE_TIGHT === '1', (note) => { t.diagnostic(note); });
+});
+
+// Phase 33 D-69 (33-26): the native staff widgets draw the sentences of the live model (src/domain/staff, src/staff) and of the channel constants in
+// workbench/extension/src/common, so a later check of those constants covers everything a person reads there. A widget file holds no sentence of its
+// own: no string literal of two or more words that ends like a sentence.
+test('D-69: the native staff widgets hold no sentence of their own, only the constants they render', () => {
+  const dir = path.join(REPO_ROOT, 'workbench', 'extension', 'src', 'browser', 'staff');
+  const sentences: string[] = [];
+  for (const name of readdirSync(dir).filter((file) => file.endsWith('.ts')).sort()) {
+    const source = readFileSync(path.join(dir, name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const match of source.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)) {
+      const literal = match[1] ?? match[2] ?? match[3] ?? '';
+      if (/[A-Za-z]+\s+[A-Za-z]+/.test(literal) && /[.?!]$/.test(literal.trim())) sentences.push(`${name}: ${literal}`);
+    }
+  }
+  assert.deepEqual(sentences, []);
 });

@@ -9,6 +9,7 @@ import { validateDeviceData } from './kindSchemas/device';
 import { validateDocData } from './kindSchemas/doc';
 import { validateIntegrityData } from './kindSchemas/integrity';
 import { validateObsData } from './kindSchemas/obs';
+import { validatePersonnelData } from './kindSchemas/personnel';
 import { validateProjectData } from './kindSchemas/project';
 import { validateRegistersData } from './kindSchemas/registers';
 import { validateRosterData } from './kindSchemas/roster';
@@ -23,7 +24,10 @@ export { SCHEMA_PENDING };
 
 const KINDS_BY_FAMILY = {
   project: ['project.genesis', 'project.import'],
-  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void', 'roster.require', 'hub.readmit'],
+  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void', 'roster.require', 'hub.readmit',
+    // Phase 33.1 (D-09 to D-15, D-43): positions, postings, delegated posting authority, the staged key change and the shared project's signed mode.
+    'position.create', 'position.update', 'position.disestablish', 'authority.delegate', 'authority.revoke', 'posting.order', 'posting.enrol',
+    'posting.report', 'posting.decide', 'posting.return', 'posting.end', 'posting.cancel', 'cell.rekey.staged', 'project.mode', 'cell.access.commit'],
   doc: ['doc.client', 'doc.update', 'doc.compact'],
   versions: ['product.create', 'product.owner', 'version.propose', 'version.verdict', 'version.submit', 'version.withdraw', 'version.decide', 'version.release', 'version.supersede'],
   registers: ['register.row', 'pir.decide', 'watch.decide'],
@@ -34,7 +38,9 @@ const KINDS_BY_FAMILY = {
   // A person device's certificate for a session key (Phase 33 D-62): in the roster cell, folded beside the roster line and never on it.
   session: ['session.certify'],
   // A device's post-quantum key binding (33.2 D-03): in the roster cell, folded beside the roster line and never on it, like session.certify.
-  device: ['device.kem']
+  device: ['device.kem'],
+  // A posting's private record (Phase 33.1 D-19): only in the personnel key group, never in the base cell.
+  personnel: ['posting.unable', 'posting.reference']
 } as const;
 
 export type KindFamily = keyof typeof KINDS_BY_FAMILY;
@@ -42,7 +48,8 @@ export type ReplicaKind = typeof KINDS_BY_FAMILY[KindFamily][number];
 
 // The closed list: DESIGN 4.3 plus deputy.name (DESIGN 7.1), so a deputy lead can be honoured without a format change (D-27), plus the roster kind that
 // voids an open invite (D-17, D-49), plus roster.require (the feature check, POST-01) and hub.readmit (trusting
-// your organization's server again, Phase 33 D-42), plus session.certify (a person's session key, Phase 33 D-62), plus device.kem (a device's post-quantum keys, 33.2 D-03): 55 kinds.
+// your organization's server again, Phase 33 D-42), plus session.certify (a person's session key, Phase 33 D-62), plus device.kem (a device's post-quantum keys, 33.2 D-03),
+// plus Phase 33.1's 14 roster kinds and 2 personnel kinds: 71 kinds.
 export const REPLICA_KINDS: readonly ReplicaKind[] = (Object.values(KINDS_BY_FAMILY) as ReadonlyArray<readonly ReplicaKind[]>).flat();
 
 // A Map, because a kind is chosen by whoever wrote the entry.
@@ -102,7 +109,7 @@ export function validateBody(raw: unknown): BodyCheck {
 function copyActor(actor: EntryBody['actor']): EntryBody['actor'] {
   if (actor.kind === 'agent') return { kind: 'agent', member: actor.member, run: actor.run };
   if (actor.kind === 'hub') return { kind: 'hub', watch: actor.watch };
-  return { kind: 'person' };
+  return actor.position === undefined ? { kind: 'person' } : { kind: 'person', position: actor.position };
 }
 
 export type DataCheck = { ok: true } | { ok: false; reason: string };
@@ -119,7 +126,8 @@ const FAMILY_VALIDATORS: Readonly<Record<KindFamily, (kind: string, data: unknow
   obs: validateObsData,
   integrity: validateIntegrityData,
   session: validateSessionData,
-  device: validateDeviceData
+  device: validateDeviceData,
+  personnel: validatePersonnelData
 };
 
 // Validates the data of a known kind. Unknown kinds are not checked here (the caller keeps them).

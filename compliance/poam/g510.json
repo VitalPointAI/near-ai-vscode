@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-16",
+    "ac-21",
+    "ca-03"
+  ],
+  "gap": "G510",
+  "id": "g510",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "The CJWC experimentation and interoperability team, introduced by the DND project technical authority (owner action a), supplies a test key access server and its own samples; plan 45.2-12 then runs the acceptance trial"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "No allied test cell is arranged to check your organization's exports and partners' objects against an ally's own key access server and samples, so the exchange is checked only against the public OpenTDF quickstart, which proves wiring and never counts as acceptance. Your organization asks the DND project technical authority for an introduction to the Canadian Joint Warfare Centre (CJWC) experimentation and interoperability team, which runs the FMN trials and Project OLYMPUS (owner action a). The acceptance trial (plan 45.2-12) runs once the cell supplies a test key access server with its own samples. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+  "title": "No allied test cell is arranged for the acceptance trial"
+}

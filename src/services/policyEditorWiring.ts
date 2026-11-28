@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { projectScopeId } from '../domain/contextGraph';
 import { narrowingOf } from '../domain/gate/layers';
 import { CLEARANCE_SELF_ASSERTED_TEXT } from '../domain/gate/labels';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
@@ -105,6 +106,11 @@ export function policyEditorDeps(host: GateHost, hooks: PolicyEditorHooks): { re
     showStored: () => hooks.showStored(),
     record: (id, detail) => { host.recordPolicyEvent(id, `${String(detail.changes)} changes from ${detail.from}, proposal ${detail.proposalHash.slice(0, 16)}`); },
     onDidChange: (listener) => ({ dispose: host.onDidChange(listener) }),
+    // 74.1-11: the open folders by the id an exception names; no file is read (Restricted Mode is identical).
+    exceptions: {
+      projects: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({ id: projectScopeId(folder.uri.fsPath), name: folder.name })),
+      now: () => host.now()
+    },
     ...(hooks.ownRules === undefined ? {} : ownRulesDeps(hooks.ownRules))
   };
   return { deps, dispose: stop };

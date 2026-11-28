@@ -42,6 +42,15 @@ export interface PageState {
   running?: { runId: string };
   teeOnly: boolean;
   problem?: string;
+  /**
+   * 74.1-10 (D-18): per model, the jobs it is not approved for (role id to the option text "{job} (not approved)") and the reason line under its job
+   * control. The host decides; the page only renders it.
+   */
+  approvals?: Record<string, { blocked: Record<string, string>; reason?: string }>;
+  /** The lane line above the results and its link's words. */
+  laneText?: { line: string; open: string };
+  /** The recommended changes left out because their model is not approved for the job, and the line saying so under Apply all. */
+  leftOut?: { count: number; text: string; keys: string[] };
 }
 
 const PRIVACY_TEXT: Record<CatalogEntry['privacy'], string> = { tee: 'Private: NEAR AI private hardware, checked each time it is used', local: 'Local: runs on this machine', forwarded: 'Forwarded: not private', unknown: 'Privacy unknown' };
@@ -156,6 +165,8 @@ export type ComparisonPageMessage =
   /** Applies the recommended setup in one go: every tier and role whose best model differs from the one it uses. */
   | { type: 'apply-recommended' }
   | { type: 'undo-role'; token: string }
+  /** The lane line's link (74.1-UI-SPEC S3). */
+  | { type: 'open-research-workspace' }
   /** Puts one model setting back to the person's own settings: clears the project's choice for it. The host accepts only the nine settings a project can carry. */
   | { type: 'clear-project-choice'; setting: string };
 
@@ -185,6 +196,7 @@ export function parseComparisonMessage(value: unknown): ComparisonPageMessage | 
     }
     case 'open-run': case 'export': return only('id') && typeof message.id === 'string' && RUN_ID.test(message.id) ? { type: message.type, id: message.id } : undefined;
     case 'apply-recommended': return only() ? { type: 'apply-recommended' } : undefined;
+    case 'open-research-workspace': return only() ? { type: 'open-research-workspace' } : undefined;
     case 'apply-role': return only('model', 'role') && typeof message.model === 'string' && MODEL_ID.test(message.model) && typeof message.role === 'string' && ROLE_ID.test(message.role) ? { type: 'apply-role', model: message.model, role: message.role } : undefined;
     case 'undo-role': return only('token') && typeof message.token === 'string' && /^[a-f0-9]{16}$/.test(message.token) ? { type: 'undo-role', token: message.token } : undefined;
     case 'clear-project-choice': return only('setting') && typeof message.setting === 'string' && message.setting.length <= 80 ? { type: 'clear-project-choice', setting: message.setting } : undefined;
@@ -264,6 +276,7 @@ export function comparisonPageHtml(options: { cspSource: string; nonce: string; 
 <p id="problem" class="error" role="alert" hidden></p>
 <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 <div id="project-choices" hidden></div>
+<div id="lane-line" class="lifted notice lane-line" role="note" hidden></div>
 <main>
 <section aria-labelledby="board-title"><div class="section-head"><h2 id="board-title">Leaderboard</h2></div>
 <p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="trend" hidden></div><div id="recommended" hidden></div><div id="retest" hidden></div><div id="board"><p class="hint">Loading…</p></div></section>

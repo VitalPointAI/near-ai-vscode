@@ -16,7 +16,8 @@ import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { catalogEntries, comparisonPageHtml, defaultSelection, clearOneProjectChoice, clearProjectModelChoices, estimateView, historyEntries, leaderboardRows, projectChoicesView, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
 import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, undoProjectChoice, writeProjectChoice, type ChoiceValue, type InspectedSetting, type ProjectUndo } from './modelChoices';
-import { privacyWarning, roleAppliedText, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
+import { ROLE_APPROVAL_TEXT, applyAllLeftOutText, applyRefusedText, modelApprovals, privacyWarning, roleApproved, roleAppliedText, roleNotApprovedText, roleOptions, roleReason, roleUpdate, type ModelApproval, type RoleOption } from './modelRoles';
+import { RESEARCH_WORKSPACE_COMMAND } from './researchWorkspace';
 import type { ModelInfo, UsageMetadata } from './nearAiClient';
 import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
 import { readAgentRules, readModelTiers, readRoleModels, readRunBudget, readSettings } from './settings';
@@ -33,7 +34,7 @@ import { panelCommand } from './webview/openPanel';
 /** For the extension-host tests: messages to and from the page. */
 export const comparisonTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void } = {};
 
-interface Gathered { state: PageState; active?: ActiveProvider; models: ModelInfo[]; tasks: BenchmarkTask[]; runs: SavedRun[]; roles: RoleOption[] }
+interface Gathered { state: PageState; active?: ActiveProvider; models: ModelInfo[]; tasks: BenchmarkTask[]; runs: SavedRun[]; roles: RoleOption[]; approval: (model: string) => ModelApproval | undefined }
 
 let panel: vscode.WebviewPanel | undefined;
 let post: (message: Record<string, unknown>) => void = () => undefined;
@@ -99,11 +100,24 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
   const catalog = catalogEntries(models, roles, teeOnly);
   const [tasks, runs] = await Promise.all([benchmarkTasks(), storeFor(context).list()]);
   const leaderboard = leaderboardRows(runs, tasks, models, roles, Date.now());
+  // 74.1-10 (D-18): what each model is approved for, from its passport under the effective rules; a job it is not approved for is not offered.
+  const approvals = modelApprovals([...new Set([...models.map((model) => model.id), ...leaderboard.map((row) => row.model)])], models, gateHost?.policyLayers().effective?.models, Date.now());
+  const approval = (model: string): ModelApproval | undefined => approvals[model];
+  const recommended = recommendationView(leaderboard, roles);
+  const leftOutKeys = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes && !('tier' in entry && entry.tier === 'cyber'))
+    .filter((entry) => { const option = roles.find((role) => role.id === ('tier' in entry ? `tier:${entry.tier}` : `role:${entry.role}`)); return option !== undefined && !roleApproved(approval(entry.model), option); })
+    .map((entry) => ('tier' in entry ? `tier:${entry.tier}` : `role:${entry.role}`));
   return {
-    active, models, tasks, runs, roles,
+    active, models, tasks, runs, roles, approval,
     state: {
+      approvals: Object.fromEntries(Object.entries(approvals).map(([model, found]) => {
+        const reason = roleReason(model, found, roles);
+        return [model, { blocked: Object.fromEntries(roles.filter((role) => !roleApproved(found, role)).map((role) => [role.id, roleNotApprovedText(role.label)])), ...(reason === undefined ? {} : { reason }) }];
+      })),
+      laneText: { line: ROLE_APPROVAL_TEXT.laneLine, open: ROLE_APPROVAL_TEXT.openWorkspace },
+      ...(leftOutKeys.length === 0 ? {} : { leftOut: { count: leftOutKeys.length, text: applyAllLeftOutText(leftOutKeys.length), keys: leftOutKeys } }),
       leaderboard, catalog, selected: defaultSelection(roles, catalog), roles, projectChoices: projectChoicesView(root, (setting) => vscode.workspace.getConfiguration('nearAi').inspect(setting) as InspectedSetting | undefined),
-      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended: recommendationView(leaderboard, roles), trend: performanceTrend(runs),
+      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended, trend: performanceTrend(runs),
       ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
     }
   };
@@ -173,6 +187,7 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
           case 'export': await exportRun(context, message.id); break;
           case 'apply-role': await applyRole(context, auth, message.model, message.role); break;
           case 'apply-recommended': await applyRecommended(context, auth); break;
+          case 'open-research-workspace': await vscode.commands.executeCommand(RESEARCH_WORKSPACE_COMMAND); break;
           case 'undo-role': await undoRole(context, auth, message.token); break;
           case 'clear-project-choice': {
             const outcome = await clearOneProjectChoice(projectRootOf(), message.setting, editorWriter(context.globalState));
@@ -344,6 +359,8 @@ async function applyRole(context: vscode.ExtensionContext, auth: AuthService, mo
   if (!option) { post({ type: 'error', text: 'That role is not available.' }); return; }
   if (!entry) { post({ type: 'error', text: `${model} is not in your key’s model list, so it cannot be used.` }); return; }
   if (entry.blocked) { post({ type: 'error', text: `TEE-only mode is on, so ${model}, which is not private, cannot be used.` }); return; }
+  // 74.1-10 (D-18, T-74.1-33): a crafted apply for a job the model is not approved for is refused and writes nothing.
+  if (!roleApproved(gathered.approval(model), option)) { post({ type: 'error', text: applyRefusedText(model, gathered.approval(model), option) }); return; }
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const inspected = configuration.inspect(option.setting);
   // D-06: written to the workspace only when it already sets the value explicitly; otherwise it becomes the project's choice, which every interface and
@@ -392,6 +409,7 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
   // The roles of the layer being written, extended as each role is applied (every role goes to the same layer).
   let layerRoles: Record<string, string> | undefined;
   let wroteProject = false;
+  let leftOut = 0;
   for (const choice of choices) {
     // 0.4.19 review: the cyber recommendation is NOT the chat model. Mapping it to `main` rewrote the ordinary chat model with an abliterated one
     // chosen only because it will not refuse attack payloads. The cyber engagement picks its model when it starts (src/domain/cyberModel.ts), so the bulk
@@ -401,6 +419,8 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
     const option = gathered.roles.find((role) => role.id === roleId);
     const entry = gathered.state.catalog.find((candidate) => candidate.id === choice.model);
     if (!option || !entry || entry.blocked) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (${choice.model})`); continue; }
+    // 74.1-10: a recommended change whose model is not approved for the job is left out, and counted in the message.
+    if (!roleApproved(gathered.approval(choice.model), option)) { leftOut += 1; continue; }
     const inspected = configuration.inspect(option.setting);
     const where = planApply(inspected);
     if (option.id.startsWith('role:')) layerRoles ??= layerRolesFor(where, inspected, root);
@@ -427,9 +447,10 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
   }
   const token = randomBytes(8).toString('hex');
   if (undoEntries.length) undo.set(token, undoEntries);
+  const left = leftOut === 0 ? '' : ` ${applyAllLeftOutText(leftOut)}`;
   const text = applied.length
-    ? `Applied ${applied.length} change${applied.length === 1 ? '' : 's'}: ${applied.join('; ')}.${skipped.length ? ` Skipped ${skipped.join(', ')}, which the catalog no longer offers or TEE-only mode blocks.` : ''}`
-    : `Nothing was applied. Skipped ${skipped.join(', ')}.`;
+    ? `Applied ${applied.length} change${applied.length === 1 ? '' : 's'}: ${applied.join('; ')}.${skipped.length ? ` Skipped ${skipped.join(', ')}, which the catalog no longer offers or TEE-only mode blocks.` : ''}${left}`
+    : `Nothing was applied.${skipped.length ? ` Skipped ${skipped.join(', ')}.` : ''}${left}`;
   post({ type: applied.length ? 'role-applied' : 'notice', token, text });
   if (wroteProject) await repost(context, auth);
 }

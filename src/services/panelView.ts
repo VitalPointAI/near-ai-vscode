@@ -6,6 +6,9 @@ import { ChatWebviewMessage } from './chatBridge';
 import type { GateHost } from '../gate/host';
 import { attachChatToView } from './chat';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
+import { modelPolicyAction, onReportNoticeChange, reportNoticeView } from './reportModeNotice';
+import { openPolicyProposal } from './policyEditor';
+import { RESEARCH_WORKSPACE_COMMAND } from './researchWorkspace';
 
 /** The project chat sidebar: a compact chat in the style of the editor's own chat panels. */
 export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
@@ -30,6 +33,15 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
     }
     registerLayoutProbe('chat', webviewView.webview);
     await attachChatToView(this.context, this.auth, webviewView, sidebarHtml(webviewView.webview, media), this.gateHost);
+    // 74.1-13: the report-only notice, shown above every chat tab of the session while it is raised; its page actions are checked in reportModeNotice.
+    const layers = () => { try { return this.gateHost?.policyLayers(); } catch { return undefined; } };
+    const postNotice = (): void => { const notice = reportNoticeView(layers()); void webviewView.webview.postMessage({ type: 'model-policy-notice', ...(notice === undefined ? {} : { notice }) }); };
+    const noticeChange = onReportNoticeChange(postNotice);
+    webviewView.onDidDispose(() => { noticeChange.dispose(); });
+    webviewView.webview.onDidReceiveMessage((message: unknown) => {
+      void modelPolicyAction(message, { layers, propose: (change) => openPolicyProposal(change), openResearchWorkspace: () => Promise.resolve(vscode.commands.executeCommand(RESEARCH_WORKSPACE_COMMAND)) }).catch(() => undefined);
+    });
+    postNotice();
     for (const message of this.pending.splice(0)) void webviewView.webview.postMessage(message);
   }
 
@@ -87,6 +99,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
   <button id="new-conversation" class="icon-button" type="button" aria-label="New conversation" title="New conversation: starts alongside the ones still running"></button>
 </nav>
 <div id="needs-you" role="status" hidden></div>
+<div id="model-policy-notice" class="lifted notice bar-warning" role="status" hidden></div>
 <main id="transcript" aria-label="Conversation" aria-live="off">
   <section id="welcome">
     <div id="welcome-connect" role="region" aria-labelledby="welcome-connect-title" hidden>
@@ -100,7 +113,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
       </div>
     </div>
     <div id="welcome-ready" hidden>
-      <h2>Private AI for this project</h2>
+      <h2>AI for this project</h2>
       <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Use the model picker to see where each model runs; every reply says which.</p>
       <div class="suggestions">
         ${start.map((definition) => `<button type="button" data-command="gsd-${definition.command}">${escapeText(definition.title)}<small>${escapeText(definition.description)}</small></button>`).join('\n        ')}

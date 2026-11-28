@@ -47,17 +47,17 @@
 //   Start Again holds it.
 // - A store folder that is gone while this device's mark remains, or while a folder set aside beside it holds project.json, is refused rolled-back
 //   and never made again empty: Start Again carries from the newest set-aside folder whose own entries verify, and says which one it used.
-import { createHash, randomBytes } from 'node:crypto';
-import type { Hash } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../../services/auth';
+import { privateFileProblem } from '../../team/fileSafety';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { withRegisterLock } from '../registerLock';
-import { REPLICA_DIR, REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
-import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, entryHash, parseHeaderShape, sha256Hex, verifyHeader, writerIdOf } from '../../domain/replica/entry';
+import { REPLICA_DIR } from '../../domain/staff/multiUser';
+import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, buildEntry, entryHash, sha256Hex, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { BuiltEntry, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
@@ -71,24 +71,44 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
+import { checksFrontierV2Fixture, frontierV2CaptureCommitment } from '../../domain/replica/acceptedFrontier';
+import type { KeyRing } from '../../domain/replica/rosterView';
+import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
+import { foldRoster, rosterView } from '../../domain/replica/roster';
+import type { RosterAnchor } from '../../domain/replica/roster';
+import { epochAt } from '../../domain/replica/rosterCells';
+import { deviceAt } from '../../domain/replica/rosterMembers';
+import { verifyEntry } from '../../domain/replica/verify';
+import { identityDir, loadDeviceIdentity } from '../../team/identity';
+import { readKeyHistory } from '../../team/keyHistory';
+import { frontierCustody, reopenFrontierPolicy, withFrontierPolicySource } from '../../gate/frontierPolicy';
+import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
+import { openManagedHandoffs } from './managedHandoffOutbox';
+import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
+import {
+  INTENT_MAX_BYTES, MAX_ACCEPTED_FRONTIER_BYTES, MAX_BLOB_CHARS, NOFOLLOW, PROJECT_FILE_NAME, Refusal,
+  SET_ASIDE_NAME, STAFF_PARTS, STORE_NAME, STORE_PARTS, STORE_REFUSALS, blobWire, checkPath,
+  ensureDir, errorCode, fileId, freeAsideName, frontierFileHandle, intentFileOf, intentPresent, isPlainFile,
+  kindAt, leftoverFolders, newStreamFile, parseIntent, parseSealed, readFrontierFile, readWholeLines,
+  sharedHistoryMissing, staffDirOf, staffRelative, stampOf, syncTree, writeAllAt, writeAtomic, writeIntent,
+  writeNewFile
+} from './storeFiles';
+import type { StartAgainIntent, StoreRefusal, StoreRefused, StreamFile } from './storeFiles';
+
+export { START_AGAIN_COMMAND_TITLE, START_AGAIN_INTENT_FILE, STORE_REFUSALS, parseSealed, sharedHistoryMissing } from './storeFiles';
+export type { StoreRefusal, StoreRefused } from './storeFiles';
 
 /** The cross-window lock file inside the store folder. */
 export const REPLICA_LOCK_FILE = 'replica.lock';
 /** The exact text of the store's own ignore file. */
 export const STORE_GITIGNORE = '*\n!.gitignore\n';
 
-// The longest body a well-formed entry can carry, as base64url: an inline body is at most INLINE_BODY_MAX_BYTES plus sealing.
-const MAX_BODY_CHARS = Math.ceil(((INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD + 3) * 4) / 3);
-// A line longer than this cannot be an entry; it is skipped as damaged without being held in memory whole.
-const MAX_LINE_BYTES = HEADER_MAX_BYTES + MAX_BODY_CHARS + 1024;
-const READ_CHUNK = 64 * 1024;
-const BASE64URL = /^[A-Za-z0-9_-]*$/;
-const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
-
-/** The command that starts this computer's shared history again, as the refusals name it. */
-export const START_AGAIN_COMMAND_TITLE = 'Staff: Start This Computer\'s Shared History Again';
-/** The record of an unfinished Start Again, beside the store folder (relative to the project, forward slashes). */
-export const START_AGAIN_INTENT_FILE = `${REPLICA_DIR}.start-again.json`;
+const FRONTIER_STAGE_DIR = 'accepted-frontiers-v2-staged';
+const FRONTIER_POLICY_DIR = 'frontier-policy-captures';
+const FRONTIER_POLICY_SLOT = 'nearAi.staff.frontierPolicyCapture.';
+type FrontierPreparationRequest = { policyStorage: string; pin: RosterAnchor; stream: string; keys: KeyRing; snapshot: string };
+type FrontierV2FixtureRequest = FrontierPreparationRequest & { expectedSnapshot: string; opening: unknown };
+type FrontierPreparationVerdict = 'ready' | 'refused' | 'unavailable';
 /** The lock file in .planning/staff that Start Again, its recovery and every locked store operation take first. */
 export const START_AGAIN_LOCK_FILE = 'replica.start-again.lock';
 /** The steps of Start Again, in order; a test probe runs after each and can stop the process there. */
@@ -99,35 +119,8 @@ export type StartAgainProbe = (step: StartAgainStep) => Promise<void> | void;
 let startAgainProbe: StartAgainProbe | undefined;
 export function setStartAgainProbe(next: StartAgainProbe | undefined): void { startAgainProbe = next; }
 
-const STAFF_PARTS = path.posix.dirname(REPLICA_DIR).split('/');
-const STORE_PARTS = REPLICA_DIR.split('/');
-const STORE_NAME = path.posix.basename(REPLICA_DIR);
-// The only folder names an intent may give, and the only folders Start Again reads beside the store. Exact, so no name can leave .planning/staff.
-const SET_ASIDE_NAME = /^replica\.set-aside-(\d{8}-\d{6})(?:-(\d+))?$/;
-const TEMPORARY_NAME = /^replica\.new-[0-9a-f]{12}$/;
-const INTENT_MAX_BYTES = 4 * 1024;
 // A .planning/staff the user cannot write: no Start Again can run there, so a locked operation runs without its lock (only when no intent is there).
 const UNWRITABLE = new Set(['EACCES', 'EPERM', 'EROFS']);
-
-const START_AGAIN_STEP = `run ${START_AGAIN_COMMAND_TITLE}. It sets this copy aside without deleting anything, and your staff lead can then send you a new welcome file to bring the shared history back.`;
-
-// Closed list of refusals, in plain words. No message names a key, a secret or a full hash, and none uses an em-dash.
-export const STORE_REFUSALS = {
-  'rolled-back': `The shared history in this project folder is older than what this device has already seen, so it was not opened. Nothing was changed. This happens when the folder was restored from an older backup or copy, or when part of it was deleted. Put the newer copy of the folder back if you have one. If you do not, ${START_AGAIN_STEP}`,
-  damaged: `Part of the shared history in this project folder is damaged: lines this device had already read can no longer be read, so it was not opened. Nothing was changed. This happens after a disk error, or when a program or a person edited a file in the folder. Put back a good copy of the folder if you have one. If you do not, ${START_AGAIN_STEP}`,
-  'mark-unverified': `This device's signed record of how far it has seen the shared history does not verify, so the shared history in this project folder cannot be checked against it and was not opened. Nothing was changed. To start a new record, ${START_AGAIN_STEP}`,
-  'not-needed': 'The shared history in this project folder opens and matches what this device has already seen, so it was not set aside. Nothing was changed.',
-  'blob-too-large': 'A sealed attachment is larger than the 8 MB the shared history accepts, so it was not written. Nothing was changed.',
-  symlink: 'A folder or file on the way to the shared history in this project is a symbolic link, so nothing was read or written through it. Nothing was changed. Replace it with a real folder or file.',
-  unreadable: 'Part of the shared history in this project folder could not be read, so it was not opened. Nothing was changed. Check that the folder and its files can be read by your user account.',
-  'not-a-store': 'The shared history folder in this project is not a folder this extension made, so it was not opened. Nothing was changed.',
-  'out-of-order': 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.',
-  'snapshot-changed': 'The shared history changed before this update was saved, so nothing was written.',
-  'start-again-unfinished': 'Starting this computer\'s shared history again did not finish, so the shared history was not opened. Nothing was deleted. Open the project again to finish it. If this message comes back, check that the folders in .planning/staff can be read and written by your user account.',
-  'nothing-to-carry': 'There is no copy of this project\'s shared history on this computer to start again from, so nothing was changed. Ask your staff lead for a new welcome file and open it with Staff: Join Staff Project.'
-} as const;
-export type StoreRefusal = keyof typeof STORE_REFUSALS;
-export interface StoreRefused { refused: StoreRefusal; message: string }
 
 /** The refusals that starting this computer's shared history again resolves. Every other refusal has its own fix and is never reset. */
 export const START_AGAIN_REFUSALS: readonly StoreRefusal[] = ['rolled-back', 'damaged', 'mark-unverified'];
@@ -206,8 +199,6 @@ export interface UnreadableFile { file: string; reason: string }
 // A grant to every device a project can hold is larger than other signed items (GRANT_MAX_BYTES, MN-04).
 const SIGNED_FILE_MAX_BYTES = Math.max(2 * MAX_PAYLOAD_BYTES, GRANT_MAX_BYTES);
 const PROJECT_FILE_MAX_BYTES = 64 * 1024;
-const PROJECT_FILE_NAME = path.posix.basename(REPLICA_PROJECT_FILE);
-
 /** This device as the store knows it: its writer id and the public key its own lines must verify against. */
 interface OwnDevice { writer: string; publicKey: string }
 
@@ -232,291 +223,6 @@ async function runCheck(check: ForeignCheck, entry: SealedEntry): Promise<{ kind
 
 function refusal(reason: StoreRefusal): StoreRefused {
   return { refused: reason, message: STORE_REFUSALS[reason] };
-}
-
-class Refusal extends Error {
-  public constructor(public readonly reason: StoreRefusal) {
-    super(STORE_REFUSALS[reason]);
-  }
-}
-
-function errorCode(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException | undefined)?.code;
-}
-
-/** One (stream, writer) file as read so far. */
-interface StreamFile {
-  readonly stream: string;
-  readonly writer: string;
-  readonly file: string;
-  /** Bytes up to and including the last newline read. */
-  offset: number;
-  /** The file's size when last read; above offset means a torn tail. */
-  size: number;
-  /** The distinct entries read, in file order. */
-  readonly hashes: Set<string>;
-  readonly bySeq: Map<number, string[]>;
-  maxSeq: number;
-  /** sha256 running over the entry hashes in file order (digestOf), so the mark's digest of the whole file costs one copy. */
-  readonly running: Hash;
-  /** Whole lines that are not an entry of this file. */
-  damaged: number;
-}
-
-function newStreamFile(stream: string, writer: string, file: string): StreamFile {
-  return { stream, writer, file, offset: 0, size: 0, hashes: new Set(), bySeq: new Map(), maxSeq: -1, running: createHash('sha256'), damaged: 0 };
-}
-
-/** A sealed entry read from a line or received from outside, or undefined when its shape or body is wrong. Checks shape and body hash, no signature. */
-export function parseSealed(value: unknown): SealedEntry | undefined {
-  if (!isRecord(value)) return undefined;
-  const keys = Object.keys(value);
-  if (keys.length !== 2 || !keys.includes('header') || !keys.includes('body')) return undefined;
-  const shape = parseHeaderShape(value.header);
-  if (!shape.ok) return undefined;
-  const body = value.body;
-  if (typeof body !== 'string' || body.length > MAX_BODY_CHARS || !BASE64URL.test(body)) return undefined;
-  const wire = Buffer.from(body, 'base64url');
-  if (wire.length !== shape.header.body.size || sha256Hex(wire) !== shape.header.body.hash) return undefined;
-  return { header: shape.header, body };
-}
-
-/** The decoded size of a blob's bytes, or undefined when they are not base64url. */
-function blobWire(blob: SealedBlob): Buffer | undefined {
-  if (typeof blob?.bytes !== 'string' || typeof blob.hash !== 'string' || !HASH_PATTERN.test(blob.hash) || !BASE64URL.test(blob.bytes)) return undefined;
-  return Buffer.from(blob.bytes, 'base64url');
-}
-
-/** The largest base64url text that can decode to BLOB_MAX_BYTES; longer text is refused before it is decoded. */
-const MAX_BLOB_CHARS = Math.ceil((BLOB_MAX_BYTES * 4) / 3);
-
-interface LineRead { lines: Array<string | undefined>; end: number; size: number }
-
-/** Whole lines from `from` on, read in chunks. A line over MAX_LINE_BYTES comes back undefined (damaged). Bytes after the last newline are left. */
-async function readWholeLines(handle: FileHandle, from: number): Promise<LineRead> {
-  const size = (await handle.stat()).size;
-  const lines: Array<string | undefined> = [];
-  let end = from;
-  let pending: Buffer[] = [];
-  let pendingLength = 0;
-  let overlong = false;
-  let position = from;
-  const chunk = Buffer.allocUnsafe(READ_CHUNK);
-  while (position < size) {
-    const { bytesRead } = await handle.read(chunk, 0, Math.min(READ_CHUNK, size - position), position);
-    if (bytesRead === 0) break;
-    let start = 0;
-    for (;;) {
-      const newline = chunk.indexOf(10, start);
-      if (newline === -1 || newline >= bytesRead) break;
-      const length = pendingLength + (newline - start);
-      if (overlong || length > MAX_LINE_BYTES) lines.push(undefined);
-      else lines.push(Buffer.concat([...pending, chunk.subarray(start, newline)]).toString('utf8'));
-      pending = [];
-      pendingLength = 0;
-      overlong = false;
-      end = position + newline + 1;
-      start = newline + 1;
-    }
-    if (start < bytesRead && !overlong) {
-      pendingLength += bytesRead - start;
-      if (pendingLength > MAX_LINE_BYTES) { overlong = true; pending = []; } else pending.push(Buffer.from(chunk.subarray(start, bytesRead)));
-    }
-    position += bytesRead;
-  }
-  return { lines, end, size };
-}
-
-/** Is any part from `root` down `parts` a symbolic link? Missing parts are fine (made later). Anything else that is not a folder is not a store. */
-async function checkPath(root: string, parts: readonly string[]): Promise<StoreRefusal | undefined> {
-  let current = root;
-  for (const part of parts) {
-    current = path.join(current, part);
-    try {
-      const info = await lstat(current);
-      if (info.isSymbolicLink()) return 'symlink';
-      if (!info.isDirectory()) return 'not-a-store';
-    } catch (error) {
-      if (errorCode(error) === 'ENOENT') return undefined;
-      return 'unreadable';
-    }
-  }
-  return undefined;
-}
-
-/** Makes `parts` under `base`, refusing a symbolic link on the way. */
-async function ensureDir(base: string, parts: readonly string[]): Promise<string> {
-  const problem = await checkPath(base, parts);
-  if (problem) throw new Refusal(problem);
-  const dir = path.join(base, ...parts);
-  await mkdir(dir, { recursive: true });
-  return dir;
-}
-
-/** Writes bytes to a temporary file beside `file`, syncs it, then renames it into place. */
-async function writeAtomic(file: string, bytes: Buffer | string): Promise<void> {
-  const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o644);
-  try {
-    await handle.writeFile(bytes);
-    await handle.sync();
-  } catch (error) {
-    await handle.close();
-    await rm(temporary, { force: true });
-    throw error;
-  }
-  await handle.close();
-  try {
-    await rename(temporary, file);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-}
-
-/** Writes every byte of `bytes` at `position`, however many writes that takes. */
-async function writeAllAt(handle: FileHandle, bytes: Buffer, position: number): Promise<void> {
-  let done = 0;
-  while (done < bytes.length) {
-    const { bytesWritten } = await handle.write(bytes, done, bytes.length - done, position + done);
-    if (bytesWritten <= 0) throw new Error('The disk accepted no bytes.');
-    done += bytesWritten;
-  }
-}
-
-function fileId(stream: string, writer: string): string {
-  return `${stream}/${writer}`;
-}
-
-/** A time as YYYYMMDD-HHMMSS in UTC, for the name of a folder set aside. */
-function stampOf(at: Date): string {
-  return at.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-}
-
-/** Writes whole lines to a new file and syncs it. */
-async function writeNewFile(file: string, bytes: Buffer | string): Promise<void> {
-  const handle = await open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o644);
-  try {
-    await handle.writeFile(bytes);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
-// ---- Start Again: the intent, the folders beside the store, the .planning/staff lock -----------------------------------------------------------
-
-/** What Start Again recorded before its first rename: folder names only (basenames in .planning/staff), the writer and counts. */
-interface StartAgainIntent {
-  v: 1;
-  writer: string;
-  /** The name the store folder is set aside under; null when there was no store folder to set aside. */
-  setAside: string | null;
-  temporary: string;
-  /** The folder carried from: the store folder itself, or a folder set aside or left beside it. */
-  source: string;
-  carried: number;
-  grants: number;
-  blobs: number;
-}
-
-const INTENT_KEYS = ['blobs', 'carried', 'grants', 'setAside', 'source', 'temporary', 'v', 'writer'];
-
-function isCount(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
-/** The intent read from untrusted text, or undefined when it is not exactly the shape this version writes (T-32-01). */
-function parseIntent(text: string): StartAgainIntent | undefined {
-  let value: unknown;
-  try { value = JSON.parse(text) as unknown; } catch { return undefined; }
-  if (!isRecord(value) || Object.keys(value).sort().join(',') !== INTENT_KEYS.join(',') || value.v !== 1) return undefined;
-  const { writer, setAside, temporary, source, carried, grants, blobs } = value;
-  if (typeof writer !== 'string' || !HASH_PATTERN.test(writer)) return undefined;
-  if (setAside !== null && (typeof setAside !== 'string' || !SET_ASIDE_NAME.test(setAside))) return undefined;
-  if (typeof temporary !== 'string' || !TEMPORARY_NAME.test(temporary)) return undefined;
-  if (typeof source !== 'string' || source === temporary || !(source === STORE_NAME || SET_ASIDE_NAME.test(source) || TEMPORARY_NAME.test(source))) return undefined;
-  if (source === STORE_NAME && setAside === null) return undefined;
-  if (!isCount(carried) || !isCount(grants) || !isCount(blobs)) return undefined;
-  return { v: 1, writer, setAside, temporary, source, carried, grants, blobs };
-}
-
-function staffDirOf(root: string): string {
-  return path.join(root, ...STAFF_PARTS);
-}
-
-function intentFileOf(root: string): string {
-  return path.join(root, ...START_AGAIN_INTENT_FILE.split('/'));
-}
-
-/** What is at a path: nothing, a real folder, or something else (a file, a link). Errors other than absence are thrown. */
-async function kindAt(file: string): Promise<'none' | 'folder' | 'other'> {
-  try {
-    const info = await lstat(file);
-    return info.isDirectory() ? 'folder' : 'other';
-  } catch (error) {
-    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return 'none';
-    throw error;
-  }
-}
-
-/** Is there an intent (or anything at its path)? A path that cannot be checked counts as there, so nothing goes on as if it were not. */
-async function intentPresent(root: string): Promise<boolean> {
-  try {
-    await lstat(intentFileOf(root));
-    return true;
-  } catch (error) {
-    return !(errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR');
-  }
-}
-
-/** Is `file` a plain file (no link)? */
-async function isPlainFile(file: string): Promise<boolean> {
-  try { return (await lstat(file)).isFile(); } catch { return false; }
-}
-
-interface Leftover { name: string; dir: string }
-
-/**
- * The folders set aside or left beside the store, real folders only (no link): replica.set-aside-* newest first by name (time, then number), then
- * replica.new-* newest first by change time. Read, never written.
- */
-async function leftoverFolders(root: string): Promise<Leftover[]> {
-  const staff = staffDirOf(root);
-  let names: string[];
-  try { names = await readdir(staff); } catch (error) {
-    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return [];
-    throw error;
-  }
-  const asides: Array<{ name: string; stamp: string; n: number }> = [];
-  const temporaries: Array<{ name: string; at: number }> = [];
-  for (const name of names) {
-    const aside = SET_ASIDE_NAME.exec(name);
-    if (!aside && !TEMPORARY_NAME.test(name)) continue;
-    let info;
-    try { info = await lstat(path.join(staff, name)); } catch { continue; }
-    if (!info.isDirectory()) continue;
-    if (aside) asides.push({ name, stamp: aside[1], n: aside[2] === undefined ? 1 : Number(aside[2]) });
-    else temporaries.push({ name, at: info.mtimeMs });
-  }
-  asides.sort((a, b) => (a.stamp === b.stamp ? b.n - a.n : a.stamp < b.stamp ? 1 : -1));
-  temporaries.sort((a, b) => b.at - a.at || (a.name < b.name ? 1 : -1));
-  return [...asides, ...temporaries].map(({ name }) => ({ name, dir: path.join(staff, name) }));
-}
-
-/**
- * Is the shared history of the project at `root` missing: no store folder, while a folder set aside or left beside it (replica.set-aside-* or
- * replica.new-*) holds a project.json? Such a store is never made again empty. A folder that cannot be listed counts as missing (fail closed).
- */
-export async function sharedHistoryMissing(root: string): Promise<boolean> {
-  const absolute = path.resolve(root);
-  try {
-    if ((await kindAt(path.join(absolute, ...STORE_PARTS))) !== 'none') return false;
-    for (const leftover of await leftoverFolders(absolute)) if (await isPlainFile(path.join(leftover.dir, PROJECT_FILE_NAME))) return true;
-    return false;
-  } catch {
-    return true;
-  }
 }
 
 /**
@@ -552,48 +258,18 @@ async function startAgainLocked<T>(root: string, work: () => Promise<T>, lenient
   return work();
 }
 
-/** Syncs every folder under `dir`, deepest first (not `dir` itself). */
-async function syncTree(dir: string): Promise<void> {
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const child = path.join(dir, entry.name);
-    await syncTree(child);
-    await syncFolder(child);
-  }
-}
-
-/** The first free set-aside name for `stamp` in .planning/staff: the stamp itself, then -2, -3. */
-async function freeAsideName(staff: string, stamp: string): Promise<string> {
-  let name = `${STORE_NAME}.set-aside-${stamp}`;
-  for (let attempt = 2; (await kindAt(path.join(staff, name))) !== 'none'; attempt += 1) name = `${STORE_NAME}.set-aside-${stamp}-${attempt}`;
-  return name;
-}
-
-/** A folder in .planning/staff as the project names it: relative, with forward slashes. */
-function staffRelative(name: string): string {
-  return `${STAFF_PARTS.join('/')}/${name}`;
-}
-
-async function writeIntent(root: string, intent: StartAgainIntent): Promise<void> {
-  await writeAtomic(intentFileOf(root), `${JSON.stringify(intent)}\n`);
-}
-
 export class ReplicaStore {
   private readonly files = new Map<string, StreamFile>();
   private readonly byHash = new Map<string, SealedEntry>();
   private readonly order: string[] = [];
-  /** Entries from outside the decode check refused, with its reason. Never released once held. */
   private readonly held = new Map<string, string>();
-  /** Entries from outside no check has passed yet, with why. */
   private readonly waiting = new Map<string, WaitReason>();
   /** How many held entries each (stream, writer) file has, and how many in all, counting stored entries only (indexHeld). */
   private readonly heldBy = new Map<string, number>();
   private heldCount = 0;
-  /** The files whose flooded line is held (D-14): none of their entries from outside is written again. */
   private readonly floodedFiles = new Map<string, { stream: string; writer: string }>();
   private damaged = 0;
   private waitingAdded = 0;
-  /** The mark last read or written, and its exact text, so a mark nobody changed is not compared again. */
   private mark: ReplicaMark | undefined;
   private markText: string | undefined;
 
@@ -945,13 +621,15 @@ export class ReplicaStore {
     }
   }
 
-  /** Identifies the loaded history, decode membership, and remembered roster head. */
-  public appendSnapshot(): string {
-    return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null,
-      [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort()]));
+  public async appendSnapshot(): Promise<string> {
+    const unreadable: UnreadableFile[] = [];
+    const cells = (await this.listDir(['grants'], unreadable)).filter((cell) => STREAM_ID_PATTERN.test(cell));
+    const grants = await Promise.all(cells.map(async (cell) => [cell, await this.listDir(['grants', cell], unreadable)]));
+    const evidence = await this.listDir(['access-evidence'], unreadable);
+    return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null, evidence,
+      [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort(), grants, unreadable.map(({ file }) => file).sort()]));
   }
-  /** Appends this device's signed entries in writer order, writing blobs first and skipping stored entries on retry. */
-  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string): Promise<AppendResult> {
+  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string, mayCommit?: () => boolean, stage?: unknown): Promise<AppendResult> {
     const entries = built.map((item) => {
       const entry = parseSealed(item.entry);
       if (!entry || entry.header.writer !== this.own.writer || !verifyHeader(entry.header, this.own.publicKey)) throw new Error('Nothing was written: appendOwn takes only entries this device built and signed.');
@@ -970,7 +648,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        if (expectedSnapshot !== undefined && this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
+        if ((expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) || mayCommit?.() === false) return refusal('snapshot-changed');
         const heads = new Map<string, { seq: number; hashes: readonly string[] }>();
         const fresh: SealedEntry[] = [];
         const planned = new Set<string>();
@@ -987,6 +665,8 @@ export class ReplicaStore {
           fresh.push(entry);
         }
         if (fresh.length === 0) return { ok: true, written: 0 };
+        if (stage !== undefined) await this.writeAccessStage(stage);
+        if (stage !== undefined && mayCommit?.() === false) return refusal('snapshot-changed');
         for (const [hash, wire] of blobs) await this.putBlobBytes(hash, wire);
         await this.appendLines(fresh);
         await this.writeOwnMark();
@@ -997,20 +677,8 @@ export class ReplicaStore {
       throw error;
     }
   }
-
-  /**
-   * Takes entries and blobs from outside the machine. Each input is checked for shape and body hash (signatures are the fold's job), except that an
-   * entry naming this device as its writer must carry this device's valid signature or it is dropped (CR-02); such an entry is this device's own and
-   * needs no decode check. Each other new entry then passes `check`. Every new entry is written; one the check refuses is held, and one the check
-   * cannot run on yet waits, both recorded in the signed mark with the lines, so neither reaches the fold. An entry already stored is neither written
-   * nor checked again. A check that throws counts as a refusal.
-   *
-   * Refused entries are bounded (D-14), in input order: a writer's refused entries in one stream are held up to MAX_REFUSED_PER_WRITER, the last of
-   * them as its flooded line; from then on that writer's entries in that stream are not written (counted in `flooded`) and not checked. The entry
-   * that fills the held list (MAX_MARK_LISTED) is its writer's flooded line too, and past that a refused entry is neither written nor recorded
-   * (counted in `flooded`) while every other entry still is. An entry that would wait while the waiting list is full is not written (`deferred`).
-   */
-  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck): Promise<IngestResult | StoreRefused> {
+  /** Check foreign entries and stage valid blobs. Bound waiting and held entries and defer flooded writers (D-14). */
+  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean, stage?: { root: string; evidence: readonly unknown[] }): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
     let duplicates = 0;
     const seen = new Set<string>();
@@ -1023,8 +691,7 @@ export class ReplicaStore {
       seen.add(hash);
       fresh.push({ entry, hash });
     }
-    // The check runs outside the locks. A writer already flooded, or that this batch would flood, is not checked again; the decision is made under
-    // the locks, where an entry left unchecked whose writer turns out not to be flooded is deferred, so it is checked when it comes again.
+    // Checks run outside the locks and skip flooded writers. The lock defers an unchecked entry whose writer turns out to be eligible.
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
     const refusedHere = new Map<string, number>();
     for (const { entry, hash } of fresh) {
@@ -1048,6 +715,9 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
+        if ((expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) || mayCommit?.() === false) return refusal('snapshot-changed');
+        if (stage !== undefined && (expectedSnapshot === undefined || !fresh.some(({ entry, hash }) => hash === stage.root && verdicts.get(hash)?.kind === 'pass' &&
+          !this.byHash.has(hash) && !this.floodedFiles.has(fileId(entry.header.stream, entry.header.writer))))) return refusal('snapshot-changed');
         const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];
@@ -1075,6 +745,8 @@ export class ReplicaStore {
           }
           toWrite.push(item);
         }
+        for (const artifact of stage?.evidence ?? []) await this.writeAccessStage(artifact);
+        if (stage !== undefined && mayCommit?.() === false) return refusal('snapshot-changed');
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
         if (toWrite.length > 0) {
@@ -1089,15 +761,7 @@ export class ReplicaStore {
     }
   }
 
-  /**
-   * Runs `check` again on every entry still waiting (never checked, or waiting for its key or blob). One that passes reaches entries(); one that is
-   * refused is held; one that still cannot be checked keeps waiting. The outcome is recorded in the signed mark. An entry another window decided in
-   * the meantime keeps that window's verdict.
-   *
-   * The bounds of ingestForeign hold here too (D-14): a refusal that reaches its writer's bound, or fills the held list, is held as the writer's
-   * flooded line; a refused entry the held list has no room for keeps waiting. A flooded writer's waiting entries stay out of the fold and are not
-   * checked again.
-   */
+  /** Retry waiting entries under the ingest limits (D-14), preserving outcomes already decided in another window. */
   public async recheck(check: ForeignCheck): Promise<RecheckResult | StoreRefused> {
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
     const refusedHere = new Map<string, number>();
@@ -1218,43 +882,285 @@ export class ReplicaStore {
       return [];
     }
   }
-
-  private async readSigned(relative: string, matches: (value: unknown) => boolean): Promise<{ value: unknown } | { reason: string }> {
-    const file = path.join(this.dir, relative);
-    try {
-      if ((await lstat(file)).isSymbolicLink()) return { reason: 'it is a symbolic link' };
-    } catch {
-      return { reason: 'it could not be opened' };
-    }
-    const read = await readWhole(file, SIGNED_FILE_MAX_BYTES);
-    if (read.kind === 'missing') return { reason: 'it is gone' };
-    if (read.kind === 'unreadable') return { reason: read.reason };
-    let value: unknown;
-    try { value = JSON.parse(read.text) as unknown; } catch { return { reason: 'it is not readable JSON' }; }
-    try {
-      if (!matches(value)) return { reason: 'its content does not match its name' };
-    } catch {
-      return { reason: 'its content does not match its name' };
-    }
-    return { value };
+  public async putAccessEvidence(evidence: unknown, expectedSnapshot?: string, mayCommit?: () => boolean): Promise<{ ok: true; hash: string } | StoreRefused> {
+    const bytes = canonicalBytes(evidence);
+    if (bytes.length > (isManagedPacketStage(evidence) ? MANAGED_PACKET_STAGE_MAX_BYTES : BLOB_MAX_BYTES)) return refusal('blob-too-large');
+    const hash = sha256Hex(bytes);
+    return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash, expectedSnapshot === undefined ? undefined : async () => {
+      await this.verifyAppendSnapshot(expectedSnapshot);
+      if (mayCommit?.() === false) throw new Refusal('snapshot-changed');
+      await this.writeAccessStage(evidence);
+    });
+  }
+  /** The synthetic check never selects or persists the private candidate. */
+  private async checkFrontierPreparation(request: FrontierPreparationRequest): Promise<boolean> {
+    return await this.frontierPreparation(request, 'check') === 'ready';
   }
 
-  private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string): Promise<{ ok: true; hash: string } | StoreRefused> {
-    try {
-      return await this.locked(async () => {
-        const dir = await ensureDir(this.dir, parts);
-        const file = path.join(dir, name);
-        try {
-          const info = await lstat(file);
-          if (info.isSymbolicLink()) throw new Refusal('symlink');
-          if (info.isFile()) return { ok: true as const, hash };
-        } catch (error) {
-          if (error instanceof Refusal) throw error;
-          if (errorCode(error) !== 'ENOENT') throw new Refusal('unreadable');
+  /** Fixture-only preparation and prospective durability. Only an inert verdict leaves the checked scope. */
+  private async frontierPreparation(request: FrontierPreparationRequest, mode: 'check' | 'capture' | 'reopen'): Promise<FrontierPreparationVerdict> {
+    const signer = await this.deps.signer().catch(() => undefined);
+    if (signer === undefined || signer.publicKey !== this.own.publicKey || !STREAM_ID_PATTERN.test(request.stream)) return 'refused';
+    const result = await withFrontierPolicySource(request.policyStorage, this.deps.secrets, this.deps.now ?? (() => new Date()),
+      (capture) => this.locked(async (): Promise<FrontierPreparationVerdict> => {
+        await this.verifyAppendSnapshot(request.snapshot);
+        const { grants } = await this.grants();
+        const { pin, keys } = request;
+        const policy = await capture();
+        if (policy === undefined) return 'refused';
+        const { source } = policy;
+        const now = new Date(source.instant);
+        const roster = foldRoster({ anchor: pin, entries: this.rosterEntries(), grants: grants.map(({ signed }) => signed), keys,
+          blobs: () => undefined, now });
+        const predecessor = roster.positions.at(-1);
+        if (predecessor === undefined || predecessor !== this.mark?.rosterHead || !this.byHash.has(pin.genesisHash) ||
+          roster.pending.length !== 0 || roster.requiredFrom.has(CELL_ACCESS_FEATURE)) return 'refused';
+        const epoch = epochAt(roster.cells, pin.project, roster.positions.length - 1);
+        const key = epoch === undefined ? undefined : keys(pin.project, epoch);
+        const head = this.head(pin.project, this.own.writer);
+        if (epoch === undefined || key === undefined || head === undefined ||
+          this.files.get(fileId(pin.project, this.own.writer))?.bySeq.get(head.seq)?.length !== 1) return 'refused';
+        const ctx = { roster: rosterView(roster), keys, blobs: () => undefined, now };
+        const previous = verifyEntry(this.byHash.get(head.hash), ctx);
+        if (previous.status !== 'verified' || previous.entry.keep !== undefined) return 'refused';
+        const lamport = previous.entry.body.lamport + 1;
+        const matches = (entry: unknown, requirement: string, instant: number) => {
+          const checked = verifyEntry(entry, { ...ctx, now: new Date(instant) });
+          if (checked.status !== 'verified' || checked.entry.keep !== undefined || checked.entry.hash !== requirement) return false;
+          const { writer, stream, seq, prev, epoch: signedEpoch } = checked.entry.header;
+          const { body, data } = checked.entry;
+          return writer === this.own.writer && stream === pin.project && seq === head.seq + 1 && prev === head.hash && signedEpoch === epoch &&
+            body.kind === 'roster.require' && body.actor.kind === 'person' && body.at === new Date(instant).toISOString() &&
+            body.roster === predecessor && body.lamport === lamport && body.deps.length === 0 && isRecord(data) &&
+            data.rosterPrev === predecessor && Array.isArray(data.features) && data.features.length === 1 && data.features[0] === CELL_ACCESS_FEATURE;
+        };
+        const current = async () => {
+          if (!await policy.recheck()) return false;
+          await this.verifyAppendSnapshot(request.snapshot);
+          return this.mark?.rosterHead === predecessor;
+        };
+        const scope = this.frontierCaptureScope(request, predecessor);
+        const slot = FRONTIER_POLICY_SLOT + scope;
+        const reference = mode === 'check' ? undefined : await this.deps.secrets.get(slot);
+        if (reference !== undefined) {
+          const saved = await this.readFrontierPolicyCapture(scope, reference);
+          if (saved === undefined) return 'refused';
+          const historical = await reopenFrontierPolicy(saved.policy, source, request.policyStorage, this.deps.secrets);
+          if (historical === undefined || !matches(saved.entry, saved.requirement, historical.instant)) return 'refused';
+          const custody = frontierCustody(roster, request.stream, this.own.writer, keys, historical);
+          if (custody === undefined || !canonicalBytes(custody).equals(canonicalBytes(saved.custody))) return 'refused';
+          return await current() ? 'ready' : 'refused';
         }
-        await writeAtomic(file, bytes);
-        return { ok: true as const, hash };
-      });
+        if (mode === 'reopen') return 'refused';
+        const custody = frontierCustody(roster, request.stream, this.own.writer, keys, source);
+        if (custody === undefined) return 'refused';
+
+        const at = now.toISOString();
+        const built = buildEntry({ signer, key, stream: pin.project, epoch, seq: head.seq + 1, prev: head.hash,
+          body: { deps: [], roster: predecessor, lamport, at, actor: { kind: 'person' },
+            kind: 'roster.require', data: { rosterPrev: predecessor, features: [CELL_ACCESS_FEATURE] } } });
+        if (!matches(built.entry, built.hash, source.instant) || !await current()) return 'refused';
+        if (mode === 'check') return 'ready';
+
+        const bytes = canonicalBytes({ v: 1, scope, requirement: built.hash, entry: built.entry, custody, salt: randomBytes(32).toString('hex'),
+          policy: { instant: source.instant, personalEnvelope: source.personalEnvelope, personalHistoryHead: source.personalHistoryHead,
+            personalSigner: source.personalSigner, personalSignerStatus: source.personalSignerStatus,
+            organizationEnvelope: source.organizationEnvelope, organizationPin: source.organizationPin } });
+        const artifact = frontierFileHandle(scope, bytes);
+        const directory = await ensureDir(this.dir, [FRONTIER_POLICY_DIR]);
+        const file = `${artifact}.json`;
+        await this.writeSigned([FRONTIER_POLICY_DIR], file, bytes, 0o600);
+        await syncFolder(directory);
+        await syncFolder(this.dir);
+        const durable = await readFrontierFile(path.join(directory, file));
+        if (durable === undefined || !durable.equals(bytes) || !await current() || await this.deps.secrets.get(slot) !== undefined) return 'refused';
+        const expected = canonicalBytes({ v: 1, scope, requirement: built.hash, artifact }).toString('utf8');
+        try {
+          await this.deps.secrets.store(slot, expected);
+        } catch {
+          // An error from store does not prove that the protected write failed. Confirm its result without re-signing.
+        }
+        const back = await this.deps.secrets.get(slot);
+        if (back === undefined) return 'unavailable';
+        if (back !== expected || await this.readFrontierPolicyCapture(scope, back) === undefined || !await current()) return 'refused';
+        return 'ready';
+      }));
+    return result ?? 'unavailable';
+  }
+
+  private frontierCaptureScope(request: FrontierPreparationRequest, predecessor: string): string {
+    return sha256Hex(canonicalBytes(['private-frontier-policy-capture/1', this.dir, request.pin.project, request.pin.genesisHash,
+      request.stream, this.own.writer, predecessor, request.snapshot]));
+  }
+
+  /** Test fixture only. The Boolean conveys no archive or write authority. */
+  private checkFrontierV2Fixture(file: unknown, request: FrontierV2FixtureRequest): Promise<boolean> {
+    return this.frontierV2Fixture(file, request);
+  }
+
+  /** Test fixture only. Checks immutable private bytes without making them selectable or returning their name. */
+  private async stageFrontierV2Fixture(input: Buffer, request: FrontierV2FixtureRequest): Promise<boolean> {
+    if (input.length > MAX_ACCEPTED_FRONTIER_BYTES) return false;
+    const bytes = Buffer.from(input);
+    const text = bytes.toString('utf8');
+    if (!Buffer.from(text, 'utf8').equals(bytes)) return false;
+    try {
+      return await this.frontierV2Fixture(JSON.parse(text) as unknown, request, bytes);
+    } catch {
+      return false;
+    }
+  }
+
+  private async frontierV2Fixture(file: unknown, request: FrontierV2FixtureRequest, stagedBytes?: Buffer): Promise<boolean> {
+    if (!STREAM_ID_PATTERN.test(request.stream) || !HASH_PATTERN.test(request.snapshot)) return false;
+    const result = await withFrontierPolicySource(request.policyStorage, this.deps.secrets, this.deps.now ?? (() => new Date()),
+      (capture) => this.locked(async () => {
+        const policy = await capture();
+        if (policy === undefined) return false;
+        const verifyBinding = async () => {
+          await this.verifyAppendSnapshot(request.expectedSnapshot);
+          const { pin, keys, stream } = request;
+          const { grants } = await this.grants();
+          const roster = foldRoster({ anchor: pin, entries: this.rosterEntries(), grants: grants.map(({ signed }) => signed),
+            keys, blobs: () => undefined, now: new Date(policy.source.instant) });
+          const head = roster.positions.at(-1);
+          const fence = roster.requiredFrom.get(CELL_ACCESS_FEATURE);
+          if (head === undefined || head !== this.mark?.rosterHead || fence === undefined || roster.pending.length !== 0) return undefined;
+          const predecessor = roster.positions[fence - 1];
+          const requirement = roster.positions[fence];
+          const access = roster.accessRevision;
+          const reader = deviceAt(roster.members, this.own.writer, roster.positions.length - 1);
+          if (predecessor === undefined || requirement === undefined || access === undefined || reader?.publicKey !== this.own.publicKey ||
+            ![pin.genesisHash, predecessor, requirement, access.entry, head].every((hash) =>
+              this.byHash.get(hash)?.header.stream === pin.project && !this.held.has(hash) && !this.waiting.has(hash))) return undefined;
+
+          const scope = this.frontierCaptureScope(request, predecessor);
+          const slot = FRONTIER_POLICY_SLOT + scope;
+          const reference = await this.deps.secrets.get(slot);
+          if (reference === undefined) return undefined;
+          const saved = await this.readFrontierPolicyCapture(scope, reference);
+          if (saved === undefined || saved.requirement !== requirement ||
+            !canonicalBytes(saved.entry).equals(canonicalBytes(this.byHash.get(requirement)))) return undefined;
+          const historical = await reopenFrontierPolicy(saved.policy, policy.source, request.policyStorage, this.deps.secrets);
+          if (historical === undefined) return undefined;
+          const verified = verifyEntry(saved.entry, { roster: rosterView(roster), keys, blobs: () => undefined, now: new Date(historical.instant) });
+          if (verified.status !== 'verified' || verified.entry.keep !== undefined || verified.entry.hash !== requirement ||
+            verified.entry.header.writer !== this.own.writer || verified.entry.body.kind !== 'roster.require' ||
+            verified.entry.body.actor.kind !== 'person' || verified.entry.body.roster !== predecessor ||
+            verified.entry.body.at !== new Date(historical.instant).toISOString() ||
+            !isRecord(verified.entry.data) || verified.entry.data.rosterPrev !== predecessor ||
+            !Array.isArray(verified.entry.data.features) || verified.entry.data.features.length !== 1 ||
+            verified.entry.data.features[0] !== CELL_ACCESS_FEATURE) return undefined;
+          const custody = frontierCustody(roster, stream, this.own.writer, keys, historical, fence - 1);
+          if (custody === undefined || !canonicalBytes(custody).equals(canonicalBytes(saved.custody))) return undefined;
+          if (!checksFrontierV2Fixture(file, { roster, accessEntry: access.entry, pin: { project: pin.project, genesis: pin.genesisHash },
+            opening: request.opening, historicalKey: keys, expectedStream: stream,
+            capture: { digest: frontierV2CaptureCommitment(saved.salt, saved.hash), writer: this.own.writer, before: predecessor, requirement } })) return undefined;
+
+          if (await this.deps.secrets.get(slot) !== reference) return undefined;
+          await this.verifyAppendSnapshot(request.expectedSnapshot);
+          if (this.mark?.rosterHead !== head || !await policy.recheck()) return undefined;
+
+          const expectedHead = policy.source.personalHistoryHead;
+          const history = await readKeyHistory(identityDir(request.policyStorage), this.deps.secrets);
+          if (!history.ok || history.head?.hash !== expectedHead.hash || history.head.seq !== expectedHead.seq) return undefined;
+          // The file-only store's signer is captured at open. Read the protected device again while ordered locks are held.
+          const device = await loadDeviceIdentity(this.deps.secrets);
+          if (device === undefined || device.publicKey !== reader.publicKey || writerIdOf(device.publicKey) !== this.own.writer ||
+            history.lookup(device).state !== 'active') return undefined;
+
+          return sha256Hex(canonicalBytes(['private-frontier-stage/2', this.dir, pin.project, pin.genesisHash, stream,
+            this.own.writer, requirement, access.entry, access.root, request.expectedSnapshot, sha256Hex(Buffer.from(reference))]));
+        };
+        const binding = await verifyBinding();
+        if (binding === undefined) return false;
+        if (stagedBytes === undefined) return true;
+        if (!await this.writeFrontierV2Stage(binding, stagedBytes)) return false;
+        return await verifyBinding() === binding;
+      }, 'existing'));
+    return result === true;
+  }
+
+  private async writeFrontierV2Stage(binding: string, bytes: Buffer): Promise<boolean> {
+    if (await checkPath(this.root, [...this.parts, FRONTIER_STAGE_DIR])) return false;
+    const dir = path.join(this.dir, FRONTIER_STAGE_DIR);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const info = await lstat(dir);
+    const uid = process.getuid?.();
+    if (!info.isDirectory() || (uid !== undefined && (info.uid !== uid || (info.mode & 0o077) !== 0))) return false;
+
+    const file = path.join(dir, `${frontierFileHandle(binding, bytes)}.json`);
+    const existing = await readFrontierFile(file);
+    if (existing === undefined) await writeAtomic(file, bytes, 0o600, undefined, 'exclusive');
+    else if (!existing.equals(bytes)) return false;
+    await syncFolder(dir);
+    await syncFolder(this.dir);
+    return await privateFileProblem(file) === undefined && (await readFrontierFile(file))?.equals(bytes) === true;
+  }
+
+  private async readFrontierPolicyCapture(scope: string, reference: string) {
+    let pointer: unknown;
+    try { pointer = JSON.parse(reference) as unknown; } catch { return undefined; }
+    if (!isRecord(pointer) || Object.keys(pointer).length !== 4 || pointer.v !== 1 || pointer.scope !== scope ||
+      typeof pointer.artifact !== 'string' || !HASH_PATTERN.test(pointer.artifact) ||
+      typeof pointer.requirement !== 'string' || !HASH_PATTERN.test(pointer.requirement) ||
+      canonicalBytes(pointer).toString('utf8') !== reference ||
+      await checkPath(this.root, [...this.parts, FRONTIER_POLICY_DIR])) return undefined;
+    const bytes = await readFrontierFile(path.join(this.dir, FRONTIER_POLICY_DIR, `${pointer.artifact}.json`));
+    if (bytes === undefined || frontierFileHandle(scope, bytes) !== pointer.artifact) return undefined;
+    const value: unknown = JSON.parse(bytes.toString('utf8'));
+    if (!isRecord(value) || Object.keys(value).length !== 7 || value.v !== 1 || value.scope !== scope ||
+      value.requirement !== pointer.requirement || typeof value.salt !== 'string' || !HASH_PATTERN.test(value.salt) ||
+      !canonicalBytes(value).equals(bytes)) return undefined;
+    return { entry: value.entry, requirement: pointer.requirement, policy: value.policy, custody: value.custody,
+      salt: value.salt, hash: sha256Hex(bytes) };
+  }
+
+  public managedHandoffs(project: string, writer: string, now: () => Date) {
+    return openManagedHandoffs(this.dir, project, writer, now, {
+      locked: (work) => this.locked(work), folder: () => ensureDir(this.dir, ['managed-handoffs']), writeAtomic
+    }, (expected) => this.verifyAppendSnapshot(expected));
+  }
+  private async verifyAppendSnapshot(expected: string): Promise<void> {
+    await this.catchUp();
+    await this.syncMark();
+    if (await this.appendSnapshot() !== expected) throw new Refusal('snapshot-changed');
+  }
+  public async accessEvidence(): Promise<Array<{ hash: string; value: unknown }>> {
+    return readHashedArtifacts(path.join(this.dir, 'access-evidence'), await this.listDir(['access-evidence'], []), MANAGED_PACKET_STAGE_MAX_BYTES);
+  }
+  private readSigned(relative: string, matches: (value: unknown) => boolean, maxBytes = SIGNED_FILE_MAX_BYTES): Promise<{ value: unknown } | { reason: string }> {
+    return readStoredArtifact(path.join(this.dir, relative), maxBytes, matches);
+  }
+  private async writeAccessStage(stage: unknown): Promise<void> {
+    const bytes = canonicalBytes(stage);
+    const limit = isManagedPacketStage(stage) ? MANAGED_PACKET_STAGE_MAX_BYTES : BLOB_MAX_BYTES;
+    if (bytes.length > limit) throw new Refusal('blob-too-large');
+    const hash = sha256Hex(bytes);
+    const file = `${hash}.json`;
+    await this.writeSigned(['access-evidence'], file, bytes, 0o600);
+    const stored = await this.readSigned(`access-evidence/${file}`, (value) => sha256Hex(canonicalBytes(value)) === hash, limit);
+    if (!('value' in stored)) throw new Refusal('unreadable');
+    await syncFolder(path.join(this.dir, 'access-evidence'));
+    await syncFolder(this.dir);
+  }
+  private async writeSigned(parts: readonly string[], name: string, bytes: Buffer, mode?: number): Promise<void> {
+    const file = path.join(await ensureDir(this.dir, parts), name);
+    try {
+      const info = await lstat(file);
+      if (info.isSymbolicLink()) throw new Refusal('symlink');
+      if (info.isFile()) return;
+    } catch (error) {
+      if (error instanceof Refusal) throw error;
+      if (errorCode(error) !== 'ENOENT') throw new Refusal('unreadable');
+    }
+    await writeAtomic(file, bytes, mode);
+  }
+
+  private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string, write = () => this.writeSigned(parts, name, bytes)): Promise<{ ok: true; hash: string } | StoreRefused> {
+    try {
+      await this.locked(write);
+      return { ok: true, hash };
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);
       throw error;
@@ -1263,28 +1169,27 @@ export class ReplicaStore {
 
   // ---- inside the lock ----------------------------------------------------------------------------------------------------------------------
 
-  /**
-   * Runs `work` under the .planning/staff lock (so no Start Again runs meanwhile; an unfinished one is finished first), then the in-process register
-   * lock (same-process order) and, inside it, the cross-window file lock (other windows and processes), after checking that no symbolic link is on the
-   * way to the store. A store folder that is gone while this device's mark remains, or while a folder beside it holds project.json, is refused
-   * rolled-back and not made again (32-CONTEXT D-03). None of the locks is re-entrant: `work` never calls another locked method.
-   */
-  private locked<T>(work: () => Promise<T>): Promise<T> {
+  /** Take non-reentrant Start Again, register and cross-window locks in order and require the live store (32 D-03). */
+  private locked<T>(work: () => Promise<T>, mode: 'write' | 'existing' = 'write'): Promise<T> {
     return withStartAgainLock(this.root, async () => {
-      if (await intentPresent(this.root)) await ReplicaStore.rollForward(this.root, this.deps, this.own);
+      if (await intentPresent(this.root)) {
+        if (mode === 'existing') throw new Refusal('start-again-unfinished');
+        await ReplicaStore.rollForward(this.root, this.deps, this.own);
+      }
       return withRegisterLock(this.dir, async () => {
         const problem = await checkPath(this.root, this.parts);
         if (problem) throw new Refusal(problem);
-        if ((await kindAt(this.dir)) === 'none' && (await this.historyGone())) throw new Refusal('rolled-back');
-        await mkdir(this.dir, { recursive: true });
+        const missing = (await kindAt(this.dir)) === 'none';
+        if (missing && (mode === 'existing' || await this.historyGone())) throw new Refusal('rolled-back');
+        if (mode === 'write') await mkdir(this.dir, { recursive: true });
         return withFileLock(this.dir, REPLICA_LOCK_FILE, async () => {
           const again = await checkPath(this.root, this.parts);
           if (again) throw new Refusal(again);
-          await this.ensureIgnore();
+          if (mode === 'write') await this.ensureIgnore();
           return work();
         });
       });
-    }, true);
+    }, mode === 'write');
   }
 
   /** Was there a shared history here that is gone: this device's mark for this store remains, or a folder beside it holds project.json? */

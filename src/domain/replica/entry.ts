@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto';
 import { canonicalBytes, fingerprintOf, isStrictBase64url } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
+import { payloadSigningInput, signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
 import type { AsyncPayloadSigner, PayloadSigner, SignRefused } from '../team/signedPayload';
 import { isRecord, isSafeIntegerInRange } from '../team/validate';
 import { IV_BYTES, KEY_BYTES, TAG_BYTES, openRaw, sealRaw } from '../state/keys';
@@ -33,7 +33,8 @@ export const SEALED_OVERHEAD = IV_BYTES + TAG_BYTES;
 const HEADER_KEYS = ['v', 'stream', 'writer', 'seq', 'prev', 'epoch', 'body', 'sig'] as const;
 
 export interface Dep { writer: string; seq: number; hash: string }
-export type Actor = { kind: 'person' } | { kind: 'agent'; member: string; run: string } | { kind: 'hub'; watch: string };
+// A person actor may name the position the act is made as (Phase 33.1 D-10): inside the sealed body, accepted only behind positions@1.
+export type Actor = { kind: 'person'; position?: string } | { kind: 'agent'; member: string; run: string } | { kind: 'hub'; watch: string };
 
 export interface EntryHeader {
   v: 2;
@@ -199,6 +200,35 @@ export async function buildEntryAsync(input: Omit<BuildEntryInput, 'signer'> & {
   return 'refused' in header ? header : builtOf(header, sealed);
 }
 
+export interface PreparedEntrySigning {
+  signingBytes(): Buffer;
+  finish(signature: string): BuiltEntry | undefined;
+  matches(candidate: BuiltEntry): boolean;
+}
+
+/** Seal once. A checked signer sees the bytes of exactly this header and cannot change the entry or its blobs. */
+export function prepareEntrySigning(input: Omit<BuildEntryInput, 'signer'> & { signer: Pick<PayloadSigner, 'publicKey' | 'fingerprint'> }): PreparedEntrySigning {
+  const { fingerprint, publicKey } = input.signer;
+  const sealed = sealEntry(input);
+  const expected = payloadSigningInput({ v: 1, purpose: 'staff-replica', signer: { fingerprint, publicKey }, signedAt: REPLICA_SIGNED_AT, payload: sealed.unsigned });
+  let signed: Buffer | undefined;
+  return Object.freeze({
+    signingBytes: () => Buffer.from(expected),
+    finish(signature: string) {
+      const header = { ...sealed.unsigned, sig: signature };
+      if (!verifyHeader(header, publicKey)) return undefined;
+      const built = builtOf(header, sealed);
+      const bytes = canonicalBytes(built);
+      if (signed !== undefined && !signed.equals(bytes)) return undefined;
+      signed = bytes;
+      return JSON.parse(bytes.toString('utf8')) as BuiltEntry;
+    },
+    matches(candidate: BuiltEntry): boolean {
+      try { return signed?.equals(canonicalBytes(candidate)) === true; } catch { return false; }
+    }
+  });
+}
+
 interface SealedParts { unsigned: UnsignedHeader; body: string; blobs: SealedBlob[] }
 
 function builtOf(header: EntryHeader, sealed: SealedParts): BuiltEntry {
@@ -261,7 +291,7 @@ export function isActorShape(value: unknown): value is Actor {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
   const only = (...allowed: string[]): boolean => keys.length === allowed.length && allowed.every((key) => keys.includes(key));
-  if (value.kind === 'person') return only('kind');
+  if (value.kind === 'person') return only('kind') || (only('kind', 'position') && typeof value.position === 'string' && ACTOR_NAME.test(value.position));
   if (value.kind === 'agent') return only('kind', 'member', 'run') && typeof value.member === 'string' && ACTOR_NAME.test(value.member) && typeof value.run === 'string' && RUN_ID.test(value.run);
   if (value.kind === 'hub') return only('kind', 'watch') && typeof value.watch === 'string' && ACTOR_NAME.test(value.watch);
   return false;

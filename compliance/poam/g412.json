@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sa-04",
+    "sa-09"
+  ],
+  "gap": "G412",
+  "id": "g412",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "NEAR AI answers how model licences pass through to your organization (N8)"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Models used through NEAR AI carry their publishers' licences (for example NVIDIA's Nemotron licence and its dataset terms). Whether and how those terms pass through to your organization is question N8. Record the answer in the approvals and the fit register. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-26.",
+  "title": "How NEAR AI passes model licences through is not answered"
+}

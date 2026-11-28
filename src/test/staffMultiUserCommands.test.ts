@@ -461,7 +461,7 @@ test('every multi-user command with the setting off shows one message and writes
   assert.deepEqual(state(first), before);
 });
 
-test('remove a member: the confirmation and the result say they keep what they received and receive nothing new', async () => {
+test('remove a member: the confirmation explains pending exposure and the result describes verified keys', async () => {
   const { lead: first, member } = await pair('remove');
   stub.quickPickAnswers.push('B. Example');
   stub.messageAnswers.push(undefined);
@@ -470,6 +470,8 @@ test('remove a member: the confirmation and the result say they keep what they r
   const dialog = lastModal();
   says(dialog.message, ['Remove B. Example', 'from the project?'], 'the remove question');
   assert.ok((dialog.detail ?? '').includes(REKEY_KEEP_TEXT));
+  assert.ok((dialog.detail ?? '').includes('Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.'));
+  assert.doesNotMatch(dialog.detail ?? '', /nothing new|anything new|Every part .*moves/);
   hasNotices(dialog.detail ?? '', 'the remove confirmation');
   assert.deepEqual(state(first), before, 'dismissed: nothing written');
   const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items.map((item) => item.label);
@@ -482,6 +484,8 @@ test('remove a member: the confirmation and the result say they keep what they r
   assert.equal(result.level, 'info', result.message);
   says(result.message, ['B. Example', 'removed from the project'], 'the remove result');
   assert.ok(result.message.includes(REKEY_KEEP_TEXT));
+  assert.ok(result.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(result.message, /anything new/);
   hasNotices(result.message, 'the remove result');
   const roster = await rosterOf(first);
   assert.equal(memberAt(roster.members, member, headOf(roster)), undefined);
@@ -505,6 +509,8 @@ test('remove: cancelling an open invitation writes invite.void; removing one dev
   await run(C.remove);
   says(lastModal().message, ['Remove this device', 'B. Example'], 'the device question');
   assert.ok((lastModal().detail ?? '').includes(REKEY_KEEP_TEXT));
+  assert.ok((lastModal().detail ?? '').includes('Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.'));
+  assert.doesNotMatch(lastModal().detail ?? '', /nothing new|anything new|every part .*moves/i);
   assert.equal(lastNotification().level, 'info', lastNotification().message);
   says(lastNotification().message, ['device of B. Example', 'removed from the project'], 'the device result');
   roster = await rosterOf(first);
@@ -616,9 +622,12 @@ test('MJ-03: Remove offers to finish a removal left unfinished, first in its lis
   await run(C.remove);
   says(lastModal().message, ['Finish', 'left unfinished?'], 'the finish question');
   assert.ok((lastModal().detail ?? '').includes(REKEY_KEEP_TEXT));
+  assert.ok((lastModal().detail ?? '').includes('Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.'));
+  assert.doesNotMatch(lastModal().detail ?? '', /nothing new|anything new|every part .*moves/i);
   const result = lastNotification();
   assert.equal(result.level, 'info', result.message);
   says(result.message, ['left unfinished is now finished', 'One part of the project', 'moved to a new key'], 'the finish result');
+  assert.ok(result.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
   hasNotices(result.message, 'the finish result');
   stub.quickPickAnswers.push(undefined);
   await run(C.remove);
@@ -752,6 +761,8 @@ test('change a member\'s clearance: the confirmation carries the rekey sentence 
   await run(C.updateMember);
   says(lastModal().message, ['Change B. Example'], 'the change question');
   assert.ok((lastModal().detail ?? '').includes(REKEY_KEEP_TEXT));
+  assert.ok((lastModal().detail ?? '').includes('Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.'));
+  assert.doesNotMatch(lastModal().detail ?? '', /nothing new|anything new|every part .*moves/i);
   hasNotices(lastModal().detail ?? '', 'the change confirmation');
   assert.equal(lastNotification().level, 'info', lastNotification().message);
   says(lastNotification().message, ['B. Example', 'was changed'], 'the change result');
@@ -1369,4 +1380,35 @@ test('preview: a project made shared in Phase 32 gets neither the way forward no
   const copied = lastNotification();
   assert.equal(copied.level, 'info', copied.message);
   assert.equal(copied.message.includes(multi.COPY_SHARE_AGAIN_TEXT), false, copied.message);
+});
+
+// ---- 33-27 Task 3: one live engine in the Sterling image (D-64) ----------------------------------------------------------------------------------
+
+test('D-64: in the Sterling image (STERLING_WORKBENCH=1) no preview command is registered, and calling one finds nothing to run', async () => {
+  const at = await staffProject('sterling-image');
+  const before = state(at);
+  const previous = process.env.STERLING_WORKBENCH;
+  process.env.STERLING_WORKBENCH = '1';
+  try {
+    use(at);
+    for (const id of Object.values(C)) assert.equal(stub.commands.get(id), undefined, `${id} is not registered in the image`);
+    // The other staff commands are still the extension's own; only the multi-user preview stands back.
+    assert.ok(stub.commands.size > 0, 'the extension still registers its other staff commands');
+    assert.equal(multi.inSterlingWorkbench(), true);
+  } finally {
+    if (previous === undefined) delete process.env.STERLING_WORKBENCH;
+    else process.env.STERLING_WORKBENCH = previous;
+    use(at);
+  }
+  assert.deepEqual(state(at), before, 'nothing was written');
+});
+
+test('D-64: outside the image every preview command is registered as before, and only the exact value 1 means the image', () => {
+  assert.equal(multi.inSterlingWorkbench({}), false);
+  assert.equal(multi.inSterlingWorkbench({ STERLING_WORKBENCH: '0' }), false);
+  assert.equal(multi.inSterlingWorkbench({ STERLING_WORKBENCH: 'true' }), false);
+  assert.equal(multi.inSterlingWorkbench({ STERLING_WORKBENCH: '1' }), true);
+  const at = install('outside-image');
+  use(at);
+  for (const id of Object.values(C)) assert.ok(stub.commands.get(id), `${id} is registered outside the image`);
 });

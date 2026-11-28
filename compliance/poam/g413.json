@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "cm-07",
+    "sc-07",
+    "sc-39"
+  ],
+  "gap": "G413",
+  "id": "g413",
+  "milestones": [
+    {
+      "phase": "72",
+      "title": "Phase 72's execution backend runs the research workspace's tools in a separate machine"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The research workspace keeps adversary models away from project data and tools through the extension's own checks. The cyber harness's scan tools run on this computer with today's approvals and scope checks, not in a separate machine. Phase 72's execution backend and the v0.8.0 enclave add machine isolation. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-17.",
+  "title": "The research workspace is isolated by the extension, not by the operating system"
+}

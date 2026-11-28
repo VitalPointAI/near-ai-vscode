@@ -35,7 +35,8 @@ export function readSettings(): NearAiSettings {
   return {
     baseUrl: configuration.get<string>('baseUrl', defaults.baseUrl),
     authMode: 'apiKey',
-    defaultModel: resolveSetting(inspectedSetting(configuration, 'defaultModel') as InspectedSetting<string> | undefined, projectString('defaultModel'), configuration.get<string>('defaultModel', defaults.defaultModel)),
+    // 74.1 D-18 (coordinator's option a): empty means the default, so no caller ever gets an empty model.
+    defaultModel: resolveSetting(inspectedSetting(configuration, 'defaultModel') as InspectedSetting<string> | undefined, projectString('defaultModel'), configuration.get<string>('defaultModel', defaults.defaultModel))?.trim() || defaults.defaultModel,
     actionPolicy: { mode: POLICY_MODES.includes(policy) ? policy : defaults.actionPolicy.mode, emergencyStop: isEmergencyStopped() },
     privacyMode: configuration.get<string>('privacyMode') === 'tee-only' ? 'tee-only' : 'standard',
     dailySpendLimitUsd: Number.isFinite(limit) && limit > 0 ? limit : 0
@@ -69,7 +70,7 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
     const value = resolveSetting(inspectedSetting(configuration, key), projectString(key), configuration.get<unknown>(key, fallback));
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   };
-  return { deep: pick('agent.deepModel', AGENT_DEFAULTS.tiers.deep), standard: pick('agent.standardModel', AGENT_DEFAULTS.tiers.standard), fast: pick('agent.fastModel', AGENT_DEFAULTS.tiers.fast) };
+  return { deep: pick('agent.deepModel', AGENT_DEFAULTS.reportFallback.deep), standard: pick('agent.standardModel', AGENT_DEFAULTS.reportFallback.standard), fast: pick('agent.fastModel', AGENT_DEFAULTS.reportFallback.fast) };
 }
 
 /** The auto mode's safety model (nearAi.agent.safetyModel); empty means the fast tier's model. */
@@ -131,5 +132,22 @@ export function readAgentModels(): { visionModel: string; transcriptionModel: st
     const value = resolveSetting(inspectedSetting(configuration, key), projectString(key), configuration.get<unknown>(key, fallback));
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   };
-  return { visionModel: pick('agent.visionModel', 'z-ai/glm-5.3-flash'), transcriptionModel: pick('agent.transcriptionModel', 'openai/whisper-large-v3'), imageModel: pick('agent.imageModel', 'black-forest-labs/FLUX.2-klein-4B') };
+  return { visionModel: pick('agent.visionModel', AGENT_DEFAULTS.reportFallback.vision), transcriptionModel: pick('agent.transcriptionModel', AGENT_DEFAULTS.reportFallback.transcription), imageModel: pick('agent.imageModel', AGENT_DEFAULTS.reportFallback.image) };
+}
+
+/** The setting key of each job a person can set (74.1 D-18). */
+const JOB_SETTING_KEYS = Object.freeze({
+  standard: 'agent.standardModel', deep: 'agent.deepModel', fast: 'agent.fastModel', safety: 'agent.safetyModel', backup: 'agent.backupModel',
+  vision: 'agent.visionModel', transcription: 'agent.transcriptionModel', image: 'agent.imageModel'
+} as const);
+export type SettableJob = keyof typeof JOB_SETTING_KEYS;
+
+/** A person's own model for each job they can set, at any scope, or "" when unset: what resolveJobModel calls "set by you". No fallback here. */
+export function readJobSettings(): Readonly<Record<SettableJob, string>> {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const own = (key: string): string => {
+    const value = resolveSetting(inspectedSetting(configuration, key), projectString(key), configuration.get<unknown>(key, ''));
+    return typeof value === 'string' ? value.trim() : '';
+  };
+  return Object.freeze(Object.fromEntries(Object.entries(JOB_SETTING_KEYS).map(([job, key]) => [job, own(key)])) as Record<SettableJob, string>);
 }

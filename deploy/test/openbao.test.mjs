@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { listReleases, loadSite, renderRelease } from '../bundle/lib/render.mjs';
-import { POLICIES, planApply } from '../openbao/apply.mjs';
+import { POLICIES, applyPlan, planApply } from '../openbao/apply.mjs';
 import { countPasswordlessKeys, enrolPerson, rebindPerson } from '../openbao/enrol.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -202,7 +202,8 @@ test('the read reaches no other key: not another person\'s, not the KEK, not a l
 });
 
 test('every key-move path needs two approvals from key-custodians', () => {
-  const blocks = pathBlocks(policy('key-move'));
+  // 45.1: the deny blocks for the exchange keys are checked in their own test below.
+  const blocks = pathBlocks(policy('key-move')).filter((block) => block.body.join(' ') !== 'capabilities = ["deny"]');
   assert.deepEqual(blocks.map((block) => block.path).sort(), ['transit/backup/*', 'transit/export/*', 'transit/keys/+/config', 'transit/keys/+/import',
     'transit/keys/+/import_version', 'transit/restore/*'].sort());
   for (const block of blocks) {
@@ -215,6 +216,7 @@ test('every key-move path needs two approvals from key-custodians', () => {
 
 /** The one policy block allowed to reach another person's KV path (D-84): list and delete of guests' secrets, in the officer's step-up role only. */
 const PER_PERSON_EXCEPTION = Object.freeze({ file: 'guest-secrets-removal.hcl', path: 'kv/metadata/guests/*' });
+const SITE_KEY_PATHS = Object.freeze(['transit/decrypt/exchange-receive-@SITE@', 'transit/sign/release-@SITE@']);
 
 test('every per-person path is templated on the entity and no policy names a literal entity id', () => {
   const exceptions = [];
@@ -227,6 +229,8 @@ test('every per-person path is templated on the entity and no policy names a lit
     const text = readFileSync(path.join(POLICY_DIR, file), 'utf8');
     assert.doesNotMatch(text, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, `${file} names a literal id`);
     for (const block of pathBlocks(text)) {
+      // 45.1: the two site keys for exchange with allies are not per-person keys; their own tests below hold them to named officers after a step-up.
+      if (SITE_KEY_PATHS.includes(block.path)) continue;
       const allowed = notPerPerson[file]?.[block.path];
       if (allowed !== undefined) {
         assert.deepEqual(capabilitiesOf(block), allowed, `${file}: ${block.path} grants exactly ${allowed.join(', ')}`);
@@ -699,4 +703,83 @@ test('CronJob guest-retention-check reads, writes only the notice, alerts throug
   assert.match(job, /"alertname":"GuestSecretsAwaitRemoval"/);
   assert.doesNotMatch(job, /echo[^\n]*(\$key|\$entity|BAO_TOKEN)/, 'it prints the count only');
   assert.ok(docs.some((doc) => /^kind: ServiceAccount$/m.test(doc) && /name: guest-retention-check$/m.test(doc)));
+});
+
+// Phase 45.1 (D-03, D-07): your organization's receiving key and release key for exchange with allies, each usable only by a named officer after a step-up.
+const EXCHANGE_SITE = { ...loadSite(SITE_FILE), siteName: 'hq', exchangeOfficers: ['kc-officer-a', 'kc-officer-b'], releaseAuthorities: ['kc-release-a'] };
+
+test('45.1: planApply creates the non-exportable keys exchange-receive-<site> (RSA-3072) and release-<site> (ed25519), and their two policies', () => {
+  const operations = planApply(EXCHANGE_SITE);
+  assert.deepEqual(operationAt(operations, 'transit/keys/exchange-receive-hq').body, { type: 'rsa-3072', exportable: false, allow_plaintext_backup: false });
+  assert.deepEqual(operationAt(operations, 'transit/keys/release-hq').body, { type: 'ed25519', exportable: false, allow_plaintext_backup: false });
+  const receive = pathBlocks(operationAt(operations, 'sys/policies/acl/exchange-receive').body.policy);
+  assert.deepEqual(receive.map((block) => [block.path, block.body.join(' ')]), [['transit/decrypt/exchange-receive-hq', 'capabilities = ["update"]']]);
+  const release = pathBlocks(operationAt(operations, 'sys/policies/acl/exchange-release').body.policy);
+  assert.deepEqual(release.map((block) => [block.path, block.body.join(' ')]), [['transit/sign/release-hq', 'capabilities = ["update"]']]);
+  // A site name that cannot be part of a key name stops the plan.
+  assert.throws(() => planApply({ ...EXCHANGE_SITE, siteName: 'HQ site' }), /siteName/);
+});
+
+test('45.1: only the step-up roles of the named exchange officers and release authorities hold the exchange policies', () => {
+  const operations = planApply(EXCHANGE_SITE);
+  const role = (name) => operationAt(operations, `auth/jwt/role/${name}`)?.body;
+  const receive = role('sterling-exchange-receive-stepup');
+  const release = role('sterling-exchange-release-stepup');
+  assert.deepEqual(receive.bound_claims, { acr: EXCHANGE_SITE.stepUpAcr, sub: ['kc-officer-a', 'kc-officer-b'] });
+  assert.deepEqual(release.bound_claims, { acr: EXCHANGE_SITE.stepUpAcr, sub: ['kc-release-a'] });
+  assert.deepEqual(receive.token_policies, ['sterling-workbench', 'sterling-workbench-sign', 'exchange-receive']);
+  assert.deepEqual(release.token_policies, ['sterling-workbench', 'sterling-workbench-sign', 'exchange-release']);
+  for (const body of [receive, release]) {
+    assert.equal(body.bound_claims_type, 'string', 'no glob: a subject is matched exactly');
+    assert.equal(body.token_explicit_max_ttl, EXCHANGE_SITE.stepUpMaxAgeSeconds);
+    assert.deepEqual(body.bound_audiences, ['sterling-sessions']);
+    assert.equal(body.token_no_default_policy, true);
+  }
+  for (const name of ['sterling-workbench', 'sterling-workbench-stepup']) {
+    assert.ok(!role(name).token_policies.some((policy) => policy.startsWith('exchange-')), `${name} holds no exchange policy`);
+  }
+  // With nobody named, the keys exist and no role can use them.
+  const empty = planApply({ ...EXCHANGE_SITE, exchangeOfficers: [], releaseAuthorities: [] });
+  assert.equal(operationAt(empty, 'auth/jwt/role/sterling-exchange-receive-stepup'), undefined);
+  assert.equal(operationAt(empty, 'auth/jwt/role/sterling-exchange-release-stepup'), undefined);
+  assert.ok(operationAt(empty, 'transit/keys/exchange-receive-hq') && operationAt(empty, 'transit/keys/release-hq'));
+  for (const bad of [['*'], ['kc officer'], [''], 'kc-officer-a']) assert.throws(() => planApply({ ...EXCHANGE_SITE, exchangeOfficers: bad }), /exchangeOfficers/);
+});
+
+test('45.1: nothing can export, back up, reconfigure, replace or sign with the exchange keys, not even a key move', () => {
+  const keyMove = pathBlocks(operationAt(planApply(EXCHANGE_SITE), 'sys/policies/acl/key-move').body.policy);
+  for (const name of ['exchange-receive-hq', 'release-hq']) {
+    for (const where of [`transit/keys/${name}/config`, `transit/keys/${name}/import`, `transit/keys/${name}/import_version`, `transit/export/+/${name}`,
+      `transit/export/+/${name}/*`, `transit/backup/${name}`, `transit/restore/${name}`]) {
+      const block = keyMove.find((entry) => entry.path === where);
+      assert.ok(block, `key-move denies ${where}`);
+      assert.deepEqual(block.body, ['capabilities = ["deny"]']);
+    }
+  }
+  for (const file of readdirSync(POLICY_DIR).filter((name) => name.endsWith('.hcl') && !['exchange-receive.hcl', 'exchange-release.hcl', 'key-move.hcl'].includes(name))) {
+    assert.doesNotMatch(readFileSync(path.join(POLICY_DIR, file), 'utf8'), /exchange-receive|transit\/[a-z_]+\/release-|transit\/(sign|decrypt|export)\/\*/, `${file} reaches no exchange key`);
+  }
+  // Each exchange policy holds its one path and nothing else (the first 45.1 test reads them).
+  assert.equal(pathBlocks(policy('exchange-receive')).length, 1);
+  assert.equal(pathBlocks(policy('exchange-release')).length, 1);
+});
+
+test('45.1: a second apply changes nothing, and an exchange key that exists in another form stops the apply', async () => {
+  const store = new Map();
+  const request = async (method, apiPath, body) => {
+    if (method === 'GET') {
+      if (apiPath === 'sys/mounts') return { status: 200, data: { data: { 'kv/': { type: 'kv' }, 'transit/': { type: 'transit' }, 'pki_int/': { type: 'pki' } } } };
+      if (apiPath === 'sys/auth') return { status: 200, data: { data: { 'jwt/': { type: 'jwt' }, 'kubernetes/': { type: 'kubernetes' } } } };
+      return store.has(apiPath) ? { status: 200, data: { data: store.get(apiPath) } } : { status: 404, data: null };
+    }
+    store.set(apiPath, body);
+    return { status: 204, data: null };
+  };
+  const operations = planApply(EXCHANGE_SITE, { jwtPubkey: 'test-key' }).filter((operation) => !operation.write.startsWith('identity/'));
+  const first = await applyPlan(request, operations);
+  assert.ok(first.some((entry) => entry.what.includes('exchange-receive') && entry.result === 'written'));
+  const second = await applyPlan(request, operations);
+  assert.deepEqual(second.filter((entry) => entry.result !== 'unchanged'), []);
+  store.set('transit/keys/exchange-receive-hq', { type: 'rsa-3072', exportable: true, allow_plaintext_backup: false });
+  await assert.rejects(applyPlan(request, operations), /exchange-receive-hq/);
 });

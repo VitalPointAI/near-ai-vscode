@@ -1,6 +1,7 @@
 import type { AgentMessage, UsageMetadata } from '../domain/provider/messages';
 import type { ModelEndpoint } from '../domain/provider/endpoint';
 import { withSpendTag } from '../services/spendLedger';
+import { withCheckingJob } from '../gate/sessionMark';
 
 // The model half of the `auto` approval mode: a quick verdict from a private model on a shell
 // command the deterministic rules could not decide. It fails closed: an error, a timeout, a rate
@@ -133,7 +134,8 @@ export class SafetyModelCheck implements CommandSafetyCheck {
     try {
       this.requests += 1;
       const reply = await Promise.race([
-        withSpendTag({ kind: 'safety' }, () => this.options.client.completeOnce(model, messages, { maxTokens: this.options.maxTokens ?? SAFETY_MAX_TOKENS, signal: abort.signal, noThinking: true })),
+        // 74.1 D-19: the classifier's request is a checking job, so the gate checks it as one (and, under enforce, needs your organization's evaluation).
+        withCheckingJob(() => withSpendTag({ kind: 'safety' }, () => this.options.client.completeOnce(model, messages, { maxTokens: this.options.maxTokens ?? SAFETY_MAX_TOKENS, signal: abort.signal, noThinking: true }))),
         new Promise<never>((_resolve, reject) => abort.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
       ]);
       this.options.onUsage?.(reply.usage);

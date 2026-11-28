@@ -40,4 +40,6 @@ export interface StaffStatusServer {
 
 export const STAFF_STATUS_TEXT = {
   notOpen: 'This shared project is not open in this session.',
+  /** The status bar's tooltip for a state this build does not know (a newer engine). */
+  unknownState: 'Sterling cannot show this sync state. Ask your administrator.',
 } as const;

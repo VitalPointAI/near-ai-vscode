@@ -26,7 +26,6 @@
       "staff/replica/keyring.ts -> services/auth",
       "staff/replica/keyring.ts -> services/stateMirrorLock",
       "staff/replica/marks.ts -> services/auth",
-      "staff/replica/replicaProject.ts -> services/auth",
       "staff/replica/store.ts -> services/auth",
       "staff/replica/store.ts -> services/stateMirrorLock",
       "staff/sim/simSession.ts -> services/staffScenarioLoader",
@@ -97,7 +96,7 @@
   "fileSizes": {
     "agent/commandSafety.ts": 2900,
     "agent/gateAdapter.ts": 1400,
-    "agent/teamTemplateHistory.ts": 2335,
+    "agent/teamTemplateHistory.ts": 2884,
     "services/agentSession.ts": 2708,
     "services/chat.ts": 1517,
     "services/nearAiClient.ts": 1860,

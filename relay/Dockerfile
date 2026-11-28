@@ -21,7 +21,7 @@ RUN mkdir /app-skel \
  && chmod 0555 /app-skel \
  && mkdir -m 0700 /state-skel
 
-FROM gcr.io/distroless/nodejs26-debian13:nonroot@sha256:1d736cf8b5716c07a245301f92717143215d248fd55771ee1936ef4b3302e531
+FROM gcr.io/distroless/nodejs26-debian13:nonroot@sha256:ffa8a7545403036c94ec76674b5dbac2d425af2d679147cdf3e30180071487b7
 # Root-owned and read-only: the relay cannot rewrite its own code. Only the guard (bin.mjs) and the app (app.mjs) go in.
 COPY --from=build --chown=0:0 /app-skel /app/
 COPY --from=build --chown=65532:65532 --chmod=0700 /state-skel /var/lib/near-ai-relay

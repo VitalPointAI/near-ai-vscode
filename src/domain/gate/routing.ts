@@ -14,12 +14,16 @@ import { classMayHold, endpointCeilingAllows, findEndpoint, needsEndpointAuthori
 import type { EndpointClass, EndpointRegion, PolicyEndpoint } from './endpoints';
 import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from './labels';
-import { USE_TIERS, passportCovers, resolvePassport } from './models';
 import type { ModelsSection, UseTier } from './models';
+import { PASSPORT_GAP_TEXT, SHIPPED_REPORT_MODELS, alternativesFor, authorizationRecord, passportStep, whoToAsk } from './passportStep';
+import type { CandidateModel, PassportGapId, PassportStepResult } from './passportStep';
+import type { ObservedFacts } from './passportState';
 import { residencyAllows } from './residency';
 import type { ResidencySection } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
 import type { Parsed } from './shape';
+import { raiseUseTier, useTierFor } from './useTier';
+import type { UseInput } from './useTier';
 import { parseHostPattern } from './vocabulary';
 import type { HostPattern } from './vocabulary';
 
@@ -402,6 +406,20 @@ export interface RouteFacts {
    * nothing when it is absent (D-54).
    */
   readonly use?: UseTier;
+  /**
+   * The local facts the use was worked out from (74.1 D-13), the session's mark included. The passport step raises `use` once more by the policy's own
+   * `tierByLevel` and `tierByProject`, which only the decision has and which can only raise it.
+   */
+  readonly useInput?: UseInput;
+  /** The SHA-256 of the weights the place reports for this model, when it reports one (an attested or measured hash; 74.1 D-11 `artifact-mismatch`). */
+  readonly observedArtifact?: string;
+  /** The client's catalogue (74.1 D-14): a passport refusal names the ones decideRoute would allow instead. Absent: nothing is said about other models. */
+  readonly candidates?: readonly CandidateModel[];
+  /**
+   * What was observed about the model behind the passport with this hash (74.1 D-15): the place first seen for it, the place now, and the triggers the
+   * trigger log has fired for it. Read by the passport step only for that same passport. Absent: nothing observed, and the passport decides alone.
+   */
+  readonly observed?: ObservedFacts & { readonly passportHash: string };
   /** Team Mode's `allowedModels` (D-37): when given, a request for a model whose id is not listed is refused, with or without a policy. */
   readonly allowedModels?: readonly string[];
 }
@@ -428,7 +446,9 @@ export const ROUTE_RULES = Object.freeze([
   'route.authorization-missing',
   'route.accredited-device',
   'route.residency',
-  'route.clearance'
+  'route.clearance',
+  // Phase 74.1 (D-11): the passport step refuses under `models.mode: enforce`; its reason is the gap's own sentence (passportStep.ts).
+  'route.passport'
 ] as const);
 export type RouteRule = (typeof ROUTE_RULES)[number];
 export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.attested-cloud' | 'route.local-only' | 'route.default-session'>;
@@ -436,9 +456,10 @@ export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.at
 /**
  * Events about a session's routing that are recorded but decide nothing themselves: the answer check after a response at an attested-cloud level, and a
  * person's Check again that clears a failed one (plan 25), and classified work running on a computer not recorded as accredited (coherence review S2,
- * recorded once per chat, refusing nothing yet). Named now so a record written by a later version is never one this version cannot name (D-49).
+ * recorded once per chat, refusing nothing yet), and a re-evaluation trigger that ended a model's approval (74.1 D-15, recorded once per passport hash and
+ * trigger). Named now so a record written by a later version is never one this version cannot name (D-49).
  */
-export const ROUTE_EVENT_IDS = Object.freeze(['route.attestation-checked', 'route.attestation-cleared', 'route.not-accredited'] as const);
+export const ROUTE_EVENT_IDS = Object.freeze(['route.attestation-checked', 'route.attestation-cleared', 'route.not-accredited', 'route.passport-triggered'] as const);
 export type RouteEventId = (typeof ROUTE_EVENT_IDS)[number];
 
 /** One plain sentence per refusing rule: nothing was sent, and what to do about it. */
@@ -459,25 +480,25 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.authorization-missing': 'Nothing was sent. Content at this level may go to this AI service only with a signed approval from a person your organization names, and no approval covers this service. Ask your organization\'s security contact for one, use a model on this computer, or use SovAI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.accredited-device': 'Nothing was sent. Your organization\'s rules allow content at this level only on a computer recorded as accredited, and this computer is not. Use an accredited computer, ask your organization\'s security contact about this one, or use SovAI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.residency': 'Nothing was sent. Your organization\'s rules keep this content in the regions they name, and this AI service is not shown to run there. Choose a service in one of those regions or a model on this computer, or use SovAI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use SovAI: Lower This Chat\'s Label if what this chat read allows it.'
+  'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use SovAI: Lower This Chat\'s Label if what this chat read allows it.',
+  // The sentence of a passport refusal with no gap (a check that could not be made); a refusal with a gap says the gap's own sentence (PASSPORT_GAP_TEXT).
+  'route.passport': 'Nothing was sent. Your organization has not approved this model for this use. Choose a model your organization approved for this work, or ask your organization\'s security contact to review this one.'
 });
 
 /**
  * Route rules Phase 41 names before anything can return them (D-10, D-49, D-51). A rule enters ROUTE_RULES only when decideRoute can reach it, because
  * gateRouting checks that every ROUTE_RULES id is reached; so the new ids wait here, with their sentences, and every record id list already knows them.
- * Plan 41-10 moves each into ROUTE_RULES and ROUTE_REFUSALS, sentence unchanged, as decideRoute starts to return it. `route.passport` stays here until
- * Phase 74.1 (report only, recorded as wouldRefuse), and `route.export-control` until Phase 45, which gives the export-control step its behaviour (D-63).
- * No id is on this list and another route list at once.
+ * Plan 41-10 moves each into ROUTE_RULES and ROUTE_REFUSALS, sentence unchanged, as decideRoute starts to return it; Phase 74.1 moved `route.passport`
+ * (D-11). `route.export-control` stays here until Phase 45, which gives the export-control step its behaviour (D-63). No id is on this list and another
+ * route list at once.
  */
 export const ROUTE_RULES_NAMED_AHEAD = Object.freeze([
-  'route.passport',
   'route.export-control'
 ] as const);
 export type NamedAheadRouteRule = (typeof ROUTE_RULES_NAMED_AHEAD)[number];
 
 /** One plain sentence per named-ahead rule, in ROUTE_REFUSALS' form: nothing was sent, why, and what to do. */
 export const ROUTE_REFUSALS_NAMED_AHEAD: Readonly<Record<NamedAheadRouteRule, string>> = Object.freeze({
-  'route.passport': 'Nothing was sent. Your organization has not approved this model for this use. Choose a model your organization approved for this work, or ask your organization\'s security contact to review this one.',
   'route.export-control': 'Nothing was sent. This content is marked Controlled goods (Canada), ITAR or US export-controlled (EAR), and your organization has not approved this AI service, or you sending it there, for that marking. Use a model on this computer, or ask your organization\'s export-control contact.'
 });
 
@@ -507,7 +528,7 @@ export interface RoutePolicy {
   readonly authorizations: readonly VerifiedAuthorization[];
   /** Absent: no residency rule (D-33). */
   readonly residency?: ResidencySection;
-  /** Absent: the passport step does nothing (D-42). */
+  /** Absent: report mode with the shipped passports (provenance O1, 74.1 D-12). */
   readonly models?: ModelsSection;
   readonly scales: ScaleTable;
   readonly mappings: readonly ScaleMapping[];
@@ -521,8 +542,10 @@ export interface RoutePolicy {
   readonly requireAccreditedDevice: boolean;
   /** This device's id, the subject an accredited-device authorization names. */
   readonly deviceId?: string;
-  /** The project of the request. Absent in this phase, so an authorization scoped to projects covers nothing (D-54). */
+  /** The project of the request (74.1 D-13); absent outside a folder, where an authorization scoped to projects covers nothing (D-54). */
   readonly project?: string;
+  /** Your organization's security contact, named in every passport refusal (74.1 D-11); absent: the generic words. */
+  readonly contact?: { readonly name: string; readonly how: string };
   /** Epoch milliseconds, for authorizations and passports. */
   readonly now: number;
 }
@@ -552,11 +575,24 @@ export type AllowingRecord =
     readonly selfSigned: boolean;
     /** The `scale/level` key the authorization was checked for; absent when it was checked for the whole mark (a residency exception). */
     readonly label?: string;
+    /** A t1-risk exception's evidence text, recorded where your organization's evaluation would be (74.1 D-16); today it holds the mission benefit, not an assessment reference (G537). */
+    readonly evidence?: string;
   }
   | { readonly kind: 'model-approval'; readonly passport: string; readonly maxTier: UseTier; readonly expiresAt: string };
 
 /** The rules report mode records instead of refusing (D-34, D-42). */
 export type ReportedRouteRule = 'route.accredited-device' | 'route.passport';
+
+/** What a route.passport refusal tells the chat (74.1 D-22): the use, the label keys and place in words, the ways forward the gate found. */
+export interface PassportRefusal {
+  readonly model: string;
+  readonly use: UseTier;
+  readonly labels: readonly string[];
+  readonly place?: string;
+  readonly alternatives?: readonly string[];
+  readonly whoToAsk: string;
+  readonly organization: boolean;
+}
 
 export interface RouteDecision {
   readonly allowed: boolean;
@@ -575,6 +611,14 @@ export interface RouteDecision {
   readonly notAccredited?: Label;
   /** The TLS pins the send must hold the connection to (an org-plain place carrying a level that needs a pin, D-26). */
   readonly pinTo?: readonly string[];
+  /** With a policy: the use the passport step checked (74.1 D-13, D-23). */
+  readonly useTier?: UseTier;
+  /** On a route.passport refusal (74.1 D-22): the facts the chat's empty-state card reads. Undefined alternatives: not worked out. */
+  readonly passportRefusal?: PassportRefusal;
+  /** With a policy: the passport that decided the request, by id and hash, when the model has one (D-23). */
+  readonly passport?: { readonly id: string; readonly hash: string };
+  /** Why the passport did not cover the request: the refusal's reason under enforce, the report's under report (D-11, D-12). */
+  readonly passportGap?: PassportGapId;
 }
 
 /** The decision for a request whose route could not be worked out: deny, under the fixed rule route.deny, with ROUTE_CHECK_FAILED_TEXT. */
@@ -663,7 +707,7 @@ export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts
   if (!decision.allowed) return decision;
   // Step 0 (D-37): Team Mode's allowed models, with or without a policy. An unknown model is on no list.
   if (facts.allowedModels !== undefined && (facts.model === undefined || !facts.allowedModels.includes(facts.model.id))) return refuse(decision.tier, 'route.model-not-allowed');
-  return policy === undefined ? decision : decidePolicySteps(decision, mark, routing, facts, defaultLabel, policy);
+  return policy === undefined ? decision : decidePolicySteps(decision, mark, routing, facts, defaultLabel, policy, floor);
 }
 
 /** The safety patch's decision: the tier from the table and the floor, the local and attested checks, and the this-computer and floor sentences. */
@@ -734,11 +778,11 @@ export function endpointOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'mo
 /**
  * The policy steps, run only on a request the safety patch's checks allowed, in the order of D-36: the place (route.endpoint-unknown), its ceiling
  * (route.endpoint-ceiling), https to a listed place and a pin or binding (route.endpoint-pin), an authorization (route.authorization-missing), an accredited
- * device (route.accredited-device, reported unless your organization turns refusal on), residency (route.residency), the passport (route.passport, reported
- * only) and clearance (route.clearance). The first refusing step decides; a step that only reports never hides a later refusal, and never refuses even
- * when its check throws (WR-05). The private floor (S4) is part of the safety patch's checks, so its refusal comes first and keeps its words.
+ * device (route.accredited-device, reported unless your organization turns refusal on), residency (route.residency), the passport (route.passport, refused
+ * under `models.mode: enforce` and reported otherwise, 74.1 D-11, D-12) and clearance (route.clearance). The first refusing step decides; a step that only
+ * reports never hides a later refusal, and never refuses even when its check throws (WR-05); under enforce a passport check that throws refuses. The private floor (S4) is part of the safety patch's checks, so its refusal comes first and keeps its words.
  */
-function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, policy: RoutePolicy): RouteDecision {
+function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, policy: RoutePolicy, floor: RoutingTier | undefined): RouteDecision {
   const labels: readonly Label[] = mark.length === 0 ? (defaultLabel === undefined ? [] : [defaultLabel]) : mark;
   const strictest = strictestLabelOf(mark, routing) ?? defaultLabel;
   const allowedBy: AllowingRecord[] = strictest === undefined ? [] : [Object.freeze({ kind: 'routing' as const, label: labelKey(strictest) })];
@@ -799,18 +843,45 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
     if (!residency.ok) return refuse(decision.tier, 'route.residency');
     if (residency.exception !== undefined) addRecord(allowedBy, authorizationRecord(residency.exception));
   }
-  // Step 7 (D-42): the model's passport, report only whatever the section's mode says, until 74.1. No place counts as a closed API, the widest class. A
-  // passport check that throws is reported as would refuse and never refuses (WR-05).
-  if (policy.models !== undefined) {
-    let passport: PassportStep;
-    try {
-      passport = passportStep(policy.models, policy, facts, labels, endpoint);
-    } catch {
-      passport = { covers: false, records: [] };
-    }
-    if (!passport.covers) wouldRefuse.add('route.passport');
-    for (const record of passport.records) addRecord(allowedBy, record);
+  // Step 7 (D-42, 74.1 D-11 to D-16): the model's passport for the request's use, the use raised by the policy's own tables; its state (revoked, a fired
+  // trigger) and your organization's evaluation decided in passportStep. No place counts as a closed API, the widest class. A policy with no models
+  // section runs report mode with the shipped passports. A gap refuses under enforce and is reported under report; a check that throws refuses under
+  // enforce (fail closed) and is reported under report (WR-05).
+  const models = policy.models ?? SHIPPED_REPORT_MODELS;
+  let enforce = false;
+  let passport: PassportStepResult;
+  let checked: UseTier | undefined;
+  try {
+    enforce = models.mode === 'enforce';
+    checked = facts.useInput === undefined ? facts.use ?? 'T1' : raiseUseTier(facts.use ?? 'T1', useTierFor(facts.useInput, models));
+    passport = passportStep(models, {
+      modelId: facts.model?.id ?? '', use: checked, labelKeys: keysOf(labels), authorizations: policy.authorizations, now: policy.now,
+      whoToAsk: whoToAsk(policy.contact, policy.organization),
+      ...(endpoint === undefined ? {} : { place: { class: endpoint.class, region: endpoint.region, ...(endpoint.provider === undefined ? {} : { provider: endpoint.provider }) } }),
+      ...(policy.project === undefined ? {} : { project: policy.project }),
+      ...(facts.observedArtifact === undefined ? {} : { observedArtifact: facts.observedArtifact }),
+      ...(facts.observed === undefined ? {} : { observed: facts.observed })
+    });
+  } catch {
+    passport = { covers: false, records: [] };
   }
+  const passportFacts = passportFactsOf(passport, checked);
+  if (!passport.covers) {
+    if (enforce) {
+      // D-14: the models that would go instead, each decided the same way; they decide nothing and are never sent to.
+      const candidates = facts.candidates;
+      const alternatives = candidates === undefined ? undefined : alternativesFor(candidates, facts.model?.id ?? '', (model) => decideRoute(mark, routing, { ...facts, model, candidates: undefined, observed: firedOnly(facts.observed) }, defaultLabel, floor, policy), models.order);
+      const details = passport.details === undefined ? undefined : { ...passport.details, ...(alternatives === undefined ? {} : { alternatives }) };
+      const reason = passport.gap === undefined || details === undefined ? ROUTE_REFUSALS['route.passport'] : PASSPORT_GAP_TEXT[passport.gap](details);
+      const refusal: PassportRefusal = {
+        model: facts.model?.id ?? '', use: checked ?? 'T1', labels: keysOf(labels).filter((key): key is string => key !== undefined), whoToAsk: whoToAsk(policy.contact, policy.organization),
+        organization: policy.organization, ...(details?.place === undefined ? {} : { place: details.place }), ...(alternatives === undefined ? {} : { alternatives })
+      };
+      return { allowed: false, tier: decision.tier, rule: 'route.passport', reason, ...(endpoint === undefined ? {} : { endpoint }), ...passportFacts, passportRefusal: Object.freeze(refusal) };
+    }
+    wouldRefuse.add('route.passport');
+  }
+  for (const record of passport.records) addRecord(allowedBy, record);
   // Step 8 (D-35, D-53): clearance, only with a roster clearance. The personal clearance alone already decided every read that raised the mark.
   if (policy.rosterClearances !== undefined) {
     const effective = effectiveClearances(policy.clearances, policy.rosterClearances, policy.scales, policy.mappings);
@@ -822,7 +893,21 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
   if (wouldRefuse.size > 0) out.wouldRefuse = Object.freeze([...wouldRefuse].sort());
   if (notAccredited !== undefined) out.notAccredited = notAccredited;
   if (pinTo !== undefined) out.pinTo = pinTo;
-  return out;
+  return { ...out, ...passportFacts };
+}
+
+/** What another model's decision may read of this request's observations: only the triggers fired for a passport, never this model's place (74.1 D-15). */
+function firedOnly(observed: RouteFacts['observed']): RouteFacts['observed'] {
+  return observed === undefined ? undefined : { passportHash: observed.passportHash, ...(observed.fired === undefined ? {} : { fired: observed.fired }) };
+}
+
+/** The passport facts a decision carries for its record (74.1 D-23): the use checked, the passport by id and hash, and the gap. */
+function passportFactsOf(step: PassportStepResult, use: UseTier | undefined): Pick<RouteDecision, 'useTier' | 'passport' | 'passportGap'> {
+  return {
+    ...(use === undefined ? {} : { useTier: use }),
+    ...(step.resolved === undefined ? {} : { passport: Object.freeze({ id: step.resolved.passport.id, hash: step.resolved.hash }) }),
+    ...(step.gap === undefined ? {} : { passportGap: step.gap })
+  };
 }
 
 /** What the accredited-device step found: the records of the authorizations that cover this device, and the first label none covers. */
@@ -852,30 +937,6 @@ function accreditedDevice(policy: RoutePolicy, labels: readonly Label[], use: st
     missing ??= label;
   }
   return missing === undefined ? { records } : { records, missing };
-}
-
-/** What the passport step found: whether the model's passport covers the request, and the records that allowed it when it does. */
-interface PassportStep {
-  readonly covers: boolean;
-  readonly records: readonly AllowingRecord[];
-}
-
-/** The passport check of step 7 (D-42). It decides nothing: the caller only reports a passport that does not cover the request. */
-function passportStep(models: ModelsSection, policy: RoutePolicy, facts: RouteFacts, labels: readonly Label[], endpoint: RouteEndpoint | undefined): PassportStep {
-  const modelId = facts.model?.id ?? '';
-  const resolved = resolvePassport(models, modelId, policy.now);
-  const requestUse: UseTier = facts.use ?? 'T1';
-  const subject = resolved?.passport.id ?? modelId;
-  const risks = policy.authorizations.filter((candidate) => keysOf(labels).every((key) => authorizationCovers(candidate.body, {
-    kind: 't1-risk', subject: { model: subject }, project: policy.project, label: key, use: 't1'
-  }, policy.now)));
-  const verdict = passportCovers({ resolved, use: requestUse, endpointClass: endpoint?.class ?? 'closed-api', t1RiskCovers: risks.length > 0, now: policy.now });
-  if (!verdict.covers) return { covers: false, records: [] };
-  if (resolved === undefined) return { covers: true, records: [] };
-  const records: AllowingRecord[] = [Object.freeze({ kind: 'model-approval' as const, passport: resolved.passport.id, maxTier: resolved.maxTier, expiresAt: resolved.passport.expiresAt })];
-  // A use above the passport's tier went only because a named person accepted the risk: that record allowed it too.
-  if (USE_TIERS.indexOf(requestUse) > USE_TIERS.indexOf(resolved.maxTier)) records.push(...risks.map((risk) => authorizationRecord(risk)));
-  return { covers: true, records };
 }
 
 /** The `scale/level` keys an authorization is asked about: one per label, or a single question with no label for a mark with none. */
@@ -919,12 +980,6 @@ function covering(policy: RoutePolicy, question: AuthorizationQuestion): readonl
       return false;
     }
   });
-}
-
-function authorizationRecord(found: VerifiedAuthorization, label?: string): AllowingRecord {
-  const body = found.body;
-  const base = { kind: 'authorization' as const, authorizationKind: body.kind, id: body.id, name: body.namedPerson.name, expiresAt: body.expiresAt, selfSigned: found.selfSigned };
-  return Object.freeze(label === undefined ? base : { ...base, label });
 }
 
 /** Adds a record once: an authorization by kind, id and label, any other record by its fields. */

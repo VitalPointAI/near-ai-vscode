@@ -235,6 +235,8 @@ const REQUEST_SITES: Readonly<Record<string, Placement>> = {
   'src/services/chatParticipant.ts': { self: true },
   'src/services/cyberAssembly.ts': { self: true },
   'src/services/cyberHandoff.ts': { self: true },
+  // 74.1-07: the research workspace sends each message inside its research-lane route.
+  'src/services/researchWorkspace.ts': { self: true },
   'src/services/teamStudioPanel.ts': { self: true },
   'src/services/generationService.ts': { dormant: true }
 };
@@ -1540,9 +1542,12 @@ test('41-13 D-42: with a models section, a model with no passport on NEAR AI Clo
   assert.equal(near.content.length, 1);
   assert.deepEqual(records[0]?.unmapped.nearAi.wouldRefuse, ['route.passport']);
   assert.equal(validateDecisionRecord(records[0]).ok, true);
-  // Without a models section nothing is reported.
+  // Without a models section the step reports with the shipped passports (74.1 D-12): tee-model has none, so it is reported and still sent.
   assert.equal((await withSessionRoute(policyRoute([org('Internal')], records, () => routePolicyOf({ now: Date.now() }), [], now), () => ask(near.client, 'tee-model'))).text, 'ok');
-  assert.equal(records[1]?.unmapped.nearAi.wouldRefuse, undefined);
+  // The second request's own record (an answer check after the first may have been recorded in between).
+  const requests = records.filter((record) => ruleOf(record) === ruleOf(records[0]));
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1]?.unmapped.nearAi.wouldRefuse, ['route.passport']);
 });
 
 /** A loopback route at Secret with its own chat state, keeping its records and its chat notices. */
@@ -1564,7 +1569,8 @@ test('41-13 D-34: Secret on this computer with no accredited-device authorizatio
   assert.equal(notAccreditedEvents(records).length, 1);
   const requests = records.filter((record) => ruleOf(record) === 'route.local-only');
   assert.equal(requests.length, 2);
-  for (const request of requests) assert.deepEqual(request.unmapped.nearAi.wouldRefuse, ['route.accredited-device']);
+  // 74.1 D-12: local-model has no passport, so the passport report stands beside the accredited-device one.
+  for (const request of requests) assert.deepEqual(request.unmapped.nearAi.wouldRefuse, ['route.accredited-device', 'route.passport']);
   for (const record of records) assert.equal(validateDecisionRecord(record).ok, true);
 });
 
@@ -1577,7 +1583,7 @@ test('41-13 D-34: with an accredited-device authorization covering this device t
   assert.equal((await withSessionRoute(secretRoute(covered, told, () => policy), () => ask(loopback.client, 'local-model'))).text, 'ok');
   assert.deepEqual(told, []);
   assert.deepEqual(notAccreditedEvents(covered), []);
-  assert.equal(covered[0]?.unmapped.nearAi.wouldRefuse, undefined);
+  assert.deepEqual(covered[0]?.unmapped.nearAi.wouldRefuse, ['route.passport'], 'only the passport report of 74.1 D-12 is left');
   // Your organization turns refusal on and no authorization covers this device: refused, nothing sent, no notice.
   const refused: DecisionRecord[] = [];
   const quiet: string[] = [];

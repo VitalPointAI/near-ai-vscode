@@ -13,10 +13,11 @@ import type { Label } from '../domain/gate/labels';
 import {
   DEFAULT_ROUTING, ENDPOINT_SCHEME_TEXT, PRIVATE_FLOOR_TEXT, ROUTE_REFUSALS, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD, decideRoute as decideRouteOnce, effectiveClearances, endpointOf, parseRouting
 } from '../domain/gate/routing';
+import { PASSPORT_GAP_TEXT, whoToAsk } from '../domain/gate/passportStep';
 import type { RouteDecision, RouteFacts, RoutePolicy, RoutingTable } from '../domain/gate/routing';
 import type { AuthorizationBody } from '../domain/gate/authorizations';
 import type { VerifiedAuthorization } from '../domain/gate/routing';
-import { DAY_MS, FIXED_NOW, authorizationFor } from './helpers/policyFixtures';
+import { DAY_MS, FIXED_NOW, authorizationFor, evaluatedModels } from './helpers/policyFixtures';
 
 /** Every rule a decision in this file returned, with or without a policy: the last test checks none is route.export-control (D-63). */
 const RULES_SEEN = new Set<string>();
@@ -171,7 +172,8 @@ test('allowedBy starts with the routing record of the strictest label, or of the
   assert.deepEqual(decision.allowedBy, [{ kind: 'routing', label: 'org/Restricted' }]);
   const empty = decideRoute([], DEFAULT_ROUTING, LOCAL_OK, org('Internal'), undefined, policy);
   assert.deepEqual(empty.allowedBy, [{ kind: 'routing', label: 'org/Internal' }]);
-  assert.equal(decision.wouldRefuse, undefined);
+  // 74.1 D-12: with no models section the passport step reports with the shipped passports; local-model has none.
+  assert.deepEqual(decision.wouldRefuse, ['route.passport']);
   assert.equal(decision.pinTo, undefined);
 });
 
@@ -277,22 +279,24 @@ test('Protected B routed any-cloud: a vendor region with ceiling and authorizati
 
 test('D-34: Secret on this computer with no accredited-device authorization is allowed and reported, naming the label', () => {
   const decision = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1' }));
-  assert.deepEqual({ allowed: decision.allowed, rule: decision.rule, wouldRefuse: decision.wouldRefuse }, { allowed: true, rule: 'route.local-only', wouldRefuse: ['route.accredited-device'] });
+  // 74.1 D-12: local-model has no passport, so the passport report stands beside the accredited-device one.
+  assert.deepEqual({ allowed: decision.allowed, rule: decision.rule, wouldRefuse: decision.wouldRefuse }, { allowed: true, rule: 'route.local-only', wouldRefuse: ['route.accredited-device', 'route.passport'] });
   assert.deepEqual(decision.notAccredited, SECRET);
   // The first such label of the mark is the one named.
   assert.deepEqual(decideRoute(markOf(org('Restricted'), label('nato', 'NATO Secret'), SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith()).notAccredited, label('nato', 'NATO Secret'));
-  // Protected B and org Restricted on this computer are not this-computer-only levels: nothing is reported.
+  // Protected B and org Restricted on this computer are not this-computer-only levels: no accredited-device report (only the passport's, D-12).
   const protectedB = decideRoute(markOf(PROTECTED_B), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith());
-  assert.deepEqual({ wouldRefuse: protectedB.wouldRefuse, notAccredited: protectedB.notAccredited }, { wouldRefuse: undefined, notAccredited: undefined });
+  assert.deepEqual({ wouldRefuse: protectedB.wouldRefuse, notAccredited: protectedB.notAccredited }, { wouldRefuse: ['route.passport'], notAccredited: undefined });
 });
 
 test('D-34: an accredited-device authorization for this device clears the report and is recorded; one for another device does not', () => {
   const covering = verified(authorizationFor({ kind: 'accredited-device', id: 'accredited-device-3', subject: { device: 'device-1' } }), true);
   const decision = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [covering] }));
-  assert.deepEqual({ allowed: decision.allowed, wouldRefuse: decision.wouldRefuse, notAccredited: decision.notAccredited }, { allowed: true, wouldRefuse: undefined, notAccredited: undefined });
+  // Only the passport report of D-12 is left (local-model has no passport).
+  assert.deepEqual({ allowed: decision.allowed, wouldRefuse: decision.wouldRefuse, notAccredited: decision.notAccredited }, { allowed: true, wouldRefuse: ['route.passport'], notAccredited: undefined });
   assert.deepEqual(decision.allowedBy?.[1], { kind: 'authorization', authorizationKind: 'accredited-device', id: 'accredited-device-3', name: 'Alex Example', expiresAt: covering.body.expiresAt, selfSigned: true, label: 'ca-classified/Secret' });
   for (const policy of [policyWith({ deviceId: 'device-2', authorizations: [covering] }), policyWith({ authorizations: [covering] })]) {
-    assert.deepEqual(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policy).wouldRefuse, ['route.accredited-device']);
+    assert.deepEqual(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policy).wouldRefuse, ['route.accredited-device', 'route.passport']);
   }
 });
 
@@ -301,7 +305,7 @@ test('D-34: requireAccreditedDevice refuses only with an organization layer pres
   assert.deepEqual({ allowed: required.allowed, rule: required.rule, reason: required.reason }, { allowed: false, rule: 'route.accredited-device', reason: ROUTE_REFUSALS['route.accredited-device'] });
   for (const [organization, requireAccreditedDevice] of [[false, true], [true, false], [false, false]] as const) {
     const reported = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ organization, requireAccreditedDevice, deviceId: 'device-1' }));
-    assert.deepEqual({ allowed: reported.allowed, wouldRefuse: reported.wouldRefuse }, { allowed: true, wouldRefuse: ['route.accredited-device'] }, `${String(organization)} ${String(requireAccreditedDevice)}`);
+    assert.deepEqual({ allowed: reported.allowed, wouldRefuse: reported.wouldRefuse }, { allowed: true, wouldRefuse: ['route.accredited-device', 'route.passport'] }, `${String(organization)} ${String(requireAccreditedDevice)}`);
   }
   // A covering authorization lets it go under the switch too.
   const covering = verified(authorizationFor({ kind: 'accredited-device', subject: { device: 'device-1' } }));
@@ -350,12 +354,14 @@ const DEEPSEEK: RouteFacts = { ...NEAR_TEE_BOUND, model: { id: 'deepseek-ai/Deep
 const ENFORCE = { v: 1 as const, mode: 'enforce' as const, unknownMaxTier: 'T0' as const, passports: [] };
 const SHIPPED_EXPIRY = '2027-11-20T00:00:00.000Z';
 
-test('D-42: a T0 model on NEAR AI private hardware at use T1 is allowed and reported as route.passport, even in enforce mode', () => {
-  for (const models of [ENFORCE, { ...ENFORCE, mode: 'report' as const }]) {
-    const decision = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models }));
-    assert.deepEqual({ allowed: decision.allowed, rule: decision.rule, wouldRefuse: decision.wouldRefuse }, { allowed: true, rule: 'route.attested-cloud', wouldRefuse: ['route.passport'] }, models.mode);
-    assert.equal(decision.allowedBy?.some((record) => record.kind === 'model-approval'), false);
-  }
+test('D-42, 74.1 D-11: a T0 model on NEAR AI private hardware at use T1 is reported as route.passport under report and refused under enforce', () => {
+  const reported = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models: { ...ENFORCE, mode: 'report' } }));
+  assert.deepEqual({ allowed: reported.allowed, rule: reported.rule, wouldRefuse: reported.wouldRefuse, passportGap: reported.passportGap },
+    { allowed: true, rule: 'route.attested-cloud', wouldRefuse: ['route.passport'], passportGap: 'acceptance-missing' });
+  assert.equal(reported.allowedBy?.some((record) => record.kind === 'model-approval'), false);
+  const enforced = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models: ENFORCE }));
+  assert.deepEqual({ allowed: enforced.allowed, rule: enforced.rule, reason: enforced.reason, passportGap: enforced.passportGap },
+    { allowed: false, rule: 'route.passport', reason: PASSPORT_GAP_TEXT['acceptance-missing']({ model: 'deepseek-ai/DeepSeek-V3.1', use: 'T1', whoToAsk: whoToAsk(undefined, false) }), passportGap: 'acceptance-missing' });
 });
 
 test('D-42: a t1-risk authorization covering the model clears the report and is recorded with the model approval', () => {
@@ -365,38 +371,49 @@ test('D-42: a t1-risk authorization covering the model clears the report and is 
   assert.deepEqual(decision.allowedBy, [
     { kind: 'routing', label: 'org/Internal' },
     { kind: 'model-approval', passport: 'deepseek-ai/deepseek', maxTier: 'T0', expiresAt: SHIPPED_EXPIRY },
-    { kind: 'authorization', authorizationKind: 't1-risk', id: 't1-risk-4', name: 'Alex Example', expiresAt: risk.body.expiresAt, selfSigned: false }
+    // 74.1-06 (D-16): its assessment reference stands in for your organization's evaluation, so it is recorded with it.
+    { kind: 'authorization', authorizationKind: 't1-risk', id: 't1-risk-4', name: 'Alex Example', expiresAt: risk.body.expiresAt, selfSigned: false, evidence: risk.body.evidence }
   ]);
-  // One for another model, or for another label, does not.
+  // One for another model, or for another label, does not: under enforce the request is refused with acceptance-missing.
   const other = verified(authorizationFor({ kind: 't1-risk', subject: { model: 'moonshotai/kimi' } }));
-  assert.deepEqual(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models: ENFORCE, authorizations: [other] })).wouldRefuse, ['route.passport']);
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models: ENFORCE, authorizations: [other] })).passportGap, 'acceptance-missing');
   const otherLabel = verified(authorizationFor({ kind: 't1-risk', subject: { model: 'deepseek-ai/deepseek' }, scope: { labels: ['org/Public'] } }));
-  assert.deepEqual(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models: ENFORCE, authorizations: [otherLabel] })).wouldRefuse, ['route.passport']);
+  const refused = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models: ENFORCE, authorizations: [otherLabel] }));
+  assert.deepEqual({ allowed: refused.allowed, rule: refused.rule, passportGap: refused.passportGap }, { allowed: false, rule: 'route.passport', passportGap: 'acceptance-missing' });
 });
 
-test('D-42: a passport below the use or not listing the place\'s class is reported; one that covers both records the approval', () => {
+test('D-42, 74.1 D-11: a passport below the use or not listing the place\'s class is refused under enforce; one that covers both records the approval', () => {
   const gptOss: RouteFacts = { ...NEAR_TEE_BOUND, model: { id: 'openai/gpt-oss-120b', privacyBoundary: 'tee' } };
   const above = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T3' }, undefined, undefined, policyWith({ models: ENFORCE }));
-  assert.deepEqual({ allowed: above.allowed, wouldRefuse: above.wouldRefuse }, { allowed: true, wouldRefuse: ['route.passport'] });
-  const covered = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T2' }, undefined, undefined, policyWith({ models: ENFORCE }));
+  assert.deepEqual({ allowed: above.allowed, rule: above.rule, passportGap: above.passportGap }, { allowed: false, rule: 'route.passport', passportGap: 'tier-exceeded' });
+  const aboveReported = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T3' }, undefined, undefined, policyWith({ models: { ...ENFORCE, mode: 'report' } }));
+  assert.deepEqual({ allowed: aboveReported.allowed, wouldRefuse: aboveReported.wouldRefuse }, { allowed: true, wouldRefuse: ['route.passport'] });
+  // 74.1-06 (D-16): under enforce agent work also needs your organization's evaluation, which the shipped row lacks and its own passport carries.
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T2' }, undefined, undefined, policyWith({ models: ENFORCE })).passportGap, 'not-evaluated');
+  const covered = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T2' }, undefined, undefined, policyWith({ models: evaluatedModels('enforce', ['openai/gpt-oss']) }));
+  assert.equal(covered.allowed, true);
   assert.equal(covered.wouldRefuse, undefined);
   assert.deepEqual(covered.allowedBy?.[1], { kind: 'model-approval', passport: 'openai/gpt-oss', maxTier: 'T2', expiresAt: SHIPPED_EXPIRY });
-  // A closed model NEAR AI forwards: its passport lists only closed APIs, so a forwarded place is reported.
+  // A closed model NEAR AI forwards: its passport lists only closed APIs, so a forwarded place is refused (hosting-mismatch).
   const claude: RouteFacts = { ...NEAR_CLOUD, model: { id: 'anthropic/claude-example', privacyBoundary: 'cloud' } };
-  assert.deepEqual(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, claude, undefined, undefined, policyWith({ models: ENFORCE })).wouldRefuse, ['route.passport']);
-  // An unknown model at T1 is reported; at T0 it is covered and nothing is recorded.
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, claude, undefined, undefined, policyWith({ models: ENFORCE })).passportGap, 'hosting-mismatch');
+  // An unknown model at T1 is refused (unknown); at T0 it is covered and nothing is recorded.
   const unknown: RouteFacts = { ...NEAR_CLOUD, model: { id: 'example/unlisted-model', privacyBoundary: 'cloud' } };
-  assert.deepEqual(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, unknown, undefined, undefined, policyWith({ models: ENFORCE })).wouldRefuse, ['route.passport']);
+  const unknownRefused = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, unknown, undefined, undefined, policyWith({ models: ENFORCE }));
+  assert.deepEqual({ rule: unknownRefused.rule, passportGap: unknownRefused.passportGap }, { rule: 'route.passport', passportGap: 'unknown' });
   const t0 = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, { ...unknown, use: 'T0' }, undefined, undefined, policyWith({ models: ENFORCE }));
   assert.deepEqual({ wouldRefuse: t0.wouldRefuse, allowedBy: t0.allowedBy }, { wouldRefuse: undefined, allowedBy: [{ kind: 'routing', label: 'org/Public' }] });
 });
 
-test('D-42: no models section never reports; no use is checked as T1', () => {
-  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T3' }, undefined, undefined, policyWith()).wouldRefuse, undefined);
-  assert.deepEqual(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, DEEPSEEK, undefined, undefined, policyWith({ models: ENFORCE })).wouldRefuse, ['route.passport']);
-  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T0' }, undefined, undefined, policyWith({ models: ENFORCE })).wouldRefuse, undefined);
-  // Both reports together, sorted.
-  const both = decideRoute(markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, { ...LOCAL_OK, use: 'T1' }, undefined, undefined, policyWith({ models: ENFORCE }));
+test('74.1 D-12: no models section reports with the shipped passports and never refuses; no use is checked as T1', () => {
+  const noSection = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T3' }, undefined, undefined, policyWith());
+  assert.deepEqual({ allowed: noSection.allowed, wouldRefuse: noSection.wouldRefuse, passportGap: noSection.passportGap }, { allowed: true, wouldRefuse: ['route.passport'], passportGap: 'tier-exceeded' });
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T0' }, undefined, undefined, policyWith()).wouldRefuse, undefined);
+  // No use is checked as T1: a T0 passport then needs a risk acceptance.
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, DEEPSEEK, undefined, undefined, policyWith({ models: ENFORCE })).passportGap, 'acceptance-missing');
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T0' }, undefined, undefined, policyWith({ models: ENFORCE })).allowed, true);
+  // Both reports together, sorted (report mode).
+  const both = decideRoute(markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, { ...LOCAL_OK, use: 'T1' }, undefined, undefined, policyWith({ models: { ...ENFORCE, mode: 'report' } }));
   assert.deepEqual(both.wouldRefuse, ['route.accredited-device', 'route.passport']);
 });
 
@@ -431,7 +448,7 @@ test('effectiveClearances: the personal clearances alone without a roster, other
 test('D-36 order: model, place, ceiling, pin, authorization, residency and clearance refuse in that order; a report never hides a later refusal', () => {
   const routing = routingWith({}, 'models.example.org');
   const everything = policyWith({
-    endpoints: endpoints({ ...MODELS_CA, region: 'US' }), residency: { v: 1, required: ['CA'] }, models: ENFORCE,
+    endpoints: endpoints({ ...MODELS_CA, region: 'US' }), residency: { v: 1, required: ['CA'] }, models: { ...ENFORCE, mode: 'report' },
     clearances: [clearance('org', 'Public')], rosterClearances: [clearance('org', 'Public')]
   });
   assert.equal(decideRoute(markOf(org('Confidential')), routing, { ...LOCAL_REMOTE, allowedModels: [] }, undefined, undefined, everything).rule, 'route.model-not-allowed');
@@ -439,9 +456,12 @@ test('D-36 order: model, place, ceiling, pin, authorization, residency and clear
   assert.equal(decideRoute(markOf(org('Confidential')), routing, LOCAL_REMOTE, undefined, undefined, everything).rule, 'route.endpoint-ceiling');
   assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, everything).rule, 'route.residency');
   assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, { ...everything, residency: undefined }).rule, 'route.clearance');
+  // 74.1 D-11: under enforce the passport (step 7) refuses before clearance (step 8), and after residency.
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, { ...everything, models: ENFORCE }).rule, 'route.residency');
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, { ...everything, residency: undefined, models: ENFORCE }).rule, 'route.passport');
   // On this computer: the accredited-device and passport reports stand, and the clearance refusal still decides.
   const secret = markOf(label('ca-classified', 'Secret'));
-  const reported = policyWith({ models: ENFORCE });
+  const reported = policyWith({ models: { ...ENFORCE, mode: 'report' } });
   assert.deepEqual(decideRoute(secret, DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, reported).wouldRefuse, ['route.accredited-device', 'route.passport']);
   const narrowed = decideRoute(secret, DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, { ...reported, clearances: [clearance('org', 'Public')], rosterClearances: [clearance('org', 'Public')] });
   assert.deepEqual({ allowed: narrowed.allowed, rule: narrowed.rule }, { allowed: false, rule: 'route.clearance' });
@@ -555,14 +575,15 @@ test('WR-05: a passport step that throws is recorded as route.passport and never
 test('WR-05: an accredited-device check that throws covers nothing: only reported unless your organization turns refusal on, and a readable authorization still covers', () => {
   const broken: VerifiedAuthorization = { get body(): AuthorizationBody { throw new Error('unreadable'); }, selfSigned: false };
   const reported = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [broken] }));
-  assert.deepEqual({ allowed: reported.allowed, wouldRefuse: reported.wouldRefuse, notAccredited: reported.notAccredited }, { allowed: true, wouldRefuse: ['route.accredited-device'], notAccredited: SECRET });
+  // 74.1 D-12: local-model has no passport, so the passport report stands beside it.
+  assert.deepEqual({ allowed: reported.allowed, wouldRefuse: reported.wouldRefuse, notAccredited: reported.notAccredited }, { allowed: true, wouldRefuse: ['route.accredited-device', 'route.passport'], notAccredited: SECRET });
   const enforced = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [broken], organization: true, requireAccreditedDevice: true }));
   assert.deepEqual({ allowed: enforced.allowed, rule: enforced.rule }, { allowed: false, rule: 'route.accredited-device' });
   const good = verified(authorizationFor({ kind: 'accredited-device', id: 'accredited-device-9', subject: { device: 'device-1' } }));
   const covered = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [broken, good], organization: true, requireAccreditedDevice: true }));
-  assert.deepEqual({ allowed: covered.allowed, wouldRefuse: covered.wouldRefuse }, { allowed: true, wouldRefuse: undefined });
+  assert.deepEqual({ allowed: covered.allowed, wouldRefuse: covered.wouldRefuse }, { allowed: true, wouldRefuse: ['route.passport'] });
   // A device id that cannot be read: the same, reported or refused, never thrown.
   const noDevice = (extra: Partial<RoutePolicy>): RoutePolicy => Object.defineProperty({ ...policyWith(extra) }, 'deviceId', { get(): string { throw new Error('unreadable'); } }) as RoutePolicy;
-  assert.deepEqual(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, noDevice({})).wouldRefuse, ['route.accredited-device']);
+  assert.deepEqual(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, noDevice({})).wouldRefuse, ['route.accredited-device', 'route.passport']);
   assert.equal(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, noDevice({ organization: true, requireAccreditedDevice: true })).rule, 'route.accredited-device');
 });

@@ -7,7 +7,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { BLOB_MAX_BYTES, GENESIS_PREV, buildEntry, entryHash, sha256Hex } from '../domain/replica/entry';
+import { BLOB_MAX_BYTES, GENESIS_PREV, buildEntry, entryHash, prepareEntrySigning, sha256Hex } from '../domain/replica/entry';
 import type { BuiltEntry, SealedEntry } from '../domain/replica/entry';
 import { REPLICA_DIR } from '../domain/staff/multiUser';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -20,6 +20,7 @@ import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_WAITING, REPLIC
 import type { ReplicaMark } from '../staff/replica/marks';
 import { FLOODED_REASON, FLOODED_TEXT, MAX_REFUSED_PER_WRITER, ReplicaStore, START_AGAIN_COMMAND_TITLE, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
 import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
+import { setFolderSyncProbe } from '../staff/staffFiles';
 import { FileSecrets } from './helpers/replicaStoreChild';
 import type { StoreChildMessage } from './helpers/replicaStoreChild';
 import { epochKey, fixedSigner, streamId } from './helpers/replicaWorld';
@@ -355,7 +356,7 @@ test('guarded append refuses another writer’s new entry before writing its own
   const first = await opened(root, depsFor(lead, secrets));
   const other = fixedSigner('guard-other-writer');
   const second = await opened(root, depsFor(other, secrets));
-  const expected = first.appendSnapshot();
+  const expected = await first.appendSnapshot();
   const ownHead = first.head(STREAM, lead.writer);
   const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash }, big: true });
   assert.equal(candidate.blobs.length, 1);
@@ -366,28 +367,131 @@ test('guarded append refuses another writer’s new entry before writing its own
   assert.deepEqual(first.head(STREAM, lead.writer), ownHead);
   assert.equal(first.has(candidate.hash), false);
   assert.equal(await first.blob(candidate.blobs[0].hash), undefined);
-  assert.deepEqual(await first.appendOwn([candidate], first.appendSnapshot()), { ok: true, written: 1 });
+  assert.deepEqual(await first.appendOwn([candidate], await first.appendSnapshot()), { ok: true, written: 1 });
 });
 
 test('guarded append detects another window recording a roster head even when writer logs stay unchanged', async () => {
   const { root, lead, secrets, built } = await threeAppended();
   const first = await opened(root, depsFor(lead, secrets));
   const second = await opened(root, depsFor(lead, secrets));
-  const expected = first.appendSnapshot();
+  const expected = await first.appendSnapshot();
   const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash } });
   assert.deepEqual(await second.recordRosterHead(built[1].hash), { ok: true });
+  const packet = { purpose: 'verified peer fixture' };
+  assert.deepEqual(await first.putAccessEvidence(packet, expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.deepEqual(await first.accessEvidence(), []);
   assert.deepEqual(await first.appendOwn([candidate], expected),
     { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
   assert.equal(first.has(candidate.hash), false);
   assert.deepEqual(await first.appendOwn([candidate]), { ok: true, written: 1 }, 'ordinary appends need no snapshot');
 });
 
+test('a guarded locally signed entry refuses a changed store before persisting any entry or blob', async () => {
+  const { root, lead, secrets } = await threeAppended();
+  const first = await opened(root, depsFor(lead, secrets));
+  const other = fixedSigner('guard-other-signer');
+  const second = await opened(root, depsFor(other, secrets));
+  const expected = await first.appendSnapshot();
+  const signer = fixedSigner('guarded-person-signer');
+  const [candidate] = chain(signer, 1, { big: true });
+  assert.equal(candidate.blobs.length, 1);
+
+  assert.deepEqual(await second.appendOwn(chain(other, 1)), { ok: true, written: 1 });
+  assert.deepEqual(await first.ingestForeign([candidate.entry], candidate.blobs, async () => ({ ok: true } as const), expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.equal(first.has(candidate.hash), false);
+  assert.equal(await first.blob(candidate.blobs[0].hash), undefined);
+});
+
+test('guarded local writes retry when another window stores a cell key grant before commit', async () => {
+  const { root, lead, secrets, built } = await threeAppended();
+  const first = await opened(root, depsFor(lead, secrets));
+  const second = await opened(root, depsFor(lead, secrets));
+  const expected = await first.appendSnapshot();
+  const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash }, big: true });
+  const [hosted] = chain(fixedSigner('guarded-hosted-grants'), 1, { big: true });
+  const cell = streamId('store/cell');
+  const grant = signPayload(lead.signer, 'staff-cell-grant', { cell, epoch: 1, device: 'd1', wrapped: 'w' }, { now: () => new Date(AT) });
+  assert.ok('ok' in await second.putGrant(cell, 1, grant));
+
+  assert.deepEqual(await first.appendOwn([candidate], expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.deepEqual(await first.ingestForeign([hosted.entry], hosted.blobs, async () => ({ ok: true } as const), expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  for (const entry of [candidate, hosted]) {
+    assert.equal(first.has(entry.hash), false);
+    assert.equal(await first.blob(entry.blobs[0].hash), undefined);
+  }
+});
+
+test('both local signed write paths revalidate expiring authority before persisting the entry or blob', async () => {
+  const { root, lead, secrets, built } = await threeAppended();
+  const store = await opened(root, depsFor(lead, secrets));
+  const expected = await store.appendSnapshot();
+  const [device] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash }, big: true });
+  const [hosted] = chain(fixedSigner('managed-hosted-expiry'), 1, { big: true });
+  const expired = (): boolean => false;
+  assert.deepEqual(await store.appendOwn([device], expected, expired),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.deepEqual(await store.ingestForeign([hosted.entry], hosted.blobs, async () => ({ ok: true } as const), expected, expired),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  for (const entry of [device, hosted]) {
+    assert.equal(store.has(entry.hash), false);
+    assert.equal(await store.blob(entry.blobs[0].hash), undefined);
+  }
+});
+
+for (const writer of ['device', 'hosted'] as const) {
+  test(`a staged ${writer} write that expires during sidecar sync makes no entry or content blob live`, async () => {
+    const root = project();
+    const lead = fixedSigner('staged-expiry-device');
+    const store = await opened(root, depsFor(lead));
+    const expected = await store.appendSnapshot();
+    const signer = writer === 'device' ? lead : fixedSigner('staged-expiry-person');
+    const frozen = prepareEntrySigning({ signer: signer.signer, key: epochKey('store'), stream: STREAM, seq: 0, prev: GENESIS_PREV, epoch: 0,
+      body: { deps: [], roster: ROSTER, lamport: 1, at: AT, actor: { kind: 'person' }, kind: 'cell.rekey', data: { text: 'x'.repeat(20_000) } } });
+    const candidate = frozen.finish(signer.signer.sign(frozen.signingBytes()));
+    assert.ok(candidate);
+    assert.equal(candidate.blobs.length, 1);
+    let current = true;
+    let synced = false;
+    const submit = (entry: BuiltEntry, snapshot: string) => {
+      const authorize = () => current && frozen.matches(entry);
+      const sidecar = { entry: entry.hash, checked: true };
+      return writer === 'device' ? store.appendOwn([entry], snapshot, authorize, sidecar) :
+        store.ingestForeign([entry.entry], entry.blobs, async () => ({ ok: true } as const), snapshot,
+          authorize, { root: entry.hash, evidence: [sidecar] });
+    };
+    const refused = { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] };
+    const [replacement] = chain(signer, 1, { big: true });
+    assert.deepEqual(await submit(replacement, expected), refused);
+    assert.equal(await store.blob(replacement.blobs[0].hash) === undefined, true);
+    assert.deepEqual(await submit(candidate, '0'.repeat(64)), refused);
+    assert.deepEqual(await store.accessEvidence(), []);
+    setFolderSyncProbe((folder) => {
+      if (path.basename(folder) !== 'access-evidence') return;
+      current = false;
+      synced = true;
+    });
+    try {
+      assert.deepEqual(await submit(candidate, expected), refused);
+      assert.equal(synced, true);
+      assert.equal(store.has(candidate.hash), false);
+      assert.equal(await store.blob(candidate.blobs[0].hash) === undefined, true);
+      assert.equal((await store.accessEvidence()).length, 1, 'the sidecar remains dormant');
+    } finally {
+      setFolderSyncProbe(undefined);
+    }
+  });
+}
+
 test('only the first of two guarded same-device appends from one snapshot writes its signed entry', async () => {
   const { root, lead, secrets, built } = await threeAppended();
   const first = await opened(root, depsFor(lead, secrets));
   const second = await opened(root, depsFor(lead, secrets));
-  const expected = first.appendSnapshot();
-  assert.equal(expected, second.appendSnapshot());
+  const expected = await first.appendSnapshot();
+  assert.equal(expected, await second.appendSnapshot());
   const from = { seq: 2, hash: built[2].hash };
   const [candidate] = chain(lead, 1, { from, tag: 'first' });
   const [rival] = chain(lead, 1, { from, tag: 'second' });

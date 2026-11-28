@@ -74,3 +74,48 @@ path "transit/keys/+/import_version" {
     }
   }
 }
+
+# Phase 45.1 (D-03, D-07): the site's exchange keys never move, never become exportable and are never replaced, whatever two custodians approve.
+# A deny on the exact path wins over the paths above. apply.mjs writes the site name in place of @SITE@.
+path "transit/keys/exchange-receive-@SITE@/config" {
+  capabilities = ["deny"]
+}
+path "transit/keys/exchange-receive-@SITE@/import" {
+  capabilities = ["deny"]
+}
+path "transit/keys/exchange-receive-@SITE@/import_version" {
+  capabilities = ["deny"]
+}
+path "transit/export/+/exchange-receive-@SITE@" {
+  capabilities = ["deny"]
+}
+path "transit/export/+/exchange-receive-@SITE@/*" {
+  capabilities = ["deny"]
+}
+path "transit/backup/exchange-receive-@SITE@" {
+  capabilities = ["deny"]
+}
+path "transit/restore/exchange-receive-@SITE@" {
+  capabilities = ["deny"]
+}
+path "transit/keys/release-@SITE@/config" {
+  capabilities = ["deny"]
+}
+path "transit/keys/release-@SITE@/import" {
+  capabilities = ["deny"]
+}
+path "transit/keys/release-@SITE@/import_version" {
+  capabilities = ["deny"]
+}
+path "transit/export/+/release-@SITE@" {
+  capabilities = ["deny"]
+}
+path "transit/export/+/release-@SITE@/*" {
+  capabilities = ["deny"]
+}
+path "transit/backup/release-@SITE@" {
+  capabilities = ["deny"]
+}
+path "transit/restore/release-@SITE@" {
+  capabilities = ["deny"]
+}

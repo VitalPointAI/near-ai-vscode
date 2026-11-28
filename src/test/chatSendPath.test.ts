@@ -104,7 +104,7 @@ test('a sidebar message streams from NEAR with privacy label, estimate, and actu
     assert.deepEqual(models.models.map((model) => [model.id, model.privacy]), [['z-ai/glm-5.3', 'tee'], ['deepseek/deepseek-v4.1-flash', 'forwarded']]);
     await sidebar.send({ type: 'send', text: 'Say hello', model: 'z-ai/glm-5.3' });
     const start = sidebar.posted.find((message) => message.type === 'assistant-start');
-    assert.equal(start?.privacy, 'Private · NEAR AI private hardware, checked each time it is used');
+    assert.equal(start?.privacy, 'Runs on NEAR AI private hardware (checked each time it is used)');
     const done = sidebar.posted.find((message) => message.type === 'assistant-done') as { usage: { estimatedCostUsd: number } };
     assert.deepEqual(billingBodies.at(-1), { requestIds: [INFERENCE_ID] }, 'the run is billed by each turn\'s inference-id');
     assert.equal(Number(done.usage.estimatedCostUsd.toFixed(5)), 0.00755);
@@ -246,7 +246,7 @@ test('a local runtime profile needs no key, labels its models local, and never c
     const models = sidebar.posted.find((message) => message.type === 'models') as { models: Array<{ id: string; privacy: string; label: string }> };
     assert.deepEqual(models.models.map((model) => [model.id, model.privacy]), [['qwen3-coder:30b', 'local']]);
     await sidebar.send({ type: 'send', text: 'hi', model: 'qwen3-coder:30b' });
-    assert.equal(sidebar.posted.find((message) => message.type === 'assistant-start')?.privacy, 'Local · runs on this machine');
+    assert.equal(sidebar.posted.find((message) => message.type === 'assistant-start')?.privacy, 'Runs on this computer');
     assert.ok(sidebar.posted.some((message) => message.type === 'assistant-done'));
     assert.equal(seen.some((request) => /model\/list|billing/.test(request.url)), false, 'no NEAR-only endpoints');
     assert.equal(seen.every((request) => request.url.startsWith('http://localhost:11434/v1/') && request.auth === null), true, 'only the local runtime, with no bearer header');

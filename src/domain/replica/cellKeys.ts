@@ -15,13 +15,13 @@
 //
 // The cell's label is sealed inside each grant under a key derived from the epoch key (sealLabel), so only a device that opens a wrap learns what the
 // cell is (DESIGN 4.1, 8.2). planRekey turns a removal, a revocation or a lowered clearance into one new epoch per affected cell (D-23), and
-// earlierEpochGrants gives a device admitted later the epochs before it, so history stays readable (D-45).
+// grantPages.ts earlierEpochGrants gives a device admitted later the epochs before it, so history stays readable (D-45).
 import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { signPayload, verifyPayload } from '../team/signedPayload';
-import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
+import { signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
+import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../team/signedPayload';
 import { isRecord, isSafeIntegerInRange } from '../team/validate';
 import { HASH_PATTERN, REPLICA_SIGNED_AT, STREAM_ID_PATTERN, writerIdOf } from './entry';
 import { CELL_REKEY_REASONS } from './kindSchemas/roster';
@@ -168,6 +168,14 @@ export function buildGrant(signer: PayloadSigner, grant: CellGrant): SignedPaylo
   return signPayload(signer, 'staff-cell-grant', grantCopy(grant), { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: GRANT_MAX_BYTES });
 }
 
+// buildGrant with a signer that answers later: the person key in a hosted session signs grants as the device the roster names (Phase 33 D-60,
+// 33-27). Same payload and signing time, so the grant and its hash are the ones buildGrant makes with that key; a refusal comes back as it is.
+export function buildGrantAsync(signer: PayloadSigner | AsyncPayloadSigner, grant: CellGrant): Promise<SignedPayload<CellGrant> | SignRefused> {
+  const problem = grantProblem(grant);
+  if (problem !== undefined) throw new Error(`The grant was not signed: ${problem}.`);
+  return signPayloadAsync(signer, 'staff-cell-grant', grantCopy(grant), { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: GRANT_MAX_BYTES });
+}
+
 // sha256 hex of the canonical signed grant: what project.genesis cells, cell.create and cell.rekey commit to.
 export function grantHash(signed: unknown): string {
   return createHash('sha256').update(canonicalBytes(signed)).digest('hex');
@@ -183,7 +191,7 @@ export type GrantRead =
   | { ok: true; grant: CellGrant; hash: string; signer: { publicKey: string; writer: string } }
   | { ok: false; reason: GrantRefusal };
 
-function grantProblem(value: unknown): string | undefined {
+export function grantProblem(value: unknown): string | undefined {
   if (!isRecord(value)) return 'not an object';
   const keys = Object.keys(value);
   const paged = keys.includes('pages');
@@ -279,8 +287,10 @@ export function openLabel(epochKey: Buffer, cell: string, epoch: number, sealed:
 
 // ---- rekey planning (D-23) ----
 
-// What the lead is told, in the command result and the confirmation, whenever a rekey leaves someone out (D-23, DESIGN 8.3).
-export const REKEY_KEEP_TEXT = 'They keep what they already received. They will not receive anything new.';
+// What the lead is told about retained work and the pending or verified key change (D-23, DESIGN 8.3).
+export const REKEY_KEEP_TEXT = 'They keep what they already received.';
+export const REKEY_PENDING_TEXT = 'Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.';
+export const REKEY_VERIFIED_TEXT = 'Devices excluded from the new keys cannot read work encrypted with those keys.';
 
 export type RekeyReason = (typeof CELL_REKEY_REASONS)[number];
 
@@ -317,35 +327,4 @@ export function planRekey(input: RekeyInput): RekeyPlan[] {
     plans.push({ cell: item.cell, reason: kind, recipients: grantees.filter((writer) => !leaves(writer)), dropped, text: REKEY_KEEP_TEXT });
   }
   return plans.sort((a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0));
-}
-
-// ---- earlier epochs for a device admitted later (D-45) ----
-
-export interface EarlierEpochInput {
-  cell: string;
-  // Every epoch of the cell the device is cleared for, with its key, oldest first (the host reads them from its own key ring and epochsAt).
-  epochs: ReadonlyArray<{ epoch: number; key: Buffer }>;
-  // The roster the grants are valid at: normally the one that admitted the device. It must not be the roster an epoch's founding entry cites
-  // (only the founding grant is valid there); when the current epoch was founded at the admission roster, put the device in the founding grant.
-  roster: string;
-  // The receiving device's writer id and X25519 public key.
-  writer: string;
-  recipient: Buffer | string;
-  // The cell's label, sealed into each grant under that epoch's key, when given.
-  label?: unknown;
-}
-
-// One signed grant per epoch, each wrapping that epoch's key to the one device, so a device admitted later can open the cell's history (D-45). The
-// roster fold accepts each grant when the signer is a roster writer at the named roster and the device is admitted there. Throws on a bad key, cell,
-// epoch, roster or recipient, and on an empty or repeated epoch list.
-export function earlierEpochGrants(signer: PayloadSigner, input: EarlierEpochInput): Array<SignedPayload<CellGrant>> {
-  if (input.epochs.length === 0) throw new Error('Name at least one epoch to grant.');
-  const seen = new Set<number>();
-  return input.epochs.map(({ epoch, key }) => {
-    if (seen.has(epoch)) throw new Error('Each epoch is granted once.');
-    seen.add(epoch);
-    const wrap = wrapEpochKey({ cell: input.cell, epoch, writer: input.writer, recipient: input.recipient, epochKey: key });
-    const labelSealed = input.label === undefined ? '' : sealLabel(key, input.cell, epoch, input.label);
-    return buildGrant(signer, { cell: input.cell, epoch, roster: input.roster, labelSealed, wraps: [{ writer: input.writer, wrap }] });
-  });
 }

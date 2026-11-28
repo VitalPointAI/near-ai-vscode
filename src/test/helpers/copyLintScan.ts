@@ -100,6 +100,11 @@ export const WORKBENCH_SOURCES: readonly string[] = Object.freeze(['workbench/ex
  * values of the result fields an RPC result carries to the browser (RESULT_COPY_KEYS), and the arguments of refused().
  */
 export const WORKBENCH_BACKEND = 'workbench/extension/src/node';
+/**
+ * The sovereignty badge and card's words (48.4 D-35): every string literal in this folder is read as copy, like the workbench's common modules, because
+ * the desktop badge and the workbench card both show them. Its files are already among the src sources; an absent folder simply gives no file.
+ */
+export const SOVEREIGNTY_SOURCES: readonly string[] = Object.freeze(['src/domain/sovereignty']);
 
 /** Files no rule ever scans: the mode table is where the mode words live (D-40), and term() is its only reader. */
 export const NEVER_SCANNED: readonly string[] = Object.freeze(['src/domain/org/modes.ts', 'src/domain/org/terms.ts']);
@@ -344,8 +349,9 @@ export function extractCopy(source: string, file: string): CopyText[] {
   if (path.posix.basename(file) === 'package.json') return extractPackage(JSON.parse(source) as unknown);
   if (file.endsWith('.html')) return htmlText(source).map((text) => ({ text }));
   const page = file.startsWith('media/');
-  // The Sterling workbench's pages build their DOM from inline strings, so they are read as page scripts, parsed as TypeScript (D-33).
-  const workbench = WORKBENCH_SOURCES.some((folder) => file.startsWith(`${folder}/`));
+  // The Sterling workbench's pages build their DOM from inline strings, so they are read as page scripts, parsed as TypeScript (D-33); so are the
+  // sovereignty badge and card's words (48.4 D-35).
+  const workbench = [...WORKBENCH_SOURCES, ...SOVEREIGNTY_SOURCES].some((folder) => file.startsWith(`${folder}/`));
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, page ? ts.ScriptKind.JS : ts.ScriptKind.TS);
   const collector = new Collector();
   if (file.startsWith(`${WORKBENCH_BACKEND}/`)) walkBackend(parsed, collector);
@@ -417,6 +423,10 @@ export const GLOSSARY_WORDS: readonly GlossaryWord[] = Object.freeze([
   glossary('issuer', 'issuers?', false, RULES_WORD),
   glossary('residency', 'residency', false, '"must stay in Canada" (or the region named)'),
   glossary('sovereign', 'sovereign', false, '"must stay in Canada" (or the region named)'),
+  // 48.4 D-35, D-04: Sovereignty only as the badge and card name (allowed-context rows, one per file, added by the plans that build them).
+  glossary('sovereignty', 'sovereignty', false, 'Sovereignty only as the badge and card name; the dimension\'s plain name elsewhere ("Where your data is stored")'),
+  glossary('SEAL', 'SEAL', true, 'the sovereignty card\'s state words (Met, Partly met, Not met, Unknown), never a level or a score'),
+  glossary('sovereignty score', 'sovereignty\\s+scores?', false, 'the worst state and counts, never a score (48.4 D-02)'),
   glossary('model passport', 'model\\s+passports?', false, '"Approved for {use words} until {date}"'),
   glossary('passport', 'passports?', false, '"Approved for {use words} until {date}"'),
   glossary('risk acceptance', 'risk\\s+acceptances?', false, '"Allowed by {name} until {date}"'),
@@ -474,7 +484,8 @@ export const ALLOWED_CONTEXTS: readonly AllowedContext[] = Object.freeze([
   { file: 'src/domain/gate/labels.ts', words: ['CGP', 'ITAR', 'EAR'], why: 'the label module that holds the reserved compartments\' shown words; they are produced there (D-62)' },
   { file: 'src/services/policyEditor.ts', words: EXPORT_WORDS, why: 'your organization\'s rules page, the administrator view (glossary section 1, D-64)' },
   { file: 'media/policy/policy.js', words: EXPORT_WORDS, why: 'your organization\'s rules page, the administrator view (glossary section 1, D-64)' },
-  { file: 'workbench/extension/src/common/compliance-evidence.ts', words: ['attestation'], why: 'the cosign verify-attestation and gh attestation verify commands\' own names, inside the release checks disclosure (48.2-UI-SPEC P5)' }
+  { file: 'workbench/extension/src/common/compliance-evidence.ts', words: ['attestation'], why: 'the cosign verify-attestation and gh attestation verify commands\' own names, inside the release checks disclosure (48.2-UI-SPEC P5)' },
+  { file: 'workbench/extension/src/common/staff-share.ts', words: ['hub'], why: 'the grant trade-off, shown word for word as hubMembership.ts HUB_GRANT_TRADE_OFF says it (DESIGN 10.2, 33-27)' }
 ].map((row) => Object.freeze({ ...row, words: Object.freeze([...row.words]) })));
 
 const TOKEN_BEFORE = '(?<![A-Za-z0-9_])';
@@ -596,15 +607,29 @@ function bareTeamHits(text: string): number {
 }
 
 /**
- * Rule 7 (D-64; GLOSSARY section 5; CGP-ITAR.md section 10.3): claims about the product. The longest phrase wins, so "ITAR compliant" counts once and not
- * also as "compliant".
+ * The sovereignty overclaims (48.4 D-35; GLOSSARY section 5 rule 6): a product named Sterling Sovereign AI must never call itself any of these. The
+ * sovereignty card shows a state with its evidence instead. They are compliance claims in user copy (rule 7) and are also read in the documentation
+ * files (overclaimHits). "Sterling Sovereign AI" is a name and is stripped before matching (EDITION_NAME).
+ */
+export const SOVEREIGNTY_OVERCLAIMS: readonly string[] = Object.freeze([
+  'fully sovereign', '100% sovereign', '100% Canadian', 'sovereign by default', 'sovereignty certified', 'certified sovereign'
+]);
+
+/**
+ * Rule 7 (D-64; GLOSSARY section 5; CGP-ITAR.md section 10.3): claims about the product, the sovereignty overclaims included (spelled out, because
+ * compliance/src/wordLint.ts copies this list and compliance/test/wordLintParity.test.ts reads it literally). The longest phrase wins, so "ITAR compliant"
+ * counts once and not also as "compliant", and "certified sovereign" not also as "certified".
  */
 export const COMPLIANCE_CLAIMS: readonly string[] = Object.freeze([
-  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'compliant', 'accredited', 'certified'
+  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'fully sovereign', '100% sovereign',
+  '100% Canadian', 'sovereign by default', 'sovereignty certified', 'certified sovereign', 'compliant', 'accredited', 'certified'
 ]);
 const CLAIM_MATCHERS = COMPLIANCE_CLAIMS.map((phrase) => ({ phrase, regex: phraseRegex(phrase) }));
+const OVERCLAIM_MATCHERS = SOVEREIGNTY_OVERCLAIMS.map((phrase) => ({ phrase, regex: phraseRegex(phrase) }));
 /** A claim is honest when its own sentence negates it before the phrase ("is not certified", "does not make ... accredited"). */
 const NEGATION = /(?<![A-Za-z0-9_])(?:not|never|no|cannot|without|isn['\u2019]t|doesn['\u2019]t)(?![A-Za-z0-9_])/i;
+/** "Nothing here is 100% Canadian" is the same negation in sentence form; compliance/src/wordLint.ts reads it the same way. */
+const NOTHING = /(?<![A-Za-z0-9_])nothing(?![A-Za-z0-9_])/i;
 const SENTENCE_BREAK = /[.!?]\s+|\n/;
 
 /** Where a compliance phrase may appear, and why. */
@@ -620,13 +645,27 @@ export interface ClaimContext {
  */
 export const ALLOWED_CLAIM_CONTEXTS: readonly ClaimContext[] = Object.freeze([]);
 
+/** True when the hit's own sentence negates it before the phrase. */
+function negated(text: string, hit: Hit): boolean {
+  const sentence = text.slice(0, hit.start).split(SENTENCE_BREAK).pop() ?? '';
+  return NEGATION.test(sentence) || NOTHING.test(sentence);
+}
+
 function claimHits(text: string, allowed: ReadonlySet<string>): number {
   const hits = longestFirst(CLAIM_MATCHERS.flatMap(({ phrase, regex }) => hitsOf(text, regex, phrase)));
-  return hits.filter((hit) => {
-    if (allowed.has(hit.key.toLowerCase())) return false;
-    const sentence = text.slice(0, hit.start).split(SENTENCE_BREAK).pop() ?? '';
-    return !NEGATION.test(sentence);
-  }).length;
+  return hits.filter((hit) => !allowed.has(hit.key.toLowerCase()) && !negated(text, hit)).length;
+}
+
+/**
+ * The sovereignty overclaims in `text` (48.4 D-35), one entry per hit in order of appearance, with the same negation rule as rule 7. Used over whole
+ * documentation files (documentationFiles), where the extension's copy rules are not run. The product's name is stripped first.
+ */
+export function overclaimHits(text: string): string[] {
+  const plain = text.replace(EDITION_NAME, ' ');
+  return longestFirst(OVERCLAIM_MATCHERS.flatMap(({ phrase, regex }) => hitsOf(plain, regex, phrase)))
+    .filter((hit) => !negated(plain, hit))
+    .sort((a, b) => a.start - b.start)
+    .map((hit) => hit.key);
 }
 
 export interface CountOptions {

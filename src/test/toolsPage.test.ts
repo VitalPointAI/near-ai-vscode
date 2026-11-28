@@ -250,7 +250,9 @@ test('the page script renders the directory, searches it, and "Use in chat" asks
   assert.match(page.doc.getElementById('skills')!.textContent, /\/gsd-plan-phase.*<phase>.*Plan a phase\./);
   assert.match(page.doc.getElementById('tools')!.textContent, /Bash.*shell.*Asks you first/);
   assert.match(page.doc.getElementById('mcp')!.textContent, /mcp__catalog__update/);
-  assert.match(page.doc.getElementById('models')!.textContent, /z-ai\/glm-5\.3.*TEE/);
+  assert.match(page.doc.getElementById('models')!.textContent, /z-ai\/glm-5\.3.*NEAR AI private hardware/);
+  // 74.1-12 (S5): one facts line under each model, the picker's own words.
+  assert.match(page.doc.getElementById('models')!.textContent, /Runs on NEAR AI private hardware \(checked each time it is used\) · China · GLM · Research only/);
   assert.match(page.doc.getElementById('policy')!.textContent, /Ask before edits/);
   const use = page.doc.body.all().find((node) => node.tagName === 'button' && node.getAttribute('aria-label') === 'Use /gsd-execute-phase in chat')!;
   use.click();

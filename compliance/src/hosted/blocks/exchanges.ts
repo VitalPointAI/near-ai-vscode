@@ -33,11 +33,17 @@ export interface Exchange {
   readonly siteSettings: readonly string[];
   readonly controls: readonly string[];
   readonly agreement: string;
+  /** 48.4 D-08: the ISO 3166-1 alpha-2 code of the legal seat of the far end's operator, `org` when your organization operates it, or `unknown`. */
+  readonly operatorJurisdiction: string;
+  /** 48.4 D-08: where the far end is: an ISO 3166-1 alpha-2 code, `site` when it is inside the site, or `unknown`. */
+  readonly location: string;
 }
 export interface ExchangeRegister { readonly exchanges: readonly Exchange[] }
 
 const CALL = new RegExp(`(?<![\\w$.])(${SIGNING_FUNCTIONS.join('|')})\\s*\\(`, 'g');
 const CODE_FILE = /\.(?:mjs|cjs|js|ts)$/;
+const OPERATOR_JURISDICTION = /^(?:[A-Z]{2}|org|unknown)$/;
+const LOCATION = /^(?:[A-Z]{2}|site|unknown)$/;
 const SETTING = /^(site\.example\.yaml|site\.example\/[a-z0-9-]+\.yaml)#([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)$/;
 
 function codeFiles(root: string, dir: string): string[] {
@@ -112,6 +118,10 @@ export function checkExchanges(root: string, register: ExchangeRegister): CheckR
       const built = (exchange.implementedBy ?? []).filter((file) => existsSync(path.join(root, file)));
       if (built.length) warnings.push(`exchange ${exchange.id} is planned in ${exchange.plannedIn ?? '?'}, but ${built.join(', ')} now exists: mark it implemented in ${EXCHANGES_FILE}`);
     }
+    if (!OPERATOR_JURISDICTION.test(String(exchange.operatorJurisdiction ?? ''))) {
+      problems.push(`exchange ${exchange.id}: operatorJurisdiction must be an ISO 3166-1 alpha-2 code in capitals, org (your organization operates it) or unknown`);
+    }
+    if (!LOCATION.test(String(exchange.location ?? ''))) problems.push(`exchange ${exchange.id}: location must be an ISO 3166-1 alpha-2 code in capitals, site (inside the site) or unknown`);
     for (const setting of exchange.siteSettings ?? []) {
       const match = SETTING.exec(setting);
       if (!match) { problems.push(`exchange ${exchange.id}: site setting ${setting} is not <site.example.yaml or site.example/<file>.yaml>#<dotted key>`); continue; }
@@ -137,15 +147,21 @@ function parse(text: string): ExchangeRegister {
   return data;
 }
 
+/** The operator's jurisdiction and the far end's place in plain words (48.4 D-08): a country code as written, never guessed. */
+const OPERATOR_WORDS: Readonly<Record<string, string>> = Object.freeze({ org: 'your organization', unknown: 'unknown' });
+const PLACE_WORDS: Readonly<Record<string, string>> = Object.freeze({ site: 'at the site', unknown: 'unknown' });
+
 /** The register table. */
 export function renderTable(register: ExchangeRegister): string {
   const rows = register.exchanges.map((exchange) => {
     const route = `${exchange.from} to ${exchange.to}${exchange.direction === 'both-ways' ? ' and back' : ''}, ${exchange.kind === 'file' ? 'by file' : 'over the network'}`;
     const status = exchange.status === 'implemented' ? `Implemented: ${(exchange.implementedBy ?? []).map(code).join(', ')}` : `Planned in ${exchange.plannedIn ?? '?'}`;
     const settings = exchange.siteSettings.length ? exchange.siteSettings.map(code).join(', ') : 'None';
-    return `| **${cell(exchange.title)}** (${code(exchange.id)}) | ${cell(route)} | ${cell(exchange.data)} Format: ${cell(exchange.format)} | ${cell(exchange.protection)} | ${cell(exchange.frequency)} | ${settings} | ${status} | ${cell(exchange.agreement)} |`;
+    const operator = OPERATOR_WORDS[exchange.operatorJurisdiction] ?? exchange.operatorJurisdiction;
+    const place = PLACE_WORDS[exchange.location] ?? exchange.location;
+    return `| **${cell(exchange.title)}** (${code(exchange.id)}) | ${cell(route)} | ${cell(operator)} | ${cell(place)} | ${cell(exchange.data)} Format: ${cell(exchange.format)} | ${cell(exchange.protection)} | ${cell(exchange.frequency)} | ${settings} | ${status} | ${cell(exchange.agreement)} |`;
   });
-  return ['| Exchange | From and to | Data and format | Protection | Frequency | Site settings | Status | Agreement |', '|---|---|---|---|---|---|---|---|', ...rows].join('\n');
+  return ['| Exchange | From and to | Operator under | Far end | Data and format | Protection | Frequency | Site settings | Status | Agreement |', '|---|---|---|---|---|---|---|---|---|---|', ...rows].join('\n');
 }
 
 const nodeId = (party: string): string => `n_${party.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`;

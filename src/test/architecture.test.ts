@@ -21,8 +21,10 @@ import {
   compareWithBaseline,
   findViolations,
   foldersInCycles,
+  importsOf,
   layerOf,
   scanArchitecture,
+  sourcesUnder,
   unplacedTopLevel,
   type ArchitectureBaseline,
   type BaselineComparison
@@ -276,4 +278,145 @@ test('D-45: the baseline file is sorted and has no duplicate line', () => {
   const files = Object.keys(baseline.fileSizes);
   assert.deepEqual(files, [...files].sort(), 'fileSizes is sorted');
   assert.ok(text.endsWith('}\n') && text.includes('\n  "rules": {'), 'two-space indent and a trailing newline');
+});
+
+// ---- 33.2 D-09: no new X25519 wrap after the switch, ever ----
+
+// The two files that may make a wrap themselves: the v1 wrap (cellKeys.ts) and the v2 wrap with the one entry point (cellWrapV2.ts).
+const WRAP_MAKERS: ReadonlySet<string> = new Set(['domain/replica/cellKeys.ts', 'domain/replica/cellWrapV2.ts']);
+// Key agreement that wraps no cell key, each for its reason: it never reaches a staff replica grant.
+const OTHER_KEY_AGREEMENT: Readonly<Record<string, string>> = {
+  'domain/exchange/tdf.ts': 'OpenTDF key access for exchange with allies (45.1-02): P-256 ECDH to a partner\'s published key, never a cell key'
+};
+// Files that call the entry point (wrapForDevice, or grantPages' wrapsFor and earlierEpochGrants over it) and must choose the format with
+// wrapPlan.formatFor, except these, each for its reason.
+const FORMAT_CHOSEN_ELSEWHERE: Readonly<Record<string, string>> = {
+  'domain/replica/cellWrapV2.ts': 'defines the entry point',
+  'domain/replica/grantPages.ts': 'takes the format its caller chose',
+  'staff/replica/replicaProject.ts': 'the genesis, before any roster: v2 exactly when the project starts switched (wrapV2AtCreation)'
+};
+
+const codeOf = (text: string): string => text.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
+
+/** Every way a source tree breaks the wrap rule (D-09). */
+function wrapPathProblems(sources: ReadonlyMap<string, string>): string[] {
+  const problems: string[] = [];
+  for (const [file, text] of sources) {
+    const code = codeOf(text);
+    if (!WRAP_MAKERS.has(file) && /\bwrapEpochKey\s*\(/.test(code)) problems.push(`${file}: calls wrapEpochKey outside the wrap modules`);
+    if (!WRAP_MAKERS.has(file) && !Object.hasOwn(OTHER_KEY_AGREEMENT, file) && /\bdiffieHellman\s*\(/.test(code)) problems.push(`${file}: does key agreement outside the wrap modules`);
+    const wraps = /\b(?:wrapForDevice|wrapsFor|earlierEpochGrants)\s*\(/.test(code);
+    if (wraps && !Object.hasOwn(FORMAT_CHOSEN_ELSEWHERE, file) && !/\bformatFor\s*\(/.test(code)) problems.push(`${file}: wraps without wrapPlan.formatFor`);
+  }
+  // The entry point writes v1 only on its format-1 branch, after the format-2 branch: the caller's formatFor is what keeps v1 out after the switch.
+  const entry = codeOf(sources.get('domain/replica/cellWrapV2.ts') ?? '');
+  const body = entry.slice(entry.indexOf('export function wrapForDevice'));
+  const guard = body.indexOf('input.format === 2');
+  const v1 = body.indexOf('wrapEpochKey(');
+  if (guard < 0 || v1 < 0 || v1 < guard) problems.push('domain/replica/cellWrapV2.ts: wrapForDevice writes v1 without the format-2 branch first');
+  return problems.sort();
+}
+
+test('33.2 D-09: no file outside the wrap modules makes an X25519 wrap or agreement, and every wrap path chooses its format with formatFor', () => {
+  const sources = sourcesUnder(SRC);
+  assert.ok(sources.has('domain/replica/cellWrapV2.ts'));
+  assert.deepEqual(wrapPathProblems(sources), []);
+});
+
+test('33.2 D-09 has teeth: a planted wrapEpochKey or diffieHellman call, a wrap path without formatFor, and a v1 branch without the guard are reported', () => {
+  const sources = sourcesUnder(SRC);
+  const entry = sources.get('domain/replica/cellWrapV2.ts') as string;
+  const seeded = new Map(sources);
+  seeded.set('staff/replica/planted.ts', "import { wrapEpochKey } from '../../domain/replica/cellKeys';\nexport const w = wrapEpochKey({} as never);\n");
+  seeded.set('agent/agreed.ts', "import { diffieHellman } from 'node:crypto';\nexport const s = diffieHellman({} as never);\n");
+  seeded.set('staff/replica/unchosen.ts', "import { wrapsFor } from '../../domain/replica/grantPages';\nexport const w = wrapsFor({ format: 1 } as never);\n");
+  seeded.set('domain/replica/cellWrapV2.ts', entry.replace('input.format === 2', 'false'));
+  assert.deepEqual(wrapPathProblems(seeded), [
+    'agent/agreed.ts: does key agreement outside the wrap modules',
+    'domain/replica/cellWrapV2.ts: wrapForDevice writes v1 without the format-2 branch first',
+    'staff/replica/planted.ts: calls wrapEpochKey outside the wrap modules',
+    'staff/replica/unchosen.ts: wraps without wrapPlan.formatFor'
+  ]);
+  // A comment that names the call is not a call.
+  const commented = new Map(sources);
+  commented.set('staff/replica/notes.ts', '// wrapEpochKey(...) is called only in cellKeys.ts\nexport const n = 1;\n');
+  assert.deepEqual(wrapPathProblems(commented), []);
+});
+
+// 45.2-14 (CONTEXT D-26, D-31): the inbound adapters and the archive reader read hostile files from outside your organization, so they reach nothing
+// but the bytes they were given. Each module kind below is refused under both folders, for the reason beside it.
+const NO_IO_FOLDERS = ['domain/exchange/inbound', 'domain/archive'] as const;
+const IO_MODULES_REFUSED: Readonly<Record<string, string>> = {
+  fs: 'file system: an adapter reads only the bytes it was handed and never writes a partner file anywhere',
+  net: 'network: a URI inside an arrival is never dereferenced (request forgery)',
+  http: 'network: a URI inside an arrival is never dereferenced (request forgery)',
+  https: 'network: a URI inside an arrival is never dereferenced (request forgery)',
+  http2: 'network: a URI inside an arrival is never dereferenced (request forgery)',
+  dgram: 'network: a URI inside an arrival is never dereferenced (request forgery)',
+  undici: "network: Node's own fetch implementation",
+  dns: 'DNS: a lookup is a network call and tells a stranger what the arrival names',
+  tls: 'TLS: a connection is a network call; key servers are reached only through the backend rewrap port',
+  child_process: 'child process: escapes the pure domain and the parser limits',
+  worker_threads: 'worker: escapes the pure domain and the parser limits',
+  cluster: 'worker: escapes the pure domain and the parser limits'
+};
+// D-26: a stored form is never signed by your organization, so nothing under the inbound folder names the label binding signer of 45.1-01 (bindLabel)
+// or a release key (release-<site>, release-p256-<site>, an org-release signer id). Verifying a sender's binding (verifyLabelBinding) stays allowed.
+const NO_RELEASE_SIGNER_FOLDER = 'domain/exchange/inbound';
+const RELEASE_SIGNER_NAMES = /\bbindLabel\b|\brelease-p256\b|\brelease-(?:<site>|\$\{)|['"`]org-release:/;
+const FETCH_CALL = /(?:^|[^\w.$])fetch[ \t]*\(|\b(?:globalThis|global|window|self)[ \t]*(?:\.[ \t]*fetch\b|\[[ \t]*['"`]fetch['"`])/;
+
+function isCommentLine(line: string): boolean {
+  const trimmed = line.trimStart();
+  return trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*');
+}
+
+/** The I/O and release-signer findings under the inbound adapters and the archive reader, as "<file> -> <what>", sorted. Test files are not scanned. */
+function inboundIoFindings(sources: ReadonlyMap<string, string>): string[] {
+  const found = new Set<string>();
+  for (const [file, text] of sources) {
+    if (file.endsWith('.test.ts') || !NO_IO_FOLDERS.some((folder) => file.startsWith(`${folder}/`))) continue;
+    // Comment lines are blanked (keeping the line count), so a word in a comment is never a finding.
+    const code = text.split('\n').map((line) => (isCommentLine(line) ? '' : line)).join('\n');
+    for (const ref of importsOf(code)) {
+      const module = ref.specifier.replace(/^node:/, '').split('/')[0] ?? '';
+      if (Object.prototype.hasOwnProperty.call(IO_MODULES_REFUSED, module)) found.add(`${file} -> ${module}`);
+    }
+    if (FETCH_CALL.test(code)) found.add(`${file} -> fetch`);
+    if (file.startsWith(`${NO_RELEASE_SIGNER_FOLDER}/`) && RELEASE_SIGNER_NAMES.test(code)) found.add(`${file} -> release signer`);
+  }
+  return [...found].sort();
+}
+
+test('D-26, D-31: no inbound adapter or archive reader reaches a disk, the network or a worker, and no inbound adapter names a release signer', () => {
+  // Teeth: every import form the vscode-below-editor rule reads, for each kind of module, is reported.
+  const forms = (module: string): string[] => [`import * as m from '${module}';`, `const lazy = await import('${module}');`, `const old = require('${module}');`, `import type { X } from '${module}';`, `import '${module}';`, `export { y } from '${module}';`];
+  for (const [module, kind] of [['node:fs', 'fs'], ['fs/promises', 'fs'], ['node:https', 'https'], ['http', 'http'], ['node:net', 'net'], ['dns/promises', 'dns'], ['node:tls', 'tls'], ['node:child_process', 'child_process'], ['worker_threads', 'worker_threads'], ['undici', 'undici']] as const) {
+    for (const form of forms(module)) {
+      const found = inboundIoFindings(planted({
+        'domain/exchange/inbound/planted.ts': form,
+        'domain/archive/planted.ts': form,
+        'domain/exchange/inbound/planted.test.ts': form,
+        'domain/exchange/tdf.ts': form,
+        'agent/zip.ts': form
+      }));
+      assert.deepEqual(found, [`domain/archive/planted.ts -> ${kind}`, `domain/exchange/inbound/planted.ts -> ${kind}`], form);
+    }
+  }
+  for (const call of ['const r = await fetch(url);', 'void globalThis.fetch(url);', "globalThis['fetch'](url);", 'return fetch (url)']) {
+    assert.deepEqual(inboundIoFindings(planted({ 'domain/exchange/inbound/x.ts': call, 'domain/archive/y.ts': call })), ['domain/archive/y.ts -> fetch', 'domain/exchange/inbound/x.ts -> fetch'], call);
+  }
+  for (const signer of ["import { bindLabel } from '../labelBinding';", 'const key = `release-p256-${site}`;', 'const key = `release-${site}`;', "const signer = 'org-release:' + site;"]) {
+    assert.deepEqual(inboundIoFindings(planted({ 'domain/exchange/inbound/x.ts': signer, 'domain/archive/y.ts': signer })), ['domain/exchange/inbound/x.ts -> release signer'], signer);
+  }
+  // Comments that name them, the zlib the archive reader uses, a verifier and an adapter's own port names are not findings.
+  const fine = inboundIoFindings(planted({
+    'domain/archive/zip.ts': "import { crc32, inflateRawSync } from 'node:zlib';\n// never import fs from 'node:fs' or call fetch(url) here\n * const x = require('node:child_process');",
+    'domain/exchange/inbound/tdf.ts': "import { verifyLabelBinding } from '../labelBinding';\n/* bindLabel and release-p256-<site> are never named here */\nconst opened = await ports.rewrap(object);\nconst prefetch = sample.prefetched;"
+  }));
+  assert.deepEqual(fine, []);
+  // The repository passes today: the folders hold the archive reader (and later the adapters), and none of them reaches outside.
+  const sources = sourcesUnder(SRC);
+  assert.ok(sources.has('domain/archive/zip.ts'), 'the archive reader is scanned');
+  assert.deepEqual(inboundIoFindings(sources), []);
 });

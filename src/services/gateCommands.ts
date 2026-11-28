@@ -20,7 +20,8 @@ import { chatInView, isChatInView, onChatInViewChange, queueChatNotice } from '.
 import type { ChatInView } from './chatInView';
 import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
-import { BundleStoreError } from '../gate/bundleStore';
+import { BundleStoreError, gateDir } from '../gate/bundleStore';
+import { PASSPORT_TRIGGER_FILE, createPassportTriggerLog, setPassportTriggerLog } from '../gate/passportTriggers';
 import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
 import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError, USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
@@ -31,6 +32,8 @@ import { labelKeyShown, levelShown, scaleShown, setActiveScaleSource } from '../
 import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routing';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem, standingOrdersInstructions } from './gateStatusBar';
+import { onReportNoticeChange, reportNoticeStatus, startReportModeNotice } from './reportModeNotice';
+import { setModelRowContext } from './chatBridge';
 import type { GateStatusTimers } from './gateStatusBar';
 import { ADD_ORGANIZATION_RULES_COMMAND, addOrganizationRules, startNotices } from './organizationRules';
 import type { NoticeMemento } from './organizationRules';
@@ -291,7 +294,9 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const clearScales = setActiveScaleSource(() => host.labelPolicy().scales);
   // Coherence review S4: TEE-only mode puts the private floor on every model request, so the gate's own check decides what counts as private.
   const clearPrivateOnly = setPrivateOnlySetting(() => vscode.workspace.getConfiguration('nearAi').get<string>('privacyMode') === 'tee-only');
-  try { context.subscriptions?.push({ dispose: clearScales }, { dispose: clearPrivateOnly }); } catch { /* replaced at the next activation */ }
+  // 74.1 D-15: a re-evaluation trigger seen on a model's place is kept once per passport hash in global storage, so it still holds after a restart.
+  const clearTriggers = setPassportTriggerLog(createPassportTriggerLog({ file: path.join(gateDir(context.globalStorageUri.fsPath), PASSPORT_TRIGGER_FILE), onProblem: tell }));
+  try { context.subscriptions?.push({ dispose: clearScales }, { dispose: clearPrivateOnly }, { dispose: clearTriggers }); } catch { /* replaced at the next activation */ }
   // Coherence review S1: a policy whose local hosts hold a *. pattern is told once in this window what changed and how to fix the entry.
   // D-20, D-27: the one-time notices first; the migration notice names the same hosts, so the pattern notice waits for the next window after it.
   void host.state().then(async (state) => {
@@ -330,9 +335,14 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       const mark = chat?.mark()?.current();
       return chat === undefined || mark === undefined ? undefined : { mark, defaultLabel: chat.defaultLabel() };
     };
-    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock(), layers: host.policyLayers() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock(), layers: host.policyLayers() }), chatMark, reportNotice: () => reportNoticeStatus(host.policyLayers()), ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
     const refresh = (): void => { bar.update(host.bundleState(), clock(), host.policyLayers()); };
     keep({ dispose: () => { bar.dispose(); } });
+    // 74.1-13: the report-only notice of this window's session, raised by a would-refuse of route.passport and cleared by enforce.
+    keep(startReportModeNotice(host));
+    // 74.1-12: the picker and the model directory read the effective models section and the chat panel's use (agent work) from the host.
+    keep({ dispose: setModelRowContext(() => { const layers = host.policyLayers(); return { ...(layers.effective?.models === undefined ? {} : { section: layers.effective.models }), organization: layers.organization.state === 'valid', use: 'T2', now: clock() }; }) });
+    keep(onReportNoticeChange(refresh));
     keep({ dispose: host.onDidChange(refresh) });
     // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.
     keep({ dispose: onChatInViewChange(refresh) });

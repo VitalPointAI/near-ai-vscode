@@ -44,10 +44,15 @@ up in another project, without entering the key again.
 
 - **You know where your work goes.** NEAR AI runs some models inside attested
   trusted execution environments and forwards others to third parties. Every
-  model in the picker, and every reply, says which. Private models come first,
-  and the default (GLM 5.3) is one of them. Transcripts are encrypted on disk,
-  credentials are kept out of the agent's shell, and nothing is sent as
-  telemetry.
+  model in the picker, and every reply, says which. Transcripts are encrypted
+  on disk, credentials are kept out of the agent's shell, and nothing is sent
+  as telemetry.
+- **You know which models may do what.** Each model is approved for a use,
+  and the picker shows its origin, family and "Approved for {use} until
+  {date}" or "Research only". When your organization's model policy is set to
+  enforce, a model is refused for work its approval does not cover; until
+  then a notice says agent work runs outside it (report only). See
+  [Which models may do what](SECURITY.md#which-models-may-do-what).
 - **Chat stays beside your work.** Open the SovAI chat drawer in the workbench
   to see replies and manage approval requests while you edit.
 - **You always know the cost.** Every response shows the model, token count,
@@ -67,6 +72,26 @@ up in another project, without entering the key again.
   blocks forwarded models, and an emergency stop halts everything.
 
 ## Features
+
+### Which models may do what
+
+- **Approved for a use.** Every model request is checked against an approval
+  for its use (research only, chat you review, agent work or operational
+  work) before anything is sent, and the picker shows "Approved for {use}
+  until {date}" or "Research only".
+- **Report only until your organization enforces.** Until your organization's
+  model policy enforces, requests outside it are sent, recorded, and named in
+  a notice that cannot be closed.
+- **The research workspace.** **SovAI: Open Research Workspace** is the one
+  place for models approved for research only, with no project files,
+  commands or tools.
+- **Exceptions.** Under your organization's rules a named person can allow a
+  research-only model for chat you review for at most 90 days, shown as
+  "Allowed for chat you review by {name} until {date}".
+- **Western defaults.** The models for each job default to Nemotron 3,
+  Command A+ and gpt-oss, and checks run on a model of another family.
+- **Export AI Bill of Materials.** **SovAI: Export AI Bill of Materials**
+  lists every model a project used, with its licence, lineage and approval.
 
 ### An agent, not just a chat
 
@@ -790,8 +815,8 @@ until it runs out aren't shown.
   for its tier, and if there is none the member does not run and the lead is
   told why, so its work is never sent to a forwarded model. To choose that
   model, set `nearAi.agent.deepModel` (or the standard or fast tier the
-  member names) to a model whose picker label reads "Private · NEAR AI
-  private hardware, checked each time it is used", or to a local model; if the configured tier model is forwarded, the
+  member names) to a model whose picker group reads "Runs on NEAR AI
+  private hardware (checked each time it is used)", or to a local model; if the configured tier model is forwarded, the
   next private tier model is used (deep, then standard, then fast for a deep
   member), then the most capable other private model. `privacy: any`, or no
   line, lets the member use any model the run may use. The picker's word only

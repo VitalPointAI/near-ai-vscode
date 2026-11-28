@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sa-11",
+    "sr-03"
+  ],
+  "gap": "G415",
+  "id": "g415",
+  "milestones": [
+    {
+      "targetDate": "2027-06-30",
+      "title": "Your organization's evaluation of Nemotron 3 includes trigger sweeps with Canadian and defence context"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "NVIDIA trained Nemotron 3 from scratch, but part of its post-training data came from DeepSeek, Qwen and Kimi models (and gpt-oss). This is recorded in its approval's lineage. Before approving it for operational work, your organization's evaluation includes trigger sweeps with Canadian and defence context. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-07.",
+  "title": "Nemotron 3 was post-trained on outputs of models from the People's Republic of China"
+}

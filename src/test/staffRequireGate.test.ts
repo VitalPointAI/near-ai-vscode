@@ -3,17 +3,20 @@
 // has an install of their own (createLiveWorld); entries travel through the fake transport. Fictional people and data only.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { KNOWN_REPLICA_FEATURES, UPDATE_SENTENCE } from '../domain/replica/features';
+import { UPDATE_SENTENCE, WRAP_V2_FEATURE } from '../domain/replica/features';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { ProductEditor } from '../staff/replica/productEditing';
 import { ReplicaProject, ReplicaProjectError, isProjectRefused } from '../staff/replica/replicaProject';
 import type { ProjectRefused } from '../staff/replica/replicaProject';
-import { REQUIRE_ARMED_FEATURE, ensureRequireArmed, requireProblem } from '../staff/replica/requireGate';
+import { REQUIRE_ARMED_FEATURE, clientReplicaFeatures, ensureRequireArmed, requireProblem } from '../staff/replica/requireGate';
 import { carryThroughFake, createLiveWorld, liveInstall } from './helpers/liveWorld';
 import type { LiveDevice, LiveWorld } from './helpers/liveWorld';
 
 const PRODUCT = 'intel-estimate';
-const NEWER = [...KNOWN_REPLICA_FEATURES, 'positions@1'].sort();
+// A newer version folds everything this one does (wrap@2 too where the probe passes, 33.2 D-05) and positions@1.
+const NEWER = [...clientReplicaFeatures(), 'positions@1'].sort();
+// What a project made shared here requires from creation (D-08), with wrap@2 beside require@1 where this computer knows it (33.2 D-05).
+const ARMED = clientReplicaFeatures().includes(WRAP_V2_FEATURE) ? [REQUIRE_ARMED_FEATURE, WRAP_V2_FEATURE].sort() : [REQUIRE_ARMED_FEATURE];
 
 function opened(value: ReplicaProject | ProjectRefused | undefined, what: string): ReplicaProject {
   assert.ok(value instanceof ReplicaProject, `${what} (${isProjectRefused(value) ? value.refused : String(value)})`);
@@ -90,7 +93,7 @@ test('no loss after the update: the same store opened by a version that folds po
       const updated = opened(await ReplicaProject.open(ben.at.root, { ...ben.at.deps, knownFeatures: NEWER }), 'the updated version opens the same store');
       try {
         const { roster, fold } = await updated.state();
-        assert.deepEqual(roster.required, ['positions@1', REQUIRE_ARMED_FEATURE]);
+        assert.deepEqual(roster.required, ['positions@1', ...ARMED].sort());
         assert.equal(textOf(fold, stream), text);
         assert.deepEqual(fold.refused, [], 'nothing was refused');
       } finally {
@@ -102,19 +105,19 @@ test('no loss after the update: the same store opened by a version that folds po
   });
 });
 
-test('a project made shared holds roster.require require@1 right after its genesis, and it folds on the shipped registry (D-08)', async () => {
+test('a project made shared holds roster.require require@1 (with wrap@2 where this computer knows it) right after its genesis, and it folds on this computer\'s registry (D-08)', async () => {
   const at = liveInstall('solo');
   const project = opened(await ReplicaProject.createSharedProject(at.root, at.deps, {
     name: 'Exercise Northwind', profile: 'j4', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
   }), 'the lead makes the shared project');
   try {
     const { roster } = await project.state();
-    assert.deepEqual(roster.required, [REQUIRE_ARMED_FEATURE]);
+    assert.deepEqual(roster.required, ARMED);
     assert.equal(roster.positions.length, 3, 'origin, genesis, then the requirement');
     const own = await project.findOwnAll('roster.require', () => true);
     assert.equal(own.length, 1);
     assert.equal(own[0].hash, roster.positions[2]);
-    assert.deepEqual(own[0].data, { features: [REQUIRE_ARMED_FEATURE], rosterPrev: roster.positions[1] });
+    assert.deepEqual(own[0].data, { features: ARMED, rosterPrev: roster.positions[1] });
     assert.equal(requireProblem(roster), undefined, 'the shipped registry folds require@1');
   } finally {
     await project.close();

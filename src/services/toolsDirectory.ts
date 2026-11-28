@@ -8,6 +8,8 @@ import { describeManifest } from '../domain/gate/words';
 import { GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
 import type { TeamDefinition } from '../agent/teams';
 import type { McpServerStatus } from './mcpRegistry';
+import { MODEL_ROW_TEXT, catalogRows } from '../domain/gate/modelRow';
+import { modelRowContext } from './chatBridge';
 import { mcpToolCapability, mcpToolName } from '../mcp/tools';
 import type { ModelInfo, NearAiClient } from './nearAiClient';
 import { POLICY_OPTIONS } from './approvalPolicy';
@@ -27,7 +29,7 @@ export interface DirectoryTool { name: string; description: string; capability: 
 export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; words: string[]; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
 /** A built-in staff server (staff-products, guard-scan, intel-workbench, observations, logistics): given only to a staff team's run, granted by `grant` or tool by tool. */
 export interface DirectoryStaffServer { id: string; grant: string; name: string; description: string; tools: DirectoryTool[] }
-export interface DirectoryModel { id: string; privacy: 'tee' | 'local' | 'forwarded' | 'unknown'; privacyText: string; contextLength?: number; inputPerMillion?: number; outputPerMillion?: number; imagePrice?: number; kinds: string[]; usedFor: string[] }
+export interface DirectoryModel { id: string; privacy: 'tee' | 'local' | 'forwarded' | 'unknown'; privacyText: string; /** 74.1 D-21 (S5): Runs on, origin, family, approval, from the picker's helper. */ facts: string; contextLength?: number; inputPerMillion?: number; outputPerMillion?: number; imagePrice?: number; kinds: string[]; usedFor: string[] }
 
 export interface ToolsDirectory {
   gsd: { installed: boolean; version?: string };
@@ -159,7 +161,8 @@ export function privacyOf(model: ModelInfo): DirectoryModel['privacy'] {
   return model.privacyBoundary === 'tee' ? 'tee' : model.privacyBoundary === 'local' ? 'local' : model.privacyBoundary === 'cloud' ? 'forwarded' : 'unknown';
 }
 
-export const PRIVACY_TEXT: Record<DirectoryModel['privacy'], string> = { tee: 'TEE: runs privately in NEAR’s TEE', local: 'Local: runs on this machine', forwarded: 'Forwarded: not private', unknown: 'Privacy unknown' };
+/** Where a model runs, in the Runs on words (74.1 D-21, design 8.6): no bare "Private" and no glossary word. */
+export const PRIVACY_TEXT: Record<DirectoryModel['privacy'], string> = { tee: `Runs on ${MODEL_ROW_TEXT.nearPlace}`, local: 'Runs on this computer', forwarded: 'Runs on an outside provider', unknown: 'Runs on a place your rules do not name' };
 
 /** Builds the whole directory from what the host gathered. Pure: no I/O, no model calls. */
 export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
@@ -231,11 +234,14 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
     { use: 'safety', setting: 'nearAi.agent.safetyModel', model: input.settings.safetyModel },
     { use: 'image', setting: 'nearAi.agent.imageModel', model: input.settings.imageModel }
   ];
+  // 74.1 D-21 (S5): the same row helper as the chat picker, so the two never disagree; the directory greys nothing.
+  const context = modelRowContext();
+  const facts = new Map(catalogRows(catalog, context.section, context.now, { organization: context.organization }).map((entry) => [entry.id, entry.row.facts]));
   const models: DirectoryModel[] = catalog.map((model) => {
     const privacy = privacyOf(model);
     const kinds = [...new Set([...(model.inputModalities ?? []).filter((kind) => kind !== 'text').map((kind) => `${kind} in`), ...(model.outputModalities ?? []).filter((kind) => kind !== 'text').map((kind) => `${kind} out`)])];
     return {
-      id: model.id, privacy, privacyText: model.forwardedTo && privacy === 'forwarded' ? `Forwarded to ${model.forwardedTo}: not private` : PRIVACY_TEXT[privacy],
+      id: model.id, privacy, privacyText: model.forwardedTo && privacy === 'forwarded' ? `Runs on outside provider (${model.forwardedTo})` : PRIVACY_TEXT[privacy], facts: facts.get(model.id) ?? '',
       ...(model.contextLength ? { contextLength: model.contextLength } : {}),
       ...(model.inputPricePerMillion !== undefined ? { inputPerMillion: model.inputPricePerMillion } : {}),
       ...(model.outputPricePerMillion !== undefined ? { outputPerMillion: model.outputPricePerMillion } : {}),

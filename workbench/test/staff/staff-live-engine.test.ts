@@ -23,7 +23,7 @@ import { productBodyOf } from '../../../src/staff/replica/projection.ts';
 import { hubNodeOrSkip, startHubChild } from '../../../src/test/helpers/hubChild.ts';
 import { createLiveWorld, type LiveDevice, type LiveWorld } from '../../../src/test/helpers/liveWorld.ts';
 import { MemorySecrets } from '../../../src/test/helpers/labelCellWorld.ts';
-import { loadOrCreateEncryptionKey } from '../../../src/staff/replica/keyring.ts';
+import { loadOrCreateEncryptionKey, loadOrCreateKemKeys } from '../../../src/staff/replica/keyring.ts';
 import { identityDir } from '../../../src/team/identity.ts';
 import type { KeyObject } from 'node:crypto';
 import { startSessionKeys } from '../../extension/src/node/staff/session-keys.ts';
@@ -383,8 +383,10 @@ test('a hosted session opens the project with the person key as its device: the 
     assert.equal(started.kind, 'ok');
     if (started.kind !== 'ok') return;
     const x25519 = await loadOrCreateEncryptionKey(avery.at.secrets, { identityDir: identityDir(avery.at.global), identity: person });
+    // The person's post-quantum keys, as the session's envelope holds them (33.2-04): new shared work starts post-quantum (33.2-06).
+    const kem = await loadOrCreateKemKeys(avery.at.secrets, { identityDir: identityDir(avery.at.global) });
     let dropped = 0;
-    const encryption = { publicKey: x25519.publicKey, privateKey: x25519.privateKey as KeyObject | undefined, kem: undefined, drop: () => { dropped += 1; } };
+    const encryption = { publicKey: x25519.publicKey, privateKey: x25519.privateKey as KeyObject | undefined, kem: { publicKeys: kem.publicKeys, privateKeys: kem.privateKeys }, drop: () => { dropped += 1; } };
     const secrets = new MemorySecrets();
     FakeReplicator.made = [];
     const live = new StaffLiveEngine({

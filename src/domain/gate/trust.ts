@@ -14,6 +14,10 @@ import { endpointOf, isLocalRouteHost, strictestLabelOf } from './routing';
 import type { AllowingRecord, ReportedRouteRule, RouteDecision, RouteEndpoint, RouteFacts, RoutingTable } from './routing';
 import { TRUST_BADGE_STATES } from './trustBadge';
 import { USE_TIER_WORDS } from './useTier';
+import { MONTHS, PLACE_TEXT, dateShown, placeShown } from './placeWords';
+
+/** The date and place words live in placeWords.ts (74.1-04) and are re-exported here for the trust line's users. */
+export { dateShown, placeShown };
 
 /** How far the check of a request got: the three shipped proof levels unchanged (CLAS-08), then the state before any check ran. */
 export const TRUST_VERIFICATION_LEVELS = Object.freeze([...TRUST_BADGE_STATES, 'not-checked'] as const);
@@ -42,6 +46,8 @@ export interface TrustFacts {
   readonly use?: UseTier;
   /** The report-only rules that would have refused, sorted. */
   readonly wouldRefuse: readonly ReportedRouteRule[];
+  /** The SHA-256 of the passport that decided the request, beside its model-approval record (74.1 D-23). */
+  readonly passportHash?: string;
 }
 
 export interface TrustContext {
@@ -89,27 +95,21 @@ export function trustFactsFor(decision: RouteDecision, facts: RouteFacts, contex
     wouldRefuse: Object.freeze([...(decision.wouldRefuse ?? [])])
   };
   if (label !== undefined) trust.label = label;
-  if (facts.use !== undefined) trust.use = facts.use;
+  const use = decision.useTier ?? facts.use;
+  if (use !== undefined) trust.use = use;
+  if (decision.passport !== undefined) trust.passportHash = decision.passport.hash;
   return Object.freeze(trust);
 }
-
-const MONTHS = Object.freeze(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']);
 
 /** Every fixed word of the trust line (glossary rows Runs on, Verified and Allowed). */
 export const TRUST_LINE_TEXT = Object.freeze({
   runsOn: 'Runs on',
-  places: Object.freeze({
-    local: 'this computer',
-    'org-plain': 'your organization\'s server',
-    'org-tee': 'your organization\'s server (private hardware)',
-    'nearai-tee': 'NEAR AI private hardware',
-    unknown: 'a place your rules do not name'
-  }),
-  vault: 'Cohere vault',
-  outsideProvider: 'outside provider',
-  anOutsideProvider: 'an outside provider',
-  in: 'in',
-  regions: Object.freeze({ CA: 'Canada', US: 'the United States', EU: 'the European Union' }),
+  places: PLACE_TEXT.places,
+  vault: PLACE_TEXT.vault,
+  outsideProvider: PLACE_TEXT.outsideProvider,
+  anOutsideProvider: PLACE_TEXT.anOutsideProvider,
+  in: PLACE_TEXT.in,
+  regions: PLACE_TEXT.regions,
   verified: Object.freeze({
     'verified-private': 'Verified',
     'model-verified': 'Model verified, connection not proven',
@@ -118,6 +118,7 @@ export const TRUST_LINE_TEXT = Object.freeze({
   } satisfies Record<TrustVerificationLevel, string>),
   allowedFor: 'Allowed for',
   allowedBy: 'Allowed by',
+  allowedForChat: 'Allowed for chat you review by',
   by: 'by',
   authorization: 'authorization',
   until: 'until',
@@ -127,44 +128,6 @@ export const TRUST_LINE_TEXT = Object.freeze({
   recordSeparator: '; ',
   months: MONTHS
 });
-
-/** A date as people read it, in UTC: "1 Dec 2027". A text that is not a date is returned as it is. */
-export function dateShown(iso: string): string {
-  const at = Date.parse(iso);
-  if (!Number.isFinite(at)) return iso;
-  const date = new Date(at);
-  return `${String(date.getUTCDate())} ${MONTHS[date.getUTCMonth()] as string} ${String(date.getUTCFullYear())}`;
-}
-
-function regionShown(region: EndpointRegion): string | undefined {
-  return region === 'unstated' ? undefined : TRUST_LINE_TEXT.regions[region];
-}
-
-function outsideProvider(name: string | undefined): string {
-  return name === undefined ? TRUST_LINE_TEXT.anOutsideProvider : `${TRUST_LINE_TEXT.outsideProvider} (${name})`;
-}
-
-/** The place in the glossary's words; vendor places add their region. */
-function placeShown(place: TrustPlace): string {
-  switch (place.class) {
-    case 'local':
-    case 'org-plain':
-    case 'org-tee':
-    case 'nearai-tee':
-    case 'unknown':
-      return TRUST_LINE_TEXT.places[place.class];
-    case 'vendor-tee':
-    case 'vendor-region': {
-      const base = place.provider?.startsWith('cohere') === true ? TRUST_LINE_TEXT.vault : outsideProvider(place.provider ?? place.endpointId);
-      const region = regionShown(place.region);
-      return region === undefined ? base : `${base} ${TRUST_LINE_TEXT.in} ${region}`;
-    }
-    case 'forwarded':
-      return outsideProvider(place.forwardedTo ?? place.provider);
-    case 'closed-api':
-      return outsideProvider(place.provider ?? place.forwardedTo ?? place.endpointId);
-  }
-}
 
 /** A `scale/level` key as people read it: the decided label's words (with its export markings) when it is that label, otherwise scale and level alone. */
 function labelShownFor(key: string, decided: Label | undefined, scales: ScaleTable): string {
@@ -178,6 +141,9 @@ function recordShown(record: AllowingRecord, decided: Label | undefined, scales:
     case 'routing':
       return `${TRUST_LINE_TEXT.allowedFor} ${labelShownFor(record.label, decided, scales)}`;
     case 'authorization': {
+      // An exception always covers exactly one use, so it names it (74.1 P20, design 5.3): one string on every surface, and no self-signed form, because
+      // a self-signed exception covers nothing (D-20).
+      if (record.authorizationKind === 't1-risk') return `${TRUST_LINE_TEXT.allowedForChat} ${record.name} ${TRUST_LINE_TEXT.until} ${dateShown(record.expiresAt)}`;
       const opening = record.label === undefined
         ? TRUST_LINE_TEXT.allowedBy
         : `${TRUST_LINE_TEXT.allowedFor} ${labelShownFor(record.label, decided, scales)} ${TRUST_LINE_TEXT.by}`;

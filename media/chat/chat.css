@@ -497,3 +497,26 @@ body.vscode-high-contrast .trust-badge, body.vscode-high-contrast-light .trust-b
 .staff-team-name { font-family: var(--vscode-editor-font-family); overflow-wrap: anywhere; min-width: 0; }
 .staff-team-title, .staff-team-missing, .staff-teams-none { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; min-width: 0; }
 .staff-team.s-missing .staff-team-missing, .staff-teams-problem { color: var(--vscode-errorForeground); }
+
+/* 74.1-UI-SPEC S8, S9: the empty-state card (a lifted card with an info bar) and the report-only notice (a lifted notice with a warning bar, no dismiss). */
+#model-policy-notice { margin: 8px 16px 0; padding: 8px; line-height: 1.5; overflow-wrap: anywhere; }
+#model-policy-notice .notice-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; }
+#model-policy-notice .notice-detail { margin: 8px 0 0; }
+.policy-icon { display: inline-flex; flex: none; }
+.policy-icon svg { width: 16px; height: 16px; fill: currentColor; }
+#model-policy-notice .policy-icon { color: var(--vscode-editorWarning-foreground); }
+.empty-state { display: flex; flex-direction: column; gap: 8px; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.empty-state p { margin: 0; }
+.empty-state .strong { font-weight: 600; }
+.empty-state .muted { color: var(--vscode-descriptionForeground); }
+.empty-state-title { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 16px; font-weight: 600; line-height: 1.25; }
+.empty-state-title .policy-icon { color: var(--vscode-editorInfo-foreground); }
+.empty-state .ways { list-style: none; margin: 0; padding: 0; }
+.empty-state .way { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
+.empty-state .way > p { flex: 1 1 200px; }
+.empty-state .way-detail { flex-basis: 100%; }
+.empty-state .who { margin-top: 8px; }
+.link-button { background: none; border: 0; padding: 0; min-height: 24px; color: var(--vscode-textLink-foreground); cursor: pointer; }
+.link-button:hover { text-decoration: underline; }
+.apply-reason { margin: 8px 0 0; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+button[aria-disabled="true"][aria-label="Insert at cursor"] { opacity: 0.5; cursor: default; }

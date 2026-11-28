@@ -259,7 +259,7 @@ test('the sidebar HTML has the Connect panel, hidden until the profile is known,
   assert.match(panel, /<button id="welcome-choose-profile" class="text-button" type="button" hidden>Choose a profile<\/button>/);
   assert.match(panel, /<p id="welcome-connect-reason" hidden><\/p>/);
   assert.match(panel, /<button id="welcome-open-folder" class="text-button primary" type="button" hidden>Open a folder<\/button>/);
-  assert.match(panel, /<div id="welcome-ready" hidden>\s*<h2>Private AI for this project<\/h2>[\s\S]*class="suggestions"/);
+  assert.match(panel, /<div id="welcome-ready" hidden>\s*<h2>AI for this project<\/h2>[\s\S]*class="suggestions"/);
   const welcome = panel.slice(panel.indexOf('<section id="welcome">'), panel.indexOf('</section>', panel.indexOf('<section id="welcome">')));
   assert.doesNotMatch(welcome, /style=|—/);
   const script = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.js'), 'utf8');

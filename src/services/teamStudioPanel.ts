@@ -12,6 +12,7 @@ import { runtimePerRoot, unattendedRuntimeFor } from '../gate/host';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import type { SessionRoute } from '../gate/sessionMark';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
 import { createStaffSetupPreview, type TeamStudioLanguage } from './teamStudioStaffSetup';
 import { setUpStaffTeam } from './staffSetupCommand';
@@ -31,6 +32,11 @@ import { onDidChangeEmergencyStop } from './emergencyStop';
 import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '../domain/teamStorage';
 import { ActivityStore } from './activityStore';
 import { keptRoleTests, projectIdentity, teamKey } from '../domain/teamDashboard';
+
+/** The route of Team Studio AI's text and image requests (74.1 D-13): they write the team's files, so agent work; the default route without a gate host. */
+export function teamStudioRoute(runtime: GateRuntime | undefined): SessionRoute {
+  return runtime ? sessionRouteFrom(runtime, { use: { writesFiles: true } }) : defaultSessionRoute();
+}
 
 // The SovAI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
 // team setup, starts the guided builder).
@@ -115,7 +121,7 @@ async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promis
       const send = () => clientFor(active, model).client.completeOnce(model, messages, options);
       // The panel's runtime for this folder, asked of the host once when the panel first needed it, so no call waits on the host's start again.
       const runtime = await runtimeOf(root);
-      return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), send);
+      return withSessionRoute(teamStudioRoute(runtime), send);
     },
     // 0.4.30, team icons: the image model the settings name, and one image made the way GenerateImage makes it (the client records its cost, tagged as
     // generation like every other image), routed and recorded as the person's like the requests above.
@@ -125,7 +131,7 @@ async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promis
       const sendImage = () => withSpendTag({ kind: 'generation' }, () => clientFor(active, model).client.generateImage(model, prompt, { count: 1 }, signal));
       // The same per-panel runtime as the text requests above (PR #81 review): the host is asked once per folder, not before each image.
       const runtime = await runtimeOf(root);
-      return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), sendImage);
+      return withSessionRoute(teamStudioRoute(runtime), sendImage);
     }
   };
 }

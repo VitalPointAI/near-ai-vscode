@@ -29,3 +29,46 @@
 .rows dd { margin: 0; overflow-wrap: anywhere; }
 .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 #set-by:empty { display: none; }
+
+/* Exceptions for chat you review (74.1-UI-SPEC S11): lifted rows, the raised draft and review cards, the legal flags box first. Theme variables only. */
+.exceptions { line-height: 1.5; }
+.exceptions h2 { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 0 0 4px; }
+.exceptions h3 { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 16px 0 8px; }
+.exceptions p { margin: 0; overflow-wrap: anywhere; }
+.exceptions .muted { color: var(--vscode-descriptionForeground); }
+.exceptions .strong { font-weight: 600; }
+.exception-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.exception-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; }
+.exception-row .row-state { display: flex; gap: 4px; align-items: flex-start; }
+.exception-row .row-state .icon { display: inline-flex; padding-top: 2px; }
+.exception-card { display: flex; flex-direction: column; gap: 16px; padding: 16px; margin: 8px 0; }
+.exception-card h3 { margin: 0; }
+.legal-flags { display: flex; gap: 8px; align-items: flex-start; padding: 8px 16px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-inline-start: 3px solid var(--vscode-editorWarning-foreground); border-radius: 8px; }
+.legal-flags .icon { color: var(--vscode-editorWarning-foreground); display: inline-flex; padding-top: 2px; }
+.exception-card fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.exception-card legend { padding: 0; margin-bottom: 4px; }
+.check-rows { display: flex; flex-direction: column; gap: 4px; }
+.scale-name { margin-top: 4px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.person { display: flex; flex-wrap: wrap; gap: 16px; }
+.person .field { flex: 1 1 200px; }
+.exception-card input[type=text], .exception-card input[type=date], .exception-card textarea { min-height: 32px; padding: 4px 8px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 5px; font: inherit; max-width: 100%; }
+.exception-card textarea { resize: vertical; width: 100%; }
+.exception-card [aria-invalid="true"] { border-color: var(--vscode-inputValidation-errorBorder); }
+.field-error { color: var(--vscode-errorForeground); }
+.review-facts dd { white-space: pre-wrap; }
+.saved { display: flex; gap: 4px; align-items: flex-start; }
+.saved .icon { color: var(--vscode-testing-iconPassed); display: inline-flex; padding-top: 2px; }
+.section-status { color: var(--vscode-descriptionForeground); }
+.exceptions button { min-height: 32px; padding: 4px 16px; }
+.exceptions button[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+.exceptions :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+/* Checkboxes (owner, 2026-11-25): the box left of its text, centred on the label's first line, an 8px gap, a 16px box, rows at least 24px high, and the
+   label wraps its input so a click anywhere on the row toggles it. Box and text both start at the top of the row and the row's padding makes a one-line
+   row 24px high, so the box sits on the first line's centre whether the label is one line or wraps (the UI-SPEC's verbatim rule centred a one-line
+   label's text in the 24px row but not the box, and read the input's own line height for 1lh, 2 to 4px apart; the render test caught it). */
+label:has(> input[type=checkbox]) { display: flex; align-items: flex-start; gap: 8px; min-height: 24px; padding-block: max(0px, calc((24px - 1lh) / 2)); }
+input[type=checkbox] { flex: none; width: 16px; height: 16px; margin: 0; }
+/* line-height inherit: a form control's own line height is `normal`, so its 1lh would not be the label's. */
+label:has(> input[type=checkbox]) > input[type=checkbox] { line-height: inherit; margin-top: calc((1lh - 16px) / 2); }

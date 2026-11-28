@@ -1,0 +1,25 @@
+{
+  "controls": [
+    "sa-09.08",
+    "sa-400.06"
+  ],
+  "gap": "G532",
+  "id": "g532",
+  "milestones": [
+    {
+      "phase": "74.2",
+      "title": "An attested model server of your organization's at a site declared in Canada"
+    },
+    {
+      "phase": "37",
+      "title": "A Cohere Encrypted vault in Canada, once Cohere offers the region"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "One attested model service in Canada is listed in your organization's rules"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Data in use has no approved encryption (ITSP.10.033 SA-400(6)), so where AI runs is judged by location and operator. No attested service runs in Canada today: your organization's attested hosting is Phase 74.2, Cohere's Encrypted vault runs only in the US (Phase 37 waits on a Canadian region), and NEAR AI states no locations (G527). Until one exists, Protected B work that needs attested hosting stays on this computer or on your organization's own server at a site declared in Canada. Sovereignty: ai-runs.",
+  "title": "No attested model service runs in Canada"
+}

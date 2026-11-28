@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13"
+  ],
+  "gap": "G455",
+  "id": "g455",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "The development round trip with the OpenTDF quickstart's key access server and the acceptance trial with a partner settle which OAEP hash each partner uses (45.2-10, 45.2-12)"
+    },
+    {
+      "phase": "45.2",
+      "title": "Your organization's security officer decides whether SHA-1 in OAEP padding may be used for exports under ITSP.40.111"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The OpenTDF reference tools wrap a payload key for an RSA key with RSA-OAEP and SHA-1, while OpenBao Transit opens RSA only with OAEP and SHA-256. So an object a partner's stock OpenTDF tool addresses to your organization's receiving key exchange-receive-<site> cannot be opened, and an export to a partner's RSA key uses the hash the partner names, which for the OpenTDF reference server is SHA-1. Partners are asked for an EC key (ec:secp256r1) or SHA-256, and to address objects to their own key access server, which Phase 45.2 reaches through rewrap. Whether SHA-1 in OAEP padding is acceptable under ITSP.40.111 is not verified; your organization's security officer decides before any export uses it. Source: .planning/phases/45.1-nato-and-five-eyes-exchange-labels-and-adapter/45.1-RESEARCH.md sections 1 and 5.",
+  "title": "RSA key access with partners' OpenTDF tools needs OAEP with SHA-1, which our receiving key cannot open"
+}

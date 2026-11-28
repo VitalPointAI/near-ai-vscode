@@ -16,6 +16,7 @@
 !hub/tsconfig.json
 !hub/scripts
 !hub/src
+!src/domain/agentDefaults.ts
 !src/domain/config.ts
 !src/domain/credentials/cacheState.ts
 !src/domain/credentials/clearance.ts
@@ -48,14 +49,19 @@
 !src/domain/gate/endpoints.ts
 !src/domain/gate/enrolment.ts
 !src/domain/gate/features.ts
+!src/domain/gate/labelInteropSection.ts
 !src/domain/gate/labels.ts
 !src/domain/gate/models.ts
+!src/domain/gate/passportState.ts
+!src/domain/gate/passportStep.ts
+!src/domain/gate/placeWords.ts
 !src/domain/gate/policyDocument.ts
 !src/domain/gate/residency.ts
 !src/domain/gate/routing.ts
 !src/domain/gate/sections.ts
 !src/domain/gate/shape.ts
 !src/domain/gate/shippedPassports.ts
+!src/domain/gate/useTier.ts
 !src/domain/gate/vocabulary.ts
 !src/domain/org/modes.ts
 !src/domain/org/peopleSection.ts
@@ -80,6 +86,7 @@
 !src/domain/replica/kindSchemas/doc.ts
 !src/domain/replica/kindSchemas/integrity.ts
 !src/domain/replica/kindSchemas/obs.ts
+!src/domain/replica/kindSchemas/personnel.ts
 !src/domain/replica/kindSchemas/project.ts
 !src/domain/replica/kindSchemas/registers.ts
 !src/domain/replica/kindSchemas/roster.ts
@@ -93,7 +100,10 @@
 !src/domain/replica/roster.ts
 !src/domain/replica/rosterCells.ts
 !src/domain/replica/rosterMembers.ts
+!src/domain/replica/rosterPositions.ts
 !src/domain/replica/rosterView.ts
+!src/domain/replica/rotationGrants.ts
+!src/domain/replica/rotationProof.ts
 !src/domain/replica/safetyCode.ts
 !src/domain/replica/safetyWords.ts
 !src/domain/replica/sessionKeys.ts

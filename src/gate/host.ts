@@ -6,16 +6,19 @@
 // sentence, so only reading and planning run until the person fixes it, and the rest of the extension carries on. A bundle that expires while the window is
 // open is noticed at the next decision, with no file read.
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import * as path from 'node:path';
+import { projectScopeId } from '../domain/contextGraph';
 import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
-import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
+import type { ActorRef, GateProjectFacts, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
 import { BundleStoreError, applyPolicyDraft, loadPersonalLayer, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
 import { OrganizationStore, OrganizationStoreError, loadLayeredPolicy, recompose } from './organizationStore';
-import type { LayeredPolicy, OrganizationEvent, PolicyLayersView } from './organizationStore';
+import type { LayeredPolicy, OrganizationConfirmation, OrganizationEvent, PolicyLayersView } from './organizationStore';
 import { readLastValid } from './clockMarker';
 import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
@@ -140,6 +143,20 @@ export interface RuntimeRequest {
   readonly context: GateContextName;
 }
 
+/**
+ * What the gate knows of the project at `root` (74.1 D-13): its id, and `staff` when its project file has a staff section. The signed exercise attribute
+ * comes with the project layer's source (Phase 32.1); until then no project is an exercise. A file that cannot be read is no kind, never an error.
+ */
+export async function projectFactsOf(root: string): Promise<GateProjectFacts> {
+  const id = projectScopeId(root);
+  try {
+    const raw: unknown = JSON.parse(await readFile(path.join(root, '.planning', '.near-ai', 'project.json'), 'utf8'));
+    const staff = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>)['staff'] : undefined;
+    if (typeof staff === 'object' && staff !== null && !Array.isArray(staff)) return Object.freeze({ id, kind: 'staff' });
+  } catch { /* no project file, or not JSON: no kind */ }
+  return Object.freeze({ id });
+}
+
 function detailOf(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 300) : START_FAILED_DETAIL;
 }
@@ -215,7 +232,7 @@ export class GateHost {
    * key handover need `wordsConfirmed` (the twelve words were compared aloud). Every decision reads the composed policy from the next one on. A file that
    * is refused is recorded as policy.organization-refused, and the plain OrganizationStoreError is thrown with nothing changed.
    */
-  public async acceptOrganizationFile(text: string, confirmation: { readonly wordsConfirmed?: boolean }): Promise<BundleState> {
+  public async acceptOrganizationFile(text: string, confirmation: OrganizationConfirmation): Promise<BundleState> {
     await this.start();
     let accepted;
     try {
@@ -254,6 +271,7 @@ export class GateHost {
     // open) is opened again by the run's next record, and flush() always waits for it.
     const root = request.root === undefined || request.root === '' ? undefined : request.root;
     const key = root === undefined ? INSTALL_LOG_KEY : projectLogKey(root);
+    const project = root === undefined ? undefined : await projectFactsOf(root);
     let usable = true;
     try {
       this.logWithKey(key, root);
@@ -273,7 +291,8 @@ export class GateHost {
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
-      routePolicy: (now) => this.routePolicyNow(now),
+      routePolicy: (now) => this.routePolicyNow(now, project?.id),
+      ...(project === undefined ? {} : { project }),
       // Each folder the run works in has its own reader (a sub-agent's worktree included), kept by the host and read again only when the file changes.
       labels: (folder: string) => this.labelsFor(folder)
     };
@@ -749,9 +768,11 @@ export class GateHost {
    * already routes with the failed-closed table). A policy that cannot be worked out throws, so the client refuses the request as a failed route check
    * (route.deny); it is never decided as if no policy existed (WR-02).
    */
-  private routePolicyNow(now: number): RoutePolicyNow | undefined {
+  private routePolicyNow(now: number, project?: string): RoutePolicyNow | undefined {
     const layers = this.policyLayers();
-    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers), this.walletAt(now));
+    const policy = routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers), this.walletAt(now));
+    // 74.1 D-13: the run's project, so an authorization scoped to a project covers that project's requests only (lifts 41 D-54 for this purpose).
+    return policy === undefined || project === undefined ? policy : Object.freeze({ ...policy, project });
   }
 
   /**

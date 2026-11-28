@@ -1,0 +1,29 @@
+{
+  "controls": [
+    "sa-400.07",
+    "sa-400.09"
+  ],
+  "gap": "G534",
+  "id": "g534",
+  "milestones": [
+    {
+      "phase": "48.4",
+      "title": "The ownership structure is recorded and the card shows the supplier's jurisdiction (Canada, Met) and control (US parent, Partly met) with its mitigations (48.4-04, 48.4-05)"
+    },
+    {
+      "phase": "48.3",
+      "title": "Signed intake and builds from approved inputs at your organization's HQ, and a reproducible-build check with a recorded result"
+    },
+    {
+      "phase": "48.4",
+      "title": "Source code escrow with a Canadian escrow agent: to be determined by the owner (O6, deferred on 2026-11-25), no date"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "Your organization's authorizing official accepts or rejects the residual risk of the supplier's US control"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Recorded by the owner on 2026-11-25: Sterling Computers Canada, ULC is incorporated in Canada and, since a tax reorganization, wholly US-controlled: 99% is held by Sterling North Technologies, which Sterling Computers Corporation (US) owns outright, and 1% by a holding company owned by an individual; neither holding company has staff or property, and all operations sit in Sterling Computers Canada, ULC and Sterling Computers Corporation. Before the reorganization it was wholly owned by Sterling MSP, itself wholly owned by Sterling Computers Corporation. The supplier's jurisdiction is Canada, a Canadian corporation, which the sovereignty card shows as Met; this row is about control. Through its US parent the supplier is subject to foreign compulsion (SA-400(7)), and SA-400(9), arrangements under Canadian public ownership for the life of the system, is not met for the supplier. The exposure is real and can only be mitigated: no supplier access to any site (47 D-01), air-gapped operation, keys your organization holds (KM-3), signed intake and builds from approved inputs at your organization's HQ (48.3), a reproducible-build check (48.3, once run), and source held by a Canadian escrow agent, which the owner has left to be determined (O6, 2026-11-25), so it shows as planned. The card shows each mitigation as active only when its evidence exists, and as planned until then. The sovereignty card shows \"Supplier's control: US parent\" as Partly met with these mitigations and notes that Sterling holds no client data, keys or site access. Your organization's authorizing official decides whether to accept the residual risk. Foreign ownership, control or influence under PSPC's Contract Security Program sits with the owner's counsel. Sovereignty: switch-off, outside-laws.",
+  "title": "Supplier's control: a US parent, so the supplier is subject to foreign compulsion"
+}

@@ -139,7 +139,7 @@ test('a doc.update over 16 KB travels as a sealed blob and still folds to the sa
   assert.equal(withoutBlob.applied.length, 1);
 });
 
-test('the closed kind list has 55 kinds', () => {
-  assert.equal(REPLICA_KINDS.length, 55, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03');
-  assert.equal(new Set(REPLICA_KINDS).size, 55, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03');
+test('the closed kind list has 72 kinds', () => {
+  assert.equal(REPLICA_KINDS.length, 72, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1; cell.access.commit');
+  assert.equal(new Set(REPLICA_KINDS).size, 72, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1; cell.access.commit');
 });

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { documentsCollector, REQUIRED_DOCUMENTS } from '../src/collectors/documents.ts';
 import { run as runHostedDocs } from '../src/commands/hosted-docs.ts';
 import { checkAll, fileSource, findBlocks, loadBlocks, replaceBlock } from '../src/hosted/generate.ts';
-import { EXCHANGES_FILE, checkExchanges, signingCallSites } from '../src/hosted/blocks/exchanges.ts';
+import { EXCHANGES_FILE, checkExchanges, renderTable, signingCallSites } from '../src/hosted/blocks/exchanges.ts';
 import { validateOurs } from '../src/validate.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -174,6 +174,51 @@ test('implemented exchanges name files that exist, planned ones name their plan,
   assert.ok(result.problems.some((problem) => problem.includes('deploy/bundle/no-such-file.mjs')), result.problems.join('\n'));
   assert.ok(result.problems.some((problem) => problem.includes('noSuchSetting')), result.problems.join('\n'));
   assert.ok(result.problems.some((problem) => problem.includes('plannedIn')), result.problems.join('\n'));
+});
+
+// 48.4 D-08: whose law governs the operator of each exchange's far end, and where that end is.
+const fixtureExchange = <T extends Record<string, unknown>>(extra: T) => ({
+  id: 'probe', title: 'Probe', kind: 'network', from: 'A', to: 'B', direction: 'one-way', data: 'Data.', format: 'JSON.', protection: 'TLS.',
+  frequency: 'Daily.', status: 'planned', plannedIn: 'Phase 99', siteSettings: [], controls: ['ca-3'], agreement: 'To be completed by your organization', ...extra
+});
+const columnsOf = (table: string, id: string): string[] => {
+  const header = table.split('\n')[0].split(' | ').map((cell) => cell.replace(/^\| |\|$/g, '').trim());
+  const row = table.split('\n').find((line) => line.includes(`(\`${id}\`)`)) ?? '';
+  const cells = row.split(' | ').map((cell) => cell.replace(/^\| | \|$/g, '').trim());
+  return [header.indexOf('Operator under'), header.indexOf('Far end')].map((at) => (at >= 0 ? cells[at] : ''));
+};
+
+test('48.4 D-08 exchange jurisdiction: the table shows whose law the far end\'s operator is under and where that end is, in plain words', () => {
+  const table = renderTable({ exchanges: [
+    fixtureExchange({ id: 'probe-us', operatorJurisdiction: 'US', location: 'unknown' }),
+    fixtureExchange({ id: 'probe-org', operatorJurisdiction: 'org', location: 'site' }),
+    fixtureExchange({ id: 'probe-ca', operatorJurisdiction: 'unknown', location: 'CA' })
+  ] } as never);
+  assert.match(table.split('\n')[0], /\| Operator under \| Far end \|/);
+  assert.deepEqual(columnsOf(table, 'probe-us'), ['US', 'unknown']);
+  assert.deepEqual(columnsOf(table, 'probe-org'), ['your organization', 'at the site']);
+  assert.deepEqual(columnsOf(table, 'probe-ca'), ['unknown', 'CA']);
+  // The real register's document carries both columns for every exchange.
+  const document = findBlocks(readFileSync(path.join(ROOT, INTERCONNECTIONS), 'utf8')).get('exchanges') ?? '';
+  for (const exchange of exchanges().exchanges) assert.deepEqual(columnsOf(document, exchange.id).every((value) => value.length > 0), true, exchange.id);
+});
+
+test('48.4 D-08 refused: an exchange without its operator jurisdiction or location, or with a country name, fails the check naming the exchange', () => {
+  const probe = mkdtempSync(path.join(tmpdir(), 'hosted-docs-jurisdiction-'));
+  const ok = fixtureExchange({ operatorJurisdiction: 'US', location: 'unknown' });
+  assert.deepEqual(checkExchanges(probe, { exchanges: [ok] } as never), { problems: [], warnings: [] });
+  const { operatorJurisdiction, location, ...bare } = ok;
+  assert.ok(operatorJurisdiction && location);
+  assert.deepEqual(checkExchanges(probe, { exchanges: [bare] } as never).problems, [
+    'exchange probe: operatorJurisdiction must be an ISO 3166-1 alpha-2 code in capitals, org (your organization operates it) or unknown',
+    'exchange probe: location must be an ISO 3166-1 alpha-2 code in capitals, site (inside the site) or unknown'
+  ]);
+  assert.deepEqual(checkExchanges(probe, { exchanges: [{ ...ok, operatorJurisdiction: 'Canada' }] } as never).problems,
+    ['exchange probe: operatorJurisdiction must be an ISO 3166-1 alpha-2 code in capitals, org (your organization operates it) or unknown']);
+  assert.deepEqual(checkExchanges(probe, { exchanges: [{ ...ok, location: 'org' }] } as never).problems,
+    ['exchange probe: location must be an ISO 3166-1 alpha-2 code in capitals, site (inside the site) or unknown']);
+  const schema = JSON.parse(readFileSync(path.join(ROOT, 'compliance', 'schemas', 'exchanges.schema.json'), 'utf8'));
+  for (const field of ['operatorJurisdiction', 'location']) assert.ok(schema.definitions.exchange.required.includes(field), `the schema requires ${field}`);
 });
 
 test('the exchange diagram names every exchange id exactly once', () => {

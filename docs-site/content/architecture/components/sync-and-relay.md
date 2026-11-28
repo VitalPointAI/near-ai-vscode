@@ -76,7 +76,7 @@ Conditions:
 | | |
 | --- | --- |
 | Kind | Container image |
-| Pinned version or digest | `nonroot@sha256:1d736cf8b5716c07a245301f92717143215d248fd55771ee1936ef4b3302e531` |
+| Pinned version or digest | `nonroot@sha256:ffa8a7545403036c94ec76674b5dbac2d425af2d679147cdf3e30180071487b7` |
 | Architecture component | `relay` |
 | Used in | `hub/Dockerfile`, `relay/Dockerfile` |
 | Scope | Runtime: it runs in the product |

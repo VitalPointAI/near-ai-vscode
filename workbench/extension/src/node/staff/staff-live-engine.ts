@@ -13,6 +13,7 @@
  *   exchange   after each one that brought something, the projector writes the product files not open in an editor (33-06)
  *   checkpoint the compactor runs when due (33-06)
  *   join       a join-request frame reaches the clients only on a lead or deputy device (D-12)
+ *   keys       the switch to post-quantum keys (33.2 D-05): this computer's cards, and switchToV2, moveCellsToV2 and giveKeys for the Staff Room
  *   update     a project that requires a feature this build lacks stops with the D-67 sentence; its store keeps every entry
  *   stop       replicators stopped, projects closed, the session keys and the opened encryption key dropped
  *
@@ -23,6 +24,7 @@ import type { OpenedEncryptionKey } from './encryption-key.js';
 import type { SecretStorageLike } from './keystore-secrets.js';
 import type { EngineHubStanding, EngineLiveStatus, EngineProject, EngineReplicator, StaffEngine } from './staff-engine.js';
 import type { StaffJoinRequest, StaffStatusRow } from '../../common/staff-live.js';
+import { STAFF_ROOM_TEXT } from '../../common/staff-room.js';
 import { publishPersonKem } from './person-kem.js';
 
 /** What a hosted session brings (33-23): its session keys and the person's opened encryption key. */
@@ -59,6 +61,29 @@ interface LiveProject {
   readonly subscriptions: Array<{ dispose(): void }>;
 }
 
+/** The answer of a key action: done, or refused with its reason and the sentence a person reads. */
+export type StaffKeysAnswer = { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly message: string };
+
+/** wrapUpgrade.ts WrapActionSkip, in words. */
+const KEYS_SKIPPED: Readonly<Record<string, string>> = {
+  'already-switched': STAFF_ROOM_TEXT.keysAlreadySwitched,
+  'not-a-lead-device': STAFF_ROOM_TEXT.keysNotLead,
+  'keys-not-published': STAFF_ROOM_TEXT.keysNotPublished,
+  'not-switched': STAFF_ROOM_TEXT.keysNotSwitched,
+  'nothing-to-do': STAFF_ROOM_TEXT.keysNothingToDo,
+};
+
+/** A key action's result as plain data: a skip, the project's refusal or a membership refusal keeps its sentence; a move or a grant of nothing is nothing to do. */
+function keysAnswer(result: unknown): StaffKeysAnswer {
+  const value = result as { ok?: boolean; skipped?: unknown; refused?: string; reason?: string; message?: string; rekeyed?: unknown[]; given?: unknown[] };
+  const nothing = { ok: false, reason: 'nothing-to-do', message: STAFF_ROOM_TEXT.keysNothingToDo } as const;
+  if (typeof value.skipped === 'string') return { ok: false, reason: value.skipped, message: KEYS_SKIPPED[value.skipped] ?? STAFF_ROOM_TEXT.keysNothingToDo };
+  if (value.refused !== undefined) return { ok: false, reason: value.refused, message: value.message ?? STAFF_ROOM_TEXT.keysNothingToDo };
+  if (value.ok === false) return { ok: false, reason: value.reason ?? 'refused', message: value.message ?? STAFF_ROOM_TEXT.keysNothingToDo };
+  if ((value.rekeyed !== undefined && value.rekeyed.length === 0) || (value.given !== undefined && value.given.length === 0)) return nothing;
+  return { ok: true };
+}
+
 type RowListener = (row: StaffStatusRow) => void;
 type JoinListener = (request: StaffJoinRequest) => void;
 
@@ -69,6 +94,7 @@ export class StaffLiveEngine {
   private readonly open = new Map<string, LiveProject>();
   private readonly rowListeners = new Set<RowListener>();
   private readonly joinListeners = new Set<JoinListener>();
+  private readonly certificates = new Map<string, unknown>();
   private started = false;
   private stopped = false;
 
@@ -114,6 +140,77 @@ export class StaffLiveEngine {
     if (live !== undefined) live.bound = new Set(products);
   }
 
+  /** What Share with people (33-27) works with: the deps shared projects open with here, the person's secrets and storage, the session keys. */
+  public shareContext(): { deps: object; secrets: SecretStorageLike; globalStorageDir: string; hosted?: HostedSessionKeys } {
+    const { secrets, globalStorageDir, hosted } = this.options;
+    return { deps: this.depsFor(), secrets, globalStorageDir, ...(hosted === undefined ? {} : { hosted }) };
+  }
+
+  /** Hosted: the session key's certificate in this project, which a lead flow's own connection to the server carries (33-27). */
+  public certificateOf(id: string): unknown {
+    return this.certificates.get(id);
+  }
+
+  /** Opens a folder that became shared, or opens it again after its server changed (33-27): its replicator starts as at start. */
+  public async reopen(root: string): Promise<void> {
+    if (this.stopped) return;
+    const live = this.open.get(root);
+    if (live !== undefined) {
+      this.open.delete(root);
+      for (const subscription of live.subscriptions) subscription.dispose();
+      await live.replicator?.stop();
+      await live.project.close();
+    }
+    await this.startRoot(root);
+  }
+
+  /** The projection input of an open project (the fold, its entries and labels), for the editor binding's product lookup (33-25). */
+  public async projectionInput(id: string): Promise<unknown> {
+    const live = this.find(id);
+    return live === undefined ? undefined : this.options.engine.projectionInputOf(live.project as never, live.deps as never);
+  }
+
+  /** The open project with the deps it was opened with (the engine's SharedProjectHost), for the Staff Room's acts (33-26). */
+  public shared(id: string): { readonly project: EngineProject; readonly deps: object; readonly root: string } | undefined {
+    const live = this.find(id);
+    return live === undefined ? undefined : { project: live.project, deps: live.deps, root: live.root };
+  }
+
+  /** The cards of the switch to post-quantum keys this computer sees in an open project (33.2 D-05), with the host's clearance check. */
+  public async wrapCards(id: string): Promise<unknown[]> {
+    const live = this.find(id);
+    return live === undefined ? [] : this.options.engine.wrapCardsFor({ project: live.project, deps: live.deps } as never);
+  }
+
+  /** The lead's switch: one roster.require wrap@2, signed by the person key (a step-up in a hosted session). */
+  public switchToV2(id: string): Promise<StaffKeysAnswer> {
+    return this.keysAct(id, (shared) => this.options.engine.switchToV2(shared));
+  }
+
+  /** One scheduled rekey per part whose computers all have post-quantum keys; with includeWaiting, the others now too. */
+  public moveCellsToV2(id: string, includeWaiting: boolean): Promise<StaffKeysAnswer> {
+    return this.keysAct(id, (shared) => this.options.engine.moveCellsToV2(shared, { includeWaiting }));
+  }
+
+  /** A later grant of the current key to each computer that published its post-quantum keys late. */
+  public giveKeys(id: string): Promise<StaffKeysAnswer> {
+    return this.keysAct(id, (shared) => this.options.engine.giveKeys(shared));
+  }
+
+  private async keysAct(id: string, act: (shared: never) => Promise<unknown>): Promise<StaffKeysAnswer> {
+    const live = this.find(id);
+    if (live === undefined) return { ok: false, reason: 'not-open', message: STAFF_ROOM_TEXT.notOpen };
+    const answer = keysAnswer(await act({ project: live.project, deps: live.deps } as never));
+    if (answer.ok) live.replicator?.localAppended();
+    else this.log(`staff: a key change was not written (${answer.reason})`);
+    return answer;
+  }
+
+  /** A bound editor wrote changes (33-25): the replicator pushes them. */
+  public localAppended(id: string): void {
+    this.find(id)?.replicator?.localAppended();
+  }
+
   /** Runs one exchange for the project now; undefined when it is not open here. */
   public syncNow(id: string): StaffStatusRow | undefined {
     const live = this.find(id);
@@ -145,13 +242,19 @@ export class StaffLiveEngine {
     if (hosted === undefined) return { ...base, publishKem: true };
     const privateKey = hosted.encryption.privateKey;
     if (privateKey === undefined) throw new Error('The session\'s encryption key was dropped before the project opened.');
+    const kemPublic = hosted.encryption.kem?.publicKeys;
+    const kemPrivate = hosted.encryption.kem?.privateKeys;
     return {
       ...base,
       keyStatus: HOSTED_MARK_KEYS,
       sessionSigner: hosted.keys.sessionSigner,
       personSigner: hosted.keys.personSigner,
       // The binding (the person key's signature over the X25519 key) is made when the person joins a project (33-27); opening does not use it.
-      hosted: { personPublicKey: hosted.keys.personSigner.publicKey, encryption: { publicKey: hosted.encryption.publicKey, privateKey, binding: '' } },
+      hosted: {
+        personPublicKey: hosted.keys.personSigner.publicKey, encryption: { publicKey: hosted.encryption.publicKey, privateKey, binding: '' },
+        // The person's post-quantum keys, when the envelope holds them (33.2-04): a project that requires wrap@2 opens here too.
+        ...(kemPrivate === undefined || kemPublic === undefined ? {} : { kem: { publicKeys: kemPublic, privateKeys: kemPrivate } }),
+      },
     };
   }
 
@@ -230,11 +333,15 @@ export class StaffLiveEngine {
       this.log('staff: the person key is not a device of this shared project');
       return undefined;
     }
+    // A project opened again in this session (33-27 reopen) keeps its one certificate: your organization's server knows the session key by it.
+    const known = this.certificates.get(project.projectId);
+    if (known !== undefined) return known;
     const certified = await hosted.keys.certificate(project, seat);
     if (certified.kind === 'refused') {
       this.log('staff: the session key was not certified in a shared project');
       return undefined;
     }
+    this.certificates.set(project.projectId, certified.value.entry);
     return certified.value.entry;
   }
 
