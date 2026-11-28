@@ -1900,7 +1900,7 @@ Plans:
 Plans:
 - [x] 96-01-PLAN.md — Fictional graph and exact citation acceptance fixture
 - [x] 96-02-PLAN.md — Interactive Chromium graph motion, evidence and accessibility fixture
-- [ ] Governed store, search, [animated entity exploration](phases/96-search-context-graph-entity-pages-and-ask/96-UI-SPEC.md) and answer acceptance
+- [ ] Governed store, search, animated entity exploration (`96-UI-SPEC.md`) and answer acceptance
 
 ### Phase 97: Analytics, reports, insights and views
 **Goal**: Dashboards, reports and suggested insights appear without setup, with every number computed under the viewer's clearance.
