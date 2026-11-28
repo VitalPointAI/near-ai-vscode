@@ -13,7 +13,7 @@ Build the context graph as a layer of *evidence rows* over the governed store, n
 
 ## Bastion design reference
 
-The [Phase 96 Bastion crosswalk](../../phases/96-search-context-graph-entity-pages-and-ask/96-BASTION-CROSSWALK.md)
+The Phase 96 Bastion crosswalk (`96-BASTION-CROSSWALK.md`)
 maps Bastion's entity navigation, source detail, saved views and match review to
 the SovAI requirements. Its first synthetic case compares an authorized graph
 against the same graph with restricted evidence present. The production graph
