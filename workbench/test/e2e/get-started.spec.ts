@@ -205,7 +205,7 @@ test('the rail carries every shortcut, the planned ones disabled, and the native
   }
 });
 
-test('Context Graph landing opens by keyboard as one localized native tab', async ({ page }) => {
+test('Context Graph landing opens by keyboard as one native tab', async ({ page }) => {
   await openGetStarted(page);
   const graph = rail(page).getByRole('button', { name: 'Context Graph', exact: true });
   await expect(graph).toBeVisible({ timeout: 5_000 });
@@ -225,25 +225,6 @@ test('Context Graph landing opens by keyboard as one localized native tab', asyn
   await graph.press('Enter');
   await expect(englishHeading).toBeFocused();
   await expect(page.locator('#theia-main-content-panel .lm-TabBar-tabLabel', { hasText: /^Context Graph$/ })).toHaveCount(1);
-
-  const selection = await openLanguageSetting(page);
-  try {
-    await pickLanguage(selection, 'ArrowDown', 'Français (Canada)');
-    const frenchRail = page.getByRole('navigation', { name: 'Raccourcis Sterling' });
-    const frenchGraph = frenchRail.getByRole('button', { name: 'Graphe contextuel', exact: true });
-    await frenchGraph.press('Space');
-    await expect(currentTab(page).filter({ hasText: /^Graphe contextuel$/ })).toBeVisible();
-    await expect(landing).toHaveAttribute('lang', 'fr-CA');
-    await expect(landing.getByRole('heading', { name: 'Graphe contextuel', exact: true })).toBeFocused();
-    await expect(landing.getByRole('status')).toHaveText('Le graphe contextuel est indisponible. Aucune source de données régie n’est connectée.');
-    await expect(landing.getByRole('button', { name: 'Ouvrir la documentation', exact: true })).toBeVisible();
-    await expect(page.locator('#theia-main-content-panel .lm-TabBar-tabLabel', { hasText: /^Graphe contextuel$/ })).toHaveCount(1);
-    await frenchRail.getByRole('button', { name: 'Premiers pas', exact: true }).press('Enter');
-    await expect(currentTab(page).filter({ hasText: /^Premiers pas$/ })).toBeVisible();
-  } finally {
-    const reset = await openLanguageSetting(page);
-    if ((await reset.innerText()).includes('Français (Canada)')) await pickLanguage(reset, 'ArrowUp', 'English (Canada)');
-  }
 });
 
 test('Get Started shows the setup actions, and each work-area card opens its own page', async ({ page }) => {
@@ -323,6 +304,16 @@ test('Get Started switches Canadian language live through User Settings and keep
     await expect(inventoryView.getByText('Trust this workspace to view its inventory.', { exact: true })).toBeVisible();
     await expect(inventoryView.getByRole('heading', { name: 'Resources', exact: true })).toBeHidden();
     await expect(inventoryView.getByText('Fictional workshop kit', { exact: true })).toHaveCount(0);
+    const landing = reopened.locator('#sterling-context-graph');
+    const frenchRail = reopened.getByRole('navigation', { name: 'Raccourcis Sterling' });
+    const frenchGraph = frenchRail.getByRole('button', { name: 'Graphe contextuel', exact: true });
+    await frenchGraph.press('Space');
+    await expect(currentTab(reopened).filter({ hasText: /^Graphe contextuel$/ })).toBeVisible();
+    await expect(landing).toHaveAttribute('lang', 'fr-CA');
+    await expect(landing.getByRole('heading', { name: 'Graphe contextuel', exact: true })).toBeFocused();
+    await expect(landing.getByRole('status')).toHaveText('Le graphe contextuel est indisponible. Aucune source de données régie n’est connectée.');
+    await expect(landing.getByRole('button', { name: 'Ouvrir la documentation', exact: true })).toBeVisible();
+    await expect(reopened.locator('#theia-main-content-panel .lm-TabBar-tabLabel', { hasText: /^Graphe contextuel$/ })).toHaveCount(1);
     await reopened.getByRole('navigation', { name: 'Raccourcis Sterling' })
       .getByRole('button', { name: 'Premiers pas', exact: true }).click();
     await expect(currentTab(reopened)).toHaveText('Premiers pas');
