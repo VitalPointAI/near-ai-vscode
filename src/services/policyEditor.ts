@@ -66,6 +66,8 @@ export type ProposalEventId = 'policy.proposal-applied' | 'policy.proposal-expor
 
 export interface PolicyEditorDeps {
   state(): PolicyEditorState | undefined;
+  /** The host's safe explanation when there is no usable policy to display. */
+  unavailableNotice?(): string | undefined;
   directionOf: DirectionOf;
   /** Signs `next` as the personal layer through the host, refusing when the stored layer's hash is no longer `baseHash` (STALE_DRAFT_TEXT). */
   applyPersonal(next: PolicyDocument, baseHash: string): Promise<PolicyApplyAnswer>;
@@ -214,7 +216,9 @@ async function post(): Promise<void> {
     stale: shown.stale,
     changes: shown.changes.map((change) => ({ section: change.section, key: change.key, direction: change.direction, effect: change.effect }))
   };
-  const text = notice ?? (state === undefined ? UNREADABLE_TEXT : shown !== undefined && shown.changes.length === 0 ? NO_CHANGE_TEXT : undefined);
+  const text = notice ?? (state === undefined
+    ? host.deps.unavailableNotice?.() ?? UNREADABLE_TEXT
+    : shown !== undefined && shown.changes.length === 0 ? NO_CHANGE_TEXT : undefined);
   await view.webview.postMessage({
     type: 'state',
     title,

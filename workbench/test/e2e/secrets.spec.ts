@@ -5,6 +5,7 @@
 //   read         hosted, in a new container: "Secret probe: Read" shows the saved value
 //   unavailable  local mode in the image: the status entry reads "Secrets are unavailable" and saving shows an error, not "Saved"
 import { expect, test, type Page } from '@playwright/test';
+import { openHostedWorkbench } from './hosted-startup';
 
 const STEP = process.env.SPEC_STEP ?? '';
 const PROBE_VALUE = process.env.PROBE_VALUE ?? '';
@@ -19,14 +20,6 @@ test.use({
     : {},
 });
 
-async function openWorkbench(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first()).toBeVisible({ timeout: 90_000 });
-  // Extensions run only in a trusted workspace; answer Theia's question as the person would.
-  const trust = page.getByRole('button', { name: 'Yes, I trust the authors' });
-  await trust.waitFor({ timeout: 15_000 }).then(() => trust.click(), () => undefined);
-}
-
 async function runCommand(page: Page, label: string): Promise<void> {
   await page.keyboard.press('F1');
   const input = page.locator('.quick-input-widget input');
@@ -39,7 +32,7 @@ async function runCommand(page: Page, label: string): Promise<void> {
 const notification = (page: Page, text: RegExp) => page.locator('.theia-notification-list-item', { hasText: text }).first();
 
 test('the secret probe for this step', async ({ page }) => {
-  await openWorkbench(page);
+  await openHostedWorkbench(page);
   if (STEP === 'save') {
     await runCommand(page, 'Secret probe: Save');
     await expect(notification(page, /\bSaved\b/)).toBeVisible({ timeout: 60_000 });
