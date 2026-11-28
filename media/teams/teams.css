@@ -181,13 +181,14 @@ button.more { align-self: flex-start; padding: 0 4px; font-size: 0.9em; }
 .staff-preview { overflow-wrap: anywhere; line-height: 1.45; }
 .staff-preview h2 { font-size: 20px; line-height: 1.25; }
 .staff-preview h3, .staff-preview h4 { font-size: 16px; line-height: 1.25; }
-.staff-preview-scopes { margin: 16px 0 8px; }
-.staff-preview [aria-pressed="true"] { border-color: var(--accent); background: var(--vscode-list-inactiveSelectionBackground); }
+.staff-scope-options [aria-pressed="true"], .staff-preview-rows [aria-pressed="true"] { border-color: var(--accent); background: var(--vscode-list-inactiveSelectionBackground); }
 .staff-preview-rows { list-style: none; padding: 0; margin: 8px 0 24px; }
 .staff-preview-rows li { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
 .staff-preview-rows h4, .staff-preview-rows p { margin: 0; }
 .staff-preview-rows p + p { margin-top: 4px; }
 .staff-preview-rows button { margin-bottom: 4px; }
+.staff-scope-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.staff-scope-choices { margin-block: 12px; }
 .staff-preview button + button { margin-left: 8px; }
 .choice > .hint { grid-column: 2; margin: 2px 0 0; }
 .choice-label { font-weight: 600; }
