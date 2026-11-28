@@ -157,20 +157,30 @@ function stageFixture(passportTimes: Partial<Pick<Passport, 'issuedAt' | 'expire
 
 test('two separate human selections and their own verified adoption record shadow then canary eligibility', () => {
   const { authority, effects, select, adopted, installed } = stageFixture();
-  const record = (row: CandidateRecord) => effects.push(row);
+  let current = authority;
+  const readAuthority = () => current;
+  const record = (row: CandidateRecord) => {
+    // The same synchronous fixture store serves the read and records the next state.
+    current = { ...current, record: row };
+    effects.push(row);
+  };
   const shadow = select('shadow');
-  assert.equal(recordStage({ selection: shadow, policy: installed.envelope }, () => authority, record), 'held');
+  assert.equal(recordStage({ selection: shadow, policy: installed.envelope }, readAuthority, record), 'held');
   assert.equal(effects.length, 0);
   const shadowRequest = adopted(shadow);
-  assert.equal(recordStage(shadowRequest, () => authority, record), 'recorded');
+  assert.equal(recordStage(shadowRequest, readAuthority, record), 'recorded');
   const first = effects[0]!;
   assert.equal(first.state, 'shadow');
   assert.equal(first.visibleResult, 'incumbent');
-  const afterShadow = { ...authority, record: first };
-  assert.equal(recordStage(shadowRequest, () => afterShadow, record), 'held');
+  assert.equal(readAuthority().record, first);
+  assert.equal(recordStage(shadowRequest, readAuthority, record), 'held');
+  assert.equal(effects.length, 1);
   const canary = select('canary');
-  assert.equal(recordStage({ ...adopted(canary), adoption: shadowRequest.adoption }, () => afterShadow, record), 'held');
-  assert.equal(recordStage(adopted(canary), () => afterShadow, record), 'recorded');
+  assert.equal(recordStage({ ...adopted(canary), adoption: shadowRequest.adoption }, readAuthority, record), 'held');
+  const canaryRequest = adopted(canary);
+  assert.equal(recordStage(canaryRequest, readAuthority, record), 'recorded');
+  assert.equal(readAuthority().record, effects[1]);
+  assert.equal(recordStage(canaryRequest, readAuthority, record), 'held');
   assert.deepEqual(effects.map(({ state }) => state), ['shadow', 'canary']);
 });
 
